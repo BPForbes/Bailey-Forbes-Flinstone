@@ -11,6 +11,7 @@
 #include <sqlite3.h>
 #include <limits.h>
 #include "mem_domain.h"
+#include "tests/kq_test_util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,24 +26,6 @@
 } while (0)
 
 static char s_dir[256];
-
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        rmrf(sub);
-    }
-    closedir(d);
-    rmdir(path);
-}
 
 static void make_id(uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t seed) {
     for (size_t i = 0; i < FL_KQ_DELIVERY_ID_LEN; i++)
@@ -393,16 +376,6 @@ static int legacy_spike(sqlite3 *db, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], in
     return ok ? 0 : -1;
 }
 
-static int write_bytes(const char *path, const char *text) {
-    FILE *f = fopen(path, "wb");
-    int ok;
-
-    if (!f)
-        return -1;
-    ok = fputs(text, f) >= 0;
-    return (fclose(f) == 0 && ok) ? 0 : -1;
-}
-
 /* Deliveries an older build held come into the catalog once, with their history and letters. */
 static int test_older_store_is_carried_over(void) {
     char root[sizeof s_dir + 32], dir[sizeof root + 8], letters[sizeof dir + 16];
@@ -440,10 +413,10 @@ static int test_older_store_is_carried_over(void) {
     sqlite3_close(old);
     fl_kq_delivery_id_hex(held, hex);
     snprintf(path, sizeof path, "%s/%s.kqpb", letters, hex);
-    ASSERT(write_bytes(path, "held letter") == 0);
+    ASSERT(kq_test_write_text(path, "held letter") == 0);
     fl_kq_delivery_id_hex(rel, hex);
     snprintf(path, sizeof path, "%s/%s.kqpb", letters, hex);
-    ASSERT(write_bytes(path, "released letter") == 0);
+    ASSERT(kq_test_write_text(path, "released letter") == 0);
 
     ASSERT(fl_kq_store_open(root, &s) == FL_RESULT_OK);
     ASSERT(fl_kq_store_get(s, held, &got) == FL_RESULT_OK && !got.fired && !got.expired);
@@ -507,7 +480,7 @@ static int test_older_store_does_not_follow_links(void) {
     snprintf(letters, sizeof letters, "%s/kq_letters", dir);
     snprintf(outside, sizeof outside, "%s/outside-secret.txt", s_dir);
     ASSERT(fl_fs_mkdir_p(letters, 0700) == 0);
-    ASSERT(write_bytes(outside, "not a letter") == 0);
+    ASSERT(kq_test_write_text(outside, "not a letter") == 0);
     snprintf(db_path, sizeof db_path, "%s/kq_delivery.db", dir);
     make_id(one, 120);
     ASSERT(sqlite3_open(db_path, &old) == SQLITE_OK);
@@ -542,7 +515,7 @@ static int test_older_store_does_not_follow_links(void) {
     sqlite3_close(old);
     fl_kq_delivery_id_hex(two, hex);
     snprintf(path, sizeof path, "%s/%s.kqpb", outside_letters, hex);
-    ASSERT(write_bytes(path, "a letter elsewhere") == 0);
+    ASSERT(kq_test_write_text(path, "a letter elsewhere") == 0);
     ASSERT(symlink(outside_letters, letters) == 0);
     ASSERT(fl_kq_store_open(root, &s) == FL_RESULT_OK);
     ASSERT(fl_kq_store_get(s, two, &got) == FL_RESULT_OK && got.expired);
@@ -629,7 +602,7 @@ int main(void) {
     RUN(test_older_store_does_not_follow_links);
     RUN(test_store_creates_missing_parents);
     RUN(test_store_root_must_be_own_directory);
-    rmrf(s_dir);
+    kq_test_rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum delivery store tests passed.\n");
     return rc;

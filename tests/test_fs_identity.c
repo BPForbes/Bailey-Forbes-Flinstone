@@ -6,6 +6,7 @@
  * Passwords are drawn at run time.
  */
 #include "identity.h"
+#include "tests/kq_test_util.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -106,24 +107,8 @@ static const fl_fs_identity_kq_ops_t s_ops_noforget = {
     .change_password = test_change,
 };
 
-static int draw_pw(char *out, size_t cap) {
-    FILE *fp = fopen("/dev/urandom", "rb");
-    unsigned char raw[16];
-
-    if (!fp || fread(raw, 1, sizeof raw, fp) != sizeof raw) {
-        if (fp)
-            fclose(fp);
-        return -1;
-    }
-    fclose(fp);
-    for (size_t i = 0; i + 1 < cap && i < sizeof raw; i++)
-        out[i] = (char)('a' + (raw[i] % 26));
-    out[cap - 1] = 0;
-    return out[0] ? 0 : -1;
-}
-
 static int test_plaintext_then_sealed(void) {
-    char pw[16], next[16], wrong[16];
+    char pw[17], next[17], wrong[17];
     int unlocks_before;
 
     memset(s_held, 0, sizeof s_held);
@@ -136,7 +121,7 @@ static int test_plaintext_then_sealed(void) {
     ASSERT(strcmp(fl_fs_identity_user(0), "Flinstone") == 0);
     ASSERT(fl_fs_identity_switchuser(0, "flinstone", NULL) == 1); /* its own account is free */
     ASSERT(fl_fs_identity_enter_root(0) == 1);
-    ASSERT(draw_pw(pw, sizeof pw) == 0);
+    ASSERT(kq_test_random_hex(pw, 8) == 0);
     ASSERT(fl_fs_identity_useradd(0, "Ada", pw) == 1);
     snprintf(wrong, sizeof wrong, "%s", pw);
     wrong[0] = (char)(wrong[0] == 'a' ? 'b' : 'a');
@@ -156,7 +141,7 @@ static int test_plaintext_then_sealed(void) {
     fl_fs_identity_init();
     ASSERT(held_find("Flinstone") && held_find("Root"));
     ASSERT(fl_fs_identity_enter_root(0) == 1);
-    ASSERT(draw_pw(pw, sizeof pw) == 0);
+    ASSERT(kq_test_random_hex(pw, 8) == 0);
     unlocks_before = s_unlocks;
     ASSERT(fl_fs_identity_useradd(0, "Ada", pw) == 1);
     ASSERT(held_find("Ada") != NULL);
@@ -175,7 +160,7 @@ static int test_plaintext_then_sealed(void) {
     ASSERT(fl_fs_identity_sudo(0, wrong) == 0);
 
     /* After passwd, only the new password opens the seal. */
-    ASSERT(draw_pw(next, sizeof next) == 0);
+    ASSERT(kq_test_random_hex(next, 8) == 0);
     ASSERT(strcmp(pw, next) != 0);
     ASSERT(fl_fs_identity_passwd(0, NULL, next) == 1);
     ASSERT(fl_fs_identity_login(0, "Ada", pw) == 0);

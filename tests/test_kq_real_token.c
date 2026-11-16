@@ -13,6 +13,8 @@
 #include "session.h"
 #include "timekeeping.h"
 #include "user_db.h"
+#define KQ_TEST_UTIL_SQLITE
+#include "tests/kq_test_util.h"
 
 #include <sqlite3.h>
 #include <stdint.h>
@@ -83,31 +85,11 @@ static void audit_capture(const char *actor, const char *event, const char *subj
 static int register_pairing(const char *label, const char *kqst, const char *device_hex,
                             const char *sig_hex, const char *enc_hex) {
     unsigned char dev[16], sig[32], enc[32];
-    sqlite3 *sql = NULL;
-    sqlite3_stmt *st = NULL;
-    int ok;
 
     if (fl_hex_decode(device_hex, dev, sizeof dev) != 0 || fl_hex_decode(sig_hex, sig, sizeof sig) != 0 ||
         fl_hex_decode(enc_hex, enc, sizeof enc) != 0)
         return -1;
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK)
-        return -1;
-    ok = sqlite3_prepare_v2(sql,
-                            "INSERT OR REPLACE INTO account_keys (label,purpose,holds_share,minted_by,minted_at,"
-                            "generation,kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
-                            " VALUES (?,'own',1,'Root',1,1,?,?,?,?,0,x'00');",
-                            -1, &st, NULL) == SQLITE_OK;
-    if (ok) {
-        sqlite3_bind_text(st, 1, label, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 2, kqst, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 3, dev, 16, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 4, sig, 32, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 5, enc, 32, SQLITE_TRANSIENT);
-        ok = sqlite3_step(st) == SQLITE_DONE;
-        sqlite3_finalize(st);
-    }
-    sqlite3_close(sql);
-    return ok ? 0 : -1;
+    return kq_test_pair_account(fl_session_user_db()->path, label, kqst, dev, sig, enc, 1, 1);
 }
 
 static int set_up_accounts(void) {
@@ -209,6 +191,8 @@ static int test_login_generation(void) {
 
 static int tamper_roster_signing(const char *uid);
 
+static int session_db(sqlite3 **out) { return kq_test_open_db(fl_session_user_db()->path, out); }
+
 /* Drops this store's copy of the bridge, so an import starts from the source's state: an import keeps a
  * bridge destroyed here and refuses a source older than the local row. */
 static int forget_bridge(const char *uid) {
@@ -216,7 +200,7 @@ static int forget_bridge(const char *uid) {
     sqlite3_stmt *st = NULL;
     static const char *const del[] = {"DELETE FROM account_bridge_members WHERE uid = ?;",
                                       "DELETE FROM account_bridges WHERE uid = ?;"};
-    int ok = sqlite3_open(fl_session_user_db()->path, &sql) == SQLITE_OK;
+    int ok = session_db(&sql) == 0;
 
     for (size_t i = 0; ok && i < sizeof del / sizeof del[0]; i++) {
         ok = sqlite3_prepare_v2(sql, del[i], -1, &st, NULL) == SQLITE_OK &&
@@ -263,10 +247,8 @@ static int set_destroyed(const char *uid, int destroyed) {
     sqlite3_stmt *st = NULL;
     int ok;
 
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (session_db(&sql) != 0)
         return -1;
-    }
     ok = sqlite3_prepare_v2(sql, "UPDATE account_bridges SET destroyed = ? WHERE uid = ?;", -1, &st, NULL) ==
              SQLITE_OK &&
          sqlite3_bind_int(st, 1, destroyed) == SQLITE_OK &&
@@ -303,10 +285,8 @@ static int xor_bound(const char *select_sql, const char *update_sql, int member)
     const char *label = "Root.Flinstone.Bob";
     int n, ok = 0;
 
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (session_db(&sql) != 0)
         return -1;
-    }
     if (sqlite3_prepare_v2(sql, select_sql, -1, &rd, NULL) != SQLITE_OK)
         goto done;
     sqlite3_bind_text(rd, 1, s_mut_uid, -1, SQLITE_TRANSIENT);
@@ -338,10 +318,8 @@ static int bump_generation(void) {
     sqlite3_stmt *st = NULL;
     int ok = 0;
 
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (session_db(&sql) != 0)
         return -1;
-    }
     if (sqlite3_prepare_v2(sql, "UPDATE account_bridges SET generation = generation + 1 WHERE uid = ?;", -1,
                            &st, NULL) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, s_mut_uid, -1, SQLITE_TRANSIENT);
@@ -352,20 +330,37 @@ static int bump_generation(void) {
     return ok ? 0 : -1;
 }
 
+#define MUT_BRIDGE(col) \
+    {"SELECT " col " FROM account_bridges WHERE uid = ?;", "UPDATE account_bridges SET " col " = ? WHERE uid = ?;", 0}
+#define MUT_MEMBER(col) \
+    {"SELECT " col " FROM account_bridge_members WHERE uid = ? AND label = ?;", \
+     "UPDATE account_bridge_members SET " col " = ? WHERE uid = ? AND label = ?;", 1}
+static const struct {
+    const char *select_sql, *update_sql;
+    int member;
+} s_xor_mut[] = {
+    [MUT_SALT] = MUT_BRIDGE("salt"),
+    [MUT_PUBLIC] = MUT_BRIDGE("public_key"),
+    [MUT_SIGNING] = MUT_MEMBER("signing_public"),
+    [MUT_ENCRYPTION] = MUT_MEMBER("encryption_public"),
+    [MUT_SEALED] = MUT_MEMBER("sealed_bridge_key"),
+    [MUT_WRAP] = MUT_MEMBER("wrap_salt"),
+};
+
+static int xor_mut(int kind) {
+    return xor_bound(s_xor_mut[kind].select_sql, s_xor_mut[kind].update_sql, s_xor_mut[kind].member);
+}
+
 static int tamper_roster_signing(const char *uid) {
     s_mut_uid = uid;
-    return xor_bound("SELECT signing_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
-                     "UPDATE account_bridge_members SET signing_public = ? WHERE uid = ? AND label = ?;", 1);
+    return xor_mut(MUT_SIGNING);
 }
 
 static int begin_exclusive(void) {
     if (s_block)
         return -1;
-    if (sqlite3_open(fl_session_user_db()->path, &s_block) != SQLITE_OK) {
-        sqlite3_close(s_block);
-        s_block = NULL;
+    if (session_db(&s_block) != 0)
         return -1;
-    }
     sqlite3_busy_timeout(s_block, 0);
     if (sqlite3_exec(s_block, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) != SQLITE_OK) {
         sqlite3_close(s_block);
@@ -380,33 +375,17 @@ static int apply_mut(void) {
     switch (s_mut_kind) {
     case MUT_GENERATION:
         return bump_generation();
-    case MUT_SALT:
-        return xor_bound("SELECT salt FROM account_bridges WHERE uid = ?;",
-                         "UPDATE account_bridges SET salt = ? WHERE uid = ?;", 0);
-    case MUT_PUBLIC:
-        return xor_bound("SELECT public_key FROM account_bridges WHERE uid = ?;",
-                         "UPDATE account_bridges SET public_key = ? WHERE uid = ?;", 0);
-    case MUT_SIGNING:
-        return xor_bound("SELECT signing_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
-                         "UPDATE account_bridge_members SET signing_public = ? WHERE uid = ? AND label = ?;", 1);
-    case MUT_ENCRYPTION:
-        return xor_bound(
-            "SELECT encryption_public FROM account_bridge_members WHERE uid = ? AND label = ?;",
-            "UPDATE account_bridge_members SET encryption_public = ? WHERE uid = ? AND label = ?;", 1);
-    case MUT_SEALED:
-        return xor_bound(
-            "SELECT sealed_bridge_key FROM account_bridge_members WHERE uid = ? AND label = ?;",
-            "UPDATE account_bridge_members SET sealed_bridge_key = ? WHERE uid = ? AND label = ?;", 1);
-    case MUT_WRAP:
-        return xor_bound("SELECT wrap_salt FROM account_bridge_members WHERE uid = ? AND label = ?;",
-                         "UPDATE account_bridge_members SET wrap_salt = ? WHERE uid = ? AND label = ?;", 1);
     case MUT_EXCLUSIVE:
         return begin_exclusive();
     case MUT_LOGOUT:
         return fl_session_logout() == FL_RESULT_OK ? 0 : -1;
     default:
-        return -1;
+        break;
     }
+    if (s_mut_kind <= MUT_NONE || (size_t)s_mut_kind >= sizeof s_xor_mut / sizeof s_xor_mut[0] ||
+        !s_xor_mut[s_mut_kind].select_sql)
+        return -1;
+    return xor_mut(s_mut_kind);
 }
 
 static int verify_then_act(const char *uid, uint32_t generation, const uint8_t salt[16],
@@ -443,10 +422,8 @@ static void held_other_writer(void) {
     int stc;
 
     s_held_busy = 0;
-    if (sqlite3_open(s_held_path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (kq_test_open_db(s_held_path, &sql) != 0)
         return;
-    }
     sqlite3_busy_timeout(sql, 0);
     stc = sqlite3_exec(sql, "BEGIN IMMEDIATE;", NULL, NULL, NULL);
     if (stc == SQLITE_BUSY || sqlite3_errcode(sql) == SQLITE_BUSY)
@@ -454,10 +431,8 @@ static void held_other_writer(void) {
     if (stc == SQLITE_OK)
         (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
     sqlite3_close(sql);
-    if (sqlite3_open(s_held_path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (kq_test_open_db(s_held_path, &sql) != 0)
         return;
-    }
     sqlite3_busy_timeout(sql, 0);
     if (sqlite3_prepare_v2(sql, "UPDATE account_bridges SET generation = generation + 1;", -1, &st, NULL) ==
         SQLITE_OK) {
@@ -474,10 +449,8 @@ static int bridge_generation(const char *uid, int *gen) {
     sqlite3_stmt *st = NULL;
     int ok = 0;
 
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
+    if (session_db(&sql) != 0)
         return -1;
-    }
     if (sqlite3_prepare_v2(sql, "SELECT generation FROM account_bridges WHERE uid = ?;", -1, &st, NULL) ==
         SQLITE_OK) {
         sqlite3_bind_text(st, 1, uid, -1, SQLITE_TRANSIENT);
@@ -491,6 +464,22 @@ static int bridge_generation(const char *uid, int *gen) {
     return ok ? 0 : -1;
 }
 
+static void release_block(void) {
+    if (s_block) {
+        (void)sqlite3_exec(s_block, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(s_block);
+        s_block = NULL;
+    }
+}
+
+static void bob_to_ann(fl_session_switch_request_t *req) {
+    memset(req, 0, sizeof *req);
+    req->target = "Ann";
+    req->password = s_ann_pw;
+    req->bridge_member = "Bob";
+    req->bridge_member_password = s_bob_pw;
+}
+
 static int refuse_fact(fl_user_bridge_t *b, int kind) {
     fl_session_switch_request_t req;
     int rc;
@@ -499,11 +488,7 @@ static int refuse_fact(fl_user_bridge_t *b, int kind) {
         return -1;
     s_mut_uid = b->uid;
     s_mut_kind = kind;
-    memset(&req, 0, sizeof req);
-    req.target = "Ann";
-    req.password = s_ann_pw;
-    req.bridge_member = "Bob";
-    req.bridge_member_password = s_bob_pw;
+    bob_to_ann(&req);
     s_audit_last[0] = '\0';
     rc = fl_session_switch_user(&req);
     s_mut_kind = MUT_NONE;
@@ -516,11 +501,7 @@ static int refuse_fact(fl_user_bridge_t *b, int kind) {
     if (kind == MUT_EXCLUSIVE) {
         int stayed = strcmp(fl_session_current_user(), "Bob") == 0;
 
-        if (s_block) {
-            (void)sqlite3_exec(s_block, "ROLLBACK;", NULL, NULL, NULL);
-            sqlite3_close(s_block);
-            s_block = NULL;
-        }
+        release_block();
         if (!stayed || rc != FL_RESULT_BUSY || strcmp(s_audit_last, "su-refused:busy") != 0)
             return -1;
         return 0;
@@ -553,11 +534,7 @@ static int test_bridge_fact_races(void) {
     s_destroy_after_verify = NULL;
     if (import_fixture_bridge(b, 0) != 0 || fl_session_set_user("Bob") != FL_RESULT_OK)
         goto out;
-    memset(&req, 0, sizeof req);
-    req.target = "Ann";
-    req.password = s_ann_pw;
-    req.bridge_member = "Bob";
-    req.bridge_member_password = s_bob_pw;
+    bob_to_ann(&req);
     if (fl_session_switch_user(&req) != FL_RESULT_OK || strcmp(fl_session_current_user(), "Ann") != 0)
         goto out;
     if (import_fixture_bridge(b, 0) != 0 || fl_session_set_user("Bob") != FL_RESULT_OK)
@@ -580,11 +557,7 @@ static int test_bridge_fact_races(void) {
 out:
     s_mut_kind = MUT_NONE;
     fl_session_test_set_switch_pre_commit(NULL);
-    if (s_block) {
-        (void)sqlite3_exec(s_block, "ROLLBACK;", NULL, NULL, NULL);
-        sqlite3_close(s_block);
-        s_block = NULL;
-    }
+    release_block();
     if (rc != 0)
         fprintf(stderr, "FAIL [%s]: bridge fact races (last audit %s)\n", __func__, s_audit_last);
     free(b);
@@ -685,10 +658,7 @@ static int test_bridge_su(void) {
     if (need.factor != FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST || strcmp(need.bridge_uid, b->uid) != 0)
         goto fail;
 
-    memset(&req, 0, sizeof req);
-    req.target = "Ann";
-    req.password = s_ann_pw;
-    req.bridge_member = "Bob";
+    bob_to_ann(&req);
     req.bridge_member_password = s_ann_pw; /* wrong: refused and audited */
     if (fl_session_switch_user(&req) != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:bridge-proof") != 0)
         goto fail;

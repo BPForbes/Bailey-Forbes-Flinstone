@@ -22,6 +22,9 @@
 #include "session.h"
 #include "timekeeping.h"
 #include "user_db.h"
+#define KQ_TEST_UTIL_SQLITE
+#define KQ_TEST_UTIL_KQ
+#include "tests/kq_test_util.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -272,7 +275,6 @@ static int test_kqst_open_refusal_matrix(void) {
     char tokpath[] = "/tmp/fl_kqstXXXXXX";
     unsigned char device_id[16], signing_pub[32], encryption_pub[32];
     fl_kq_requirement_t req;
-    sqlite3 *sql = NULL;
     int fd;
     const char *db_path;
 
@@ -301,25 +303,14 @@ static int test_kqst_open_refusal_matrix(void) {
     ASSERT(fl_kq_open_account("Flinstone", "flinstone", tokpath) == FL_KQ_ACCOUNT_INVALID);
 
     db_path = getenv("FL_USERS_DB_PATH");
-    ASSERT(db_path && sqlite3_open(db_path, &sql) == SQLITE_OK);
-    {
-        sqlite3_stmt *st = NULL;
-
-        ASSERT(sqlite3_prepare_v2(sql,
-                                  "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,"
-                                  "generation,kqst_path,device_id,signing_public,encryption_public,"
-                                  "ledger_seq,event_hash) VALUES (?1,'own',1,'Root',1,1,?2,"
-                                  "x'01010101010101010101010101010101',"
-                                  "x'0202020202020202020202020202020202020202020202020202020202020202',"
-                                  "x'0303030303030303030303030303030303030303030303030303030303030303',"
-                                  "0,x'00');",
-                                  -1, &st, NULL) == SQLITE_OK);
-        sqlite3_bind_text(st, 1, flin->key_id, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 2, tokpath, -1, SQLITE_TRANSIENT);
-        ASSERT(sqlite3_step(st) == SQLITE_DONE);
-        sqlite3_finalize(st);
-    }
-    sqlite3_close(sql);
+    memset(device_id, 0x01, sizeof device_id);
+    memset(signing_pub, 0x02, sizeof signing_pub);
+    memset(encryption_pub, 0x03, sizeof encryption_pub);
+    ASSERT(db_path && kq_test_pair_account(db_path, flin->key_id, tokpath, device_id, signing_pub, encryption_pub,
+                                           1, 0) == 0);
+    memset(device_id, 0, sizeof device_id);
+    memset(signing_pub, 0, sizeof signing_pub);
+    memset(encryption_pub, 0, sizeof encryption_pub);
 
     ASSERT(fl_user_db_kqst_pairing(db, flin->key_id, device_id, signing_pub, encryption_pub) ==
            FL_RESULT_OK);
@@ -631,13 +622,13 @@ static void audit_capture(int on) {
 /* Containers made by the driver, beside s_tmp/<name>: one head by author, two heads, or none. */
 static int put_container(const char *name, const fl_kq_buf_t *c) {
     char path[512];
-    snprintf(path, sizeof path, "%s/%s%s", s_tmp, name, FL_KQ_CONTAINER_SUFFIX);
-    return fl_fs_write_file_atomic(path, c->data, c->len);
+    snprintf(path, sizeof path, "%s/%s", s_tmp, name);
+    return kq_test_put_container(path, c);
 }
 
 static int make_containers(const char *author, const uint8_t key[32], kq_file_offer_t *offer) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
-    fl_kq_buf_t base = {0}, one = {0}, left = {0}, right = {0}, both = {0};
+    fl_kq_buf_t base = {0}, one = {0}, both = {0};
     uint8_t id[16], rev[32];
     int rc = -1;
 
@@ -645,16 +636,13 @@ static int make_containers(const char *author, const uint8_t key[32], kq_file_of
     if (drv && drv->file_new(id, "doc.txt", author, &base) == KQ_FILE_OK &&
         drv->check_in(&base, author, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, key, &one, rev) == KQ_FILE_OK &&
         drv->offer(&one, rev, offer) == KQ_FILE_OK &&
-        drv->check_in(&one, author, "2026-11-10T09:01:00.000Z", (const uint8_t *)"a\n", 2, key, &left, rev) == KQ_FILE_OK &&
-        drv->check_in(&one, author, "2026-11-10T09:02:00.000Z", (const uint8_t *)"b\n", 2, key, &right, rev) == KQ_FILE_OK &&
-        drv->merge(&left, &right, author, "2026-11-10T09:03:00.000Z", &both) == KQ_FILE_OK &&
+        kq_test_fork(drv, &one, author, key, "2026-11-10T09:01:00.000Z", "2026-11-10T09:02:00.000Z",
+                     "2026-11-10T09:03:00.000Z", &both) == 0 &&
         put_container("single.txt", &one) == 0 && put_container("forked.txt", &both) == 0 &&
         put_container("empty.txt", &base) == 0)
         rc = 0;
     fl_kq_buf_free(&base);
     fl_kq_buf_free(&one);
-    fl_kq_buf_free(&left);
-    fl_kq_buf_free(&right);
     fl_kq_buf_free(&both);
     return rc;
 }
@@ -736,6 +724,14 @@ static int put_plain(const char *name, const char *text) {
     return fl_fs_write_file_atomic(path, (const uint8_t *)text, strlen(text));
 }
 
+static size_t count_lines(const fl_kq_buf_t *lines) {
+    size_t n = 0;
+
+    for (size_t i = 0; i < lines->len; i++)
+        n += lines->data[i] == '\n';
+    return n;
+}
+
 static int test_autosign_signs_a_tracked_file(void) {
     const fl_user_record_t *flin = account("Flinstone");
     char single[512], forked[512], empty[512], missing[512];
@@ -762,11 +758,7 @@ static int test_autosign_signs_a_tracked_file(void) {
     ASSERT(fl_kq_cp_last_signature(missing, &none) == FL_KQ_CP_IO && none == 0);
     ASSERT(fl_kq_autosign_last_signature(&(fl_kq_autosign_file_t){.path = missing}) == 0);
     ASSERT(fl_kq_cp_history(forked, &lines) == FL_KQ_CP_OK);
-    forked_events = fl_kq_cp_for_each_event(&lines, NULL, NULL); /* NULL fn visits nothing */
-    (void)forked_events;
-    forked_events = 0;
-    for (size_t i = 0; i < lines.len; i++)
-        forked_events += lines.data[i] == '\n';
+    forked_events = count_lines(&lines);
     fl_kq_buf_free(&lines);
 
     audit_capture(1);
@@ -784,12 +776,7 @@ static int test_autosign_signs_a_tracked_file(void) {
         ASSERT(audited(want));
     }
     ASSERT(fl_kq_cp_history(forked, &lines) == FL_KQ_CP_OK); /* a fork is never signed */
-    {
-        size_t n = 0;
-        for (size_t i = 0; i < lines.len; i++)
-            n += lines.data[i] == '\n';
-        ASSERT(n == forked_events);
-    }
+    ASSERT(count_lines(&lines) == forked_events);
     fl_kq_buf_free(&lines);
 
     /* Remove stops it; the queued item finds the object inactive. */
@@ -1062,29 +1049,12 @@ static int test_a_replacing_login_wipes_the_previous_box_key(void) {
 }
 
 static int register_device(const char *label, unsigned char dev) {
-    sqlite3 *sql = NULL;
-    sqlite3_stmt *st = NULL;
-    unsigned char id[16];
-    int ok = 0;
+    uint8_t id[16], sig[32], enc[32];
 
     memset(id, dev, sizeof id);
-    if (sqlite3_open(getenv("FL_USERS_DB_PATH"), &sql) != SQLITE_OK)
-        return 0;
-    (void)sqlite3_busy_timeout(sql, 5000); /* the session's own connection may be writing */
-    if (sqlite3_prepare_v2(sql,
-                           "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                           "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) "
-                           "VALUES (?1,'own',1,'Root',1,1,'',?2,"
-                           "x'0202020202020202020202020202020202020202020202020202020202020202',"
-                           "x'0303030303030303030303030303030303030303030303030303030303030303',0,x'00');",
-                           -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_text(st, 1, label, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_blob(st, 2, id, sizeof id, SQLITE_TRANSIENT);
-        ok = sqlite3_step(st) == SQLITE_DONE;
-        sqlite3_finalize(st);
-    }
-    sqlite3_close(sql);
-    return ok;
+    memset(sig, 0x02, sizeof sig);
+    memset(enc, 0x03, sizeof enc);
+    return kq_test_pair_account(getenv("FL_USERS_DB_PATH"), label, "", id, sig, enc, 1, 0) == 0;
 }
 
 /* Brings a child online with its box secret, as a login that opened the KQST would. */

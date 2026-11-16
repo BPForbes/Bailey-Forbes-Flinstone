@@ -21,6 +21,8 @@
 #include "fl/mem_asm.h"
 #include "fl/random.h"
 #include "user_db.h"
+#include "tests/kq_net_fake.h"
+#include "tests/kq_test_util.h"
 
 #include <dirent.h>
 #include <pthread.h>
@@ -54,46 +56,17 @@
 #define ANA "Root.Flinstone.Ana"
 #define STEVE "Root.Flinstone.Steve"
 
-/* ---- a fake server: the host and two members, no sockets ------------------------------------------ */
-
-static fl_net_server_member_t s_members[3];
-static fl_net_server_t *s_srv = (fl_net_server_t *)&s_members; /* opaque to the module */
-
-size_t fl_net_server_member_count(const fl_net_server_t *srv) {
-    (void)srv;
-    return 3;
-}
-
-const fl_net_server_member_t *fl_net_server_member_at(const fl_net_server_t *srv, size_t i) {
-    (void)srv;
-    return i < 3 ? &s_members[i] : NULL;
-}
-
-void fl_net_server_set_kq_hook(fl_net_server_kq_hook_fn hook) { (void)hook; }
-void fl_net_client_set_kq_hook(fl_net_client_kq_hook_fn hook) { (void)hook; }
-
-fl_result_t fl_net_session_send_frame(fl_net_sock_handle_t h, uint8_t op, const uint8_t *p, uint16_t n) {
-    (void)h; (void)op; (void)p; (void)n;
-    return FL_RESULT_OK;
-}
-
 /* ---- recording transport ---------------------------------------------------------------------------- */
 
 #define MEMBER_ANA (&s_members[1])
 #define MEMBER_STEVE (&s_members[2])
 
-static const fl_net_server_member_t *s_actor;
 static int s_data_to[3];
-static char s_last_err[512];
 
 static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, uint8_t opcode,
                       const uint8_t *payload, uint16_t plen) {
     (void)srv;
-    if (opcode == 0x7Fu) {
-        size_t n = plen < sizeof s_last_err - 1 ? plen : sizeof s_last_err - 1;
-        memcpy(s_last_err, payload, n);
-        s_last_err[n] = '\0';
-    }
+    kq_net_fake_note_error(opcode, payload, plen);
     for (int i = 1; i < 3; i++)
         if (to == &s_members[i]) {
             if (opcode == FL_NET_SESSION_OP_KQH_DATA)
@@ -107,70 +80,11 @@ static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *
     fl_net_kq_host_handle(s_srv, s_actor, opcode, payload, plen);
 }
 
-static int64_t s_clock = 1000000;
-static int64_t fake_now(void) { return s_clock; }
-
 /* ---- fixtures ----------------------------------------------------------------------------------------- */
 
 static char s_dir[256];
-static fl_user_db_t s_db;
 /* Drawn at run time (fl_random_bytes, hex); wiped at exit. */
 static char s_pw_mya[33], s_pw_ana[33], s_pw_steve[33];
-
-static const fl_user_db_t *the_users(void) { return &s_db; }
-
-static int draw_password(char out[33]) {
-    static const char hex[] = "0123456789abcdef";
-    uint8_t raw[16];
-
-    if (fl_random_bytes(raw, sizeof raw) != 0)
-        return -1;
-    for (size_t i = 0; i < sizeof raw; i++) {
-        out[2 * i] = hex[raw[i] >> 4];
-        out[2 * i + 1] = hex[raw[i] & 15u];
-    }
-    out[32] = '\0';
-    asm_mem_secure_zero(raw, sizeof raw);
-    return 0;
-}
-
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        rmrf(sub);
-    }
-    closedir(d);
-    rmdir(path);
-}
-
-static int write_bytes(const char *path, const void *data, size_t n) {
-    FILE *f = fopen(path, "wb");
-    if (!f)
-        return -1;
-    if (n && fwrite(data, 1, n, f) != n) {
-        fclose(f);
-        return -1;
-    }
-    return fclose(f);
-}
-
-static void member(int i, const char *principal, int is_host) {
-    memset(&s_members[i], 0, sizeof s_members[i]);
-    s_members[i].in_use = 1;
-    s_members[i].is_host = (uint8_t)is_host;
-    s_members[i].member_id = (fl_net_server_member_id_t)(i + 1);
-    s_members[i].peer_handle = FL_NET_SOCK_INVALID;
-    snprintf(s_members[i].principal, sizeof s_members[i].principal, "%.63s", principal);
-}
 
 /* Mya checks a file in and seals it to Steve: the container beside the file and the delivery. */
 static int encode_from_mya(const char *name, const void *data, size_t n, char path[PATH_MAX],
@@ -179,7 +93,7 @@ static int encode_from_mya(const char *name, const void *data, size_t n, char pa
     int rc;
 
     snprintf(path, PATH_MAX, "%s/%s", s_dir, name);
-    if (write_bytes(path, data, n) != 0 || fl_user_db_open_key(&s_db, "Mya", s_pw_mya, sign) != FL_RESULT_OK)
+    if (kq_test_write_file(path, data, n) != 0 || fl_user_db_open_key(&s_db, "Mya", s_pw_mya, sign) != FL_RESULT_OK)
         return -1;
     rc = fl_kq_cp_encode(&s_db, MYA, sign, STEVE, fl_user_db_box_public(&s_db, STEVE), path,
                          "2026-11-16T09:00:00.000Z", enc) == FL_KQ_CP_OK ? 0 : -1;
@@ -773,7 +687,7 @@ int main(void) {
         return 1;
     snprintf(s_dir, sizeof s_dir, "%s", tmpl);
     snprintf(path, sizeof path, "%s/users.db", s_dir);
-    if (draw_password(s_pw_mya) != 0 || draw_password(s_pw_ana) != 0 || draw_password(s_pw_steve) != 0 ||
+    if (kq_test_random_hex(s_pw_mya, 16) != 0 || kq_test_random_hex(s_pw_ana, 16) != 0 || kq_test_random_hex(s_pw_steve, 16) != 0 ||
         fl_user_db_load(&s_db, path) != FL_RESULT_OK ||
         fl_user_db_add_user_under(&s_db, "Root.Flinstone", "Mya", s_pw_mya, 4000, 0, 0) != FL_RESULT_OK ||
         fl_user_db_add_user_under(&s_db, "Root.Flinstone", "Ana", s_pw_ana, 4001, 0, 0) != FL_RESULT_OK ||
@@ -822,7 +736,7 @@ out:
     asm_mem_secure_zero(s_pw_mya, sizeof s_pw_mya);
     asm_mem_secure_zero(s_pw_ana, sizeof s_pw_ana);
     asm_mem_secure_zero(s_pw_steve, sizeof s_pw_steve);
-    rmrf(s_dir);
+    kq_test_rmrf(s_dir);
     if (rc == 0)
         printf("All FL-04 member history tests passed.\n");
     return rc;

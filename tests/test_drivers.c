@@ -25,6 +25,8 @@
 #include "common.h"
 #if defined(FL_WITH_KEYQUORUM)
 #include "fl/driver/keyquorum.h"
+#define KQ_TEST_UTIL_KQ
+#include "tests/kq_test_util.h"
 /* The synthetic "keyquorum" device is enumerated and bound beside host_blk. */
 #define EXPECTED_DEVICES 2
 #else
@@ -317,7 +319,7 @@ static int test_keyquorum_head_author(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get();
     const char *mya = "Root.Flinstone.Mya";
     uint8_t sec[32], pub[32], id[16], rev[32];
-    fl_kq_buf_t empty = {0}, one = {0}, left = {0}, right = {0}, forked = {0};
+    fl_kq_buf_t empty = {0}, one = {0}, forked = {0};
     char who[64], tiny[4];
     int rc = 1;
 
@@ -336,11 +338,8 @@ static int test_keyquorum_head_author(void) {
     if (kq->head_author(&one, tiny, sizeof tiny) != KQ_FILE_NO_ROOM || tiny[0] != '\0')
         goto out;
     /* Two edits on the same head, imported into one copy: two heads, no author. */
-    if (kq->check_in(&one, mya, "2026-11-10T09:01:00.000Z", (const uint8_t *)"a\n", 2, sec, &left,
-                     rev) != KQ_FILE_OK ||
-        kq->check_in(&one, mya, "2026-11-10T09:02:00.000Z", (const uint8_t *)"b\n", 2, sec, &right,
-                     rev) != KQ_FILE_OK ||
-        kq->merge(&left, &right, mya, "2026-11-10T09:03:00.000Z", &forked) != KQ_FILE_OK)
+    if (kq_test_fork(kq, &one, mya, sec, "2026-11-10T09:01:00.000Z", "2026-11-10T09:02:00.000Z",
+                     "2026-11-10T09:03:00.000Z", &forked) != 0)
         goto out;
     if (kq->head_author(&forked, who, sizeof who) != KQ_FILE_FORKED || who[0] != '\0')
         goto out;
@@ -349,8 +348,6 @@ out:
     kq->wipe(sec, sizeof sec);
     fl_kq_buf_free(&empty);
     fl_kq_buf_free(&one);
-    fl_kq_buf_free(&left);
-    fl_kq_buf_free(&right);
     fl_kq_buf_free(&forked);
     if (rc)
         fprintf(stderr, "FAIL [%s]: head_author\n", __func__);

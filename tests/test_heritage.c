@@ -18,6 +18,8 @@
 #include "cmd_authutil.h"
 #include "fs_facade.h"
 #include "fs_jail.h"
+#define KQ_TEST_UTIL_SQLITE
+#include "tests/kq_test_util.h"
 
 /* session_sync.c calls these. The deny path never starts a file service. */
 file_manager_service_t *g_fm_service;
@@ -59,30 +61,6 @@ static int temp_db(char *out, size_t cap) {
     unlink(tmpl);
     snprintf(out, cap, "%s.db", tmpl);
     return 0;
-}
-
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        struct stat st;
-
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
-            rmrf(sub);
-        else
-            unlink(sub);
-    }
-    closedir(d);
-    rmdir(path);
 }
 
 /*
@@ -325,24 +303,20 @@ static int test_bridge_reach(void) {
  * memory, so a field outside the INSERT would be lost); the KQST path is read from account_keys. */
 static int test_auth_mode_and_kqst_path(void) {
     char path[256], kqst[128];
-    sqlite3 *sql = NULL;
     fl_user_db_t db;
     const fl_user_record_t *u;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
-                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0,"
-                        " key_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, signing_public TEXT NOT NULL DEFAULT '',"
-                        " signing_sealed TEXT NOT NULL DEFAULT '', box_public TEXT NOT NULL DEFAULT '',"
-                        " box_sealed TEXT NOT NULL DEFAULT '');"
-                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id) VALUES ('Root','x','y',0,'Root');"
-                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,created_by)"
-                        " VALUES ('Bob','x','y',2000,'Root.Bob','Root');",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                            " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0,"
+                            " key_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, signing_public TEXT NOT NULL DEFAULT '',"
+                            " signing_sealed TEXT NOT NULL DEFAULT '', box_public TEXT NOT NULL DEFAULT '',"
+                            " box_sealed TEXT NOT NULL DEFAULT '');"
+                            "INSERT INTO users (name,password_hash,salt_hex,uid,key_id) VALUES ('Root','x','y',0,'Root');"
+                            "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,created_by)"
+                            " VALUES ('Bob','x','y',2000,'Root.Bob','Root');") == 0);
 
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     u = fl_user_db_find(&db, "Bob");
@@ -357,16 +331,13 @@ static int test_auth_mode_and_kqst_path(void) {
 
     /* no row, then a row without a path, then a path */
     ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
-                        " VALUES ('Root.Bob','own',1,'Root',1,1,NULL,x'00',x'00',x'00',0,x'00');"
-                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
-                        " VALUES ('Root.Eve','own',1,'Root',1,1,'/keys/eve.kqst',x'00',x'00',x'00',0,x'00');",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                            "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                            " VALUES ('Root.Bob','own',1,'Root',1,1,NULL,x'00',x'00',x'00',0,x'00');"
+                            "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                            "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                            " VALUES ('Root.Eve','own',1,'Root',1,1,'/keys/eve.kqst',x'00',x'00',x'00',0,x'00');") == 0);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, sizeof kqst) == FL_RESULT_OK);
     ASSERT(strcmp(kqst, "/keys/eve.kqst") == 0);
@@ -378,14 +349,11 @@ static int test_auth_mode_and_kqst_path(void) {
         ASSERT(fl_user_db_kqst_pairing(&db, "Root.Eve", device_id, signing_public, encryption_public) ==
                FL_RESULT_NOENT);
     }
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "UPDATE account_keys SET device_id=x'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
-                        " signing_public=x'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
-                        " encryption_public=x'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'"
-                        " WHERE label='Root.Eve';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_keys SET device_id=x'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
+                            " signing_public=x'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
+                            " encryption_public=x'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'"
+                            " WHERE label='Root.Eve';") == 0);
     {
         unsigned char device_id[16], signing_public[32], encryption_public[32];
 
@@ -406,15 +374,12 @@ static int test_legacy_bridge_migration(void) {
     int found = 0;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
-                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0);"
-                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
-                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                            " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0);"
+                            "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                            " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);") == 0);
 
     /* Opening through the public API migrates; the legacy row survives with empty signature fields. */
     ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
@@ -442,20 +407,16 @@ static int test_legacy_bridge_migration(void) {
 /* Behavior change of D9: an existing column matches case-insensitively (was strcmp, then a duplicate ALTER failed). */
 static int test_legacy_bridge_mixed_case_columns(void) {
     char path[256];
-    sqlite3 *sql = NULL;
     fl_bridge_t b;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
-                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0,"
-                        " Nonce TEXT NOT NULL DEFAULT '', REQUEST_SIG TEXT NOT NULL DEFAULT '');"
-                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
-                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                            " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0,"
+                            " Nonce TEXT NOT NULL DEFAULT '', REQUEST_SIG TEXT NOT NULL DEFAULT '');"
+                            "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                            " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);") == 0);
     ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
     ASSERT(b.created_at == 7);
     unlink(path);
@@ -471,15 +432,12 @@ static int test_legacy_case_collision(void) {
     int rows = 0;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
-                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0);"
-                        "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
-                        "INSERT INTO users VALUES('root','x','00',1000,1);"
-                        "INSERT INTO users VALUES('Root','y','11',2000,0);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                            " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0);"
+                            "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
+                            "INSERT INTO users VALUES('root','x','00',1000,1);"
+                            "INSERT INTO users VALUES('Root','y','11',2000,0);") == 0);
 
     ASSERT(fl_user_db_load(&db, path) != FL_RESULT_OK);
 
@@ -650,9 +608,7 @@ static int test_signed_bridges(void) {
     /* A request with no valid requester signature cannot be accepted. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 3, bob, &id)
            == FL_RESULT_OK);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET request_sig='';", NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE bridges SET request_sig='';") == 0);
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 4, ann) == FL_RESULT_INVAL);
     ASSERT(fl_bridge_revoke(path, "Root.Flinstone.Bob", id) == FL_RESULT_OK);
 
@@ -693,7 +649,6 @@ static int test_box_keys(void) {
     char path[256];
     fl_user_db_t db;
     fl_user_db_t again;
-    sqlite3 *sql = NULL;
     int created = 0;
     unsigned char box[FL_USER_SIGNING_SECRET_LEN];
     unsigned char before[FL_USER_SIGNING_PUBLIC_LEN];
@@ -726,10 +681,7 @@ static int test_box_keys(void) {
 
     /* An account from before box keys keeps its signing key and gains a box key. */
     memcpy(before, fl_user_db_signing_public(&again, "Root.Flinstone.Mya"), sizeof before);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE users SET box_public='',box_sealed='' WHERE name='Mya';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET box_public='',box_sealed='' WHERE name='Mya';") == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
     ASSERT(fl_user_db_open_box(&db, "Mya", "pw3", box) == FL_RESULT_NOENT);
@@ -749,10 +701,7 @@ static int test_box_keys(void) {
 
     /* A damaged signing key beside a valid box key: a password change makes both keys new,
      * and the box key it stores is one the new password opens and that matches its public. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE users SET signing_public='',signing_sealed='' WHERE name='Mya';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET signing_public='',signing_sealed='' WHERE name='Mya';") == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Mya"));
     ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
@@ -772,7 +721,6 @@ static int test_share_gate(void) {
     int64_t id = 0;
     unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
     unsigned char ann[FL_USER_SIGNING_SECRET_LEN];
-    sqlite3 *sql = NULL;
 
     ASSERT(temp_db(path, sizeof path) == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
@@ -799,10 +747,7 @@ static int test_share_gate(void) {
     /* The bridge joins exactly those two: Bob's parent does not inherit it. */
     ASSERT(fl_share_gate_check(&db, "Flinstone", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
     /* A tampered bridge stops counting. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET accept_sig=request_sig;", NULL, NULL, NULL)
-           == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE bridges SET accept_sig=request_sig;") == 0);
     ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
 
     /* Unknown accounts and accounts without a key are refused. */
@@ -947,19 +892,6 @@ static int auth_cell_is(const char *path, const char *name, int sql_type, sqlite
     return 0;
 }
 
-static int auth_exec_sql(const char *path, const char *sql_text) {
-    sqlite3 *sql = NULL;
-    int rc;
-
-    if (sqlite3_open(path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return -1;
-    }
-    rc = sqlite3_exec(sql, sql_text, NULL, NULL, NULL);
-    sqlite3_close(sql);
-    return rc == SQLITE_OK ? 0 : -1;
-}
-
 /* A bad stored mode publishes no users and does not rewrite the file. */
 static int auth_expect_load_err(const char *path) {
     fl_user_db_t db;
@@ -986,8 +918,6 @@ static int auth_expect_load_err(const char *path) {
 }
 
 static int auth_write_null_mode(const char *path) {
-    sqlite3 *sql = NULL;
-    int rc;
     const char *stmt =
         "CREATE TABLE users ("
         " name TEXT PRIMARY KEY NOT NULL,"
@@ -1006,13 +936,7 @@ static int auth_write_null_mode(const char *path) {
         "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,auth_mode)"
         " VALUES ('Root','x','y',0,'Root',NULL);";
 
-    if (sqlite3_open(path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return -1;
-    }
-    rc = sqlite3_exec(sql, stmt, NULL, NULL, NULL);
-    sqlite3_close(sql);
-    return rc == SQLITE_OK ? 0 : -1;
+    return kq_test_exec_sql(path, stmt);
 }
 
 /* Valid modes load. Unknown integers, a non-integer storage class, a partial row, and a
@@ -1046,29 +970,29 @@ static int test_auth_mode_reject_malformed(void) {
     ASSERT(fl_user_db_load(&db, longp) == FL_RESULT_INVAL);
     ASSERT(db.loaded == 1 && strcmp(db.path, path) == 0);
 
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
     ASSERT(auth_expect_load_err(path) == 0);
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=-1 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=-1 WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, -1, NULL));
     ASSERT(auth_expect_load_err(path) == 0);
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=4294967296 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=4294967296 WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, (sqlite3_int64)4294967296LL, NULL));
     ASSERT(auth_expect_load_err(path) == 0);
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode='nope' WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode='nope' WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_TEXT, 0, "nope"));
     ASSERT(auth_expect_load_err(path) == 0);
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=1.5 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=1.5 WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_FLOAT, 0, NULL));
     ASSERT(auth_expect_load_err(path) == 0);
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=x'01' WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=x'01' WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(path, "Root", SQLITE_BLOB, 0, NULL));
     ASSERT(auth_expect_load_err(path) == 0);
     unlink(path);
 
     ASSERT(temp_db(partial, sizeof partial) == 0);
     ASSERT(fl_user_db_load(&db, partial) == FL_RESULT_OK);
-    ASSERT(auth_exec_sql(partial, "UPDATE users SET auth_mode=2 WHERE name='Flinstone';") == 0);
+    ASSERT(kq_test_exec_sql(partial, "UPDATE users SET auth_mode=2 WHERE name='Flinstone';") == 0);
     ASSERT(auth_cell_is(partial, "Root", SQLITE_INTEGER, 0, NULL));
     ASSERT(auth_cell_is(partial, "Flinstone", SQLITE_INTEGER, 2, NULL));
     ASSERT(auth_expect_load_err(partial) == 0);
@@ -1089,7 +1013,7 @@ static int test_auth_mode_reject_malformed(void) {
     ASSERT(temp_db(badalias, sizeof badalias) == 0);
     ASSERT(fl_user_db_load(&db, badalias) == FL_RESULT_OK);
     ASSERT(fl_user_db_add_user_under(&db, "Root", "Temp", "pw", 4100, 0, 0) == FL_RESULT_OK);
-    ASSERT(auth_exec_sql(badalias, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(badalias, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
     ASSERT(auth_cell_is(badalias, "Root", SQLITE_INTEGER, 2, NULL));
     {
         auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
@@ -1158,7 +1082,7 @@ static int test_auth_mode_startup_fail_closed(void) {
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(fl_user_db_find(&db, "Root") && fl_user_db_find(&db, "Flinstone") &&
            fl_user_db_find(&db, "Alternative"));
-    ASSERT(auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
     ASSERT(auth_snap_rows(path, before, AUTH_SNAP_MAX, &nb) == 0);
     ASSERT(nb == 3);
     ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
@@ -1298,13 +1222,10 @@ static int test_private_bridge_store(void) {
     int has_wrap = 0;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE account_bridge_members (uid TEXT NOT NULL, label TEXT NOT NULL,"
-                        " encryption_public BLOB NOT NULL, signing_public BLOB NOT NULL,"
-                        " sealed_bridge_key BLOB, PRIMARY KEY (uid, label));",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE account_bridge_members (uid TEXT NOT NULL, label TEXT NOT NULL,"
+                            " encryption_public BLOB NOT NULL, signing_public BLOB NOT NULL,"
+                            " sealed_bridge_key BLOB, PRIMARY KEY (uid, label));") == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
     ASSERT(sqlite3_prepare_v2(sql, "SELECT name FROM pragma_table_info('account_bridge_members');", -1,
@@ -1339,51 +1260,40 @@ static int test_private_bridge_store(void) {
         size_t gi;
 
         for (gi = 0; gi < sizeof bad_gen / sizeof bad_gen[0]; gi++) {
-            ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-            ASSERT(sqlite3_exec(sql, bad_gen[gi], NULL, NULL, NULL) == SQLITE_OK);
-            sqlite3_close(sql);
+            ASSERT(kq_test_exec_sql(path, bad_gen[gi]) == 0);
             ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
             ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
         }
         /* Numeric text stays text only without integer affinity. column_int64 would turn '3' into 3. */
-        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-        ASSERT(sqlite3_exec(sql,
-                            "CREATE TABLE account_bridges_text (uid TEXT PRIMARY KEY NOT NULL,"
-                            " generation TEXT, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
-                            " destroyed INTEGER NOT NULL DEFAULT 0);"
-                            "INSERT INTO account_bridges_text SELECT uid, '3', salt, public_key, destroyed"
-                            " FROM account_bridges;"
-                            "DROP TABLE account_bridges;"
-                            "ALTER TABLE account_bridges_text RENAME TO account_bridges;",
-                            NULL, NULL, NULL) == SQLITE_OK);
-        sqlite3_close(sql);
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_text (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation TEXT, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_text SELECT uid, '3', salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_text RENAME TO account_bridges;") == 0);
         ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
         ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
         /* The column is NOT NULL, so a NULL generation has to be written behind that constraint. */
-        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-        ASSERT(sqlite3_exec(sql,
-                            "CREATE TABLE account_bridges_null (uid TEXT PRIMARY KEY NOT NULL,"
-                            " generation INTEGER, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
-                            " destroyed INTEGER NOT NULL DEFAULT 0);"
-                            "INSERT INTO account_bridges_null SELECT uid, NULL, salt, public_key, destroyed"
-                            " FROM account_bridges;"
-                            "DROP TABLE account_bridges;"
-                            "ALTER TABLE account_bridges_null RENAME TO account_bridges;",
-                            NULL, NULL, NULL) == SQLITE_OK);
-        sqlite3_close(sql);
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_null (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation INTEGER, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_null SELECT uid, NULL, salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_null RENAME TO account_bridges;") == 0);
         ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
         ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
-        ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-        ASSERT(sqlite3_exec(sql,
-                            "CREATE TABLE account_bridges_ok (uid TEXT PRIMARY KEY NOT NULL,"
-                            " generation INTEGER NOT NULL, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
-                            " destroyed INTEGER NOT NULL DEFAULT 0);"
-                            "INSERT INTO account_bridges_ok SELECT uid, 3, salt, public_key, destroyed"
-                            " FROM account_bridges;"
-                            "DROP TABLE account_bridges;"
-                            "ALTER TABLE account_bridges_ok RENAME TO account_bridges;",
-                            NULL, NULL, NULL) == SQLITE_OK);
-        sqlite3_close(sql);
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_ok (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation INTEGER NOT NULL, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_ok SELECT uid, 3, salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_ok RENAME TO account_bridges;") == 0);
         ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.generation == 3);
         ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
     }
@@ -1403,10 +1313,9 @@ static int test_private_bridge_store(void) {
     ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, 8, &len, out_salt) ==
            FL_RESULT_NOMEM);
     /* A sealed key without its salt (written behind the API) opens nothing. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE account_bridge_members SET sealed_bridge_key=x'99', wrap_salt=NULL"
-                             " WHERE label='Root.Alternative';", NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_bridge_members SET sealed_bridge_key=x'99', wrap_salt=NULL"
+                            " WHERE label='Root.Alternative';") == 0);
     ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Alternative", out, sizeof out, &len, out_salt) ==
            FL_RESULT_NOENT);
 
@@ -1425,25 +1334,17 @@ static int test_private_bridge_store(void) {
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
     make_bridge(&b, "bbbb0000bbbb0000bbbb0000bbbb0000", "Root.Flinstone.Bob", "Root.Alternative");
     ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE account_bridges SET salt=x'00' WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE account_bridges SET salt=x'00' WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
     ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
     /* A live row the store cannot read whole is no list at all (never a bridge left out). */
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE account_bridge_members SET signing_public=x'00' WHERE uid="
-                             "'bbbb0000bbbb0000bbbb0000bbbb0000' AND label='Root.Alternative';"
-                             "UPDATE account_bridges SET salt=zeroblob(16) WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_bridge_members SET signing_public=x'00' WHERE uid="
+                            "'bbbb0000bbbb0000bbbb0000bbbb0000' AND label='Root.Alternative';"
+                            "UPDATE account_bridges SET salt=zeroblob(16) WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
     /* A malformed row of a destroyed bridge is not live: it does not stop the list. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE account_bridges SET destroyed=1 WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE account_bridges SET destroyed=1 WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
     /* A store that cannot be read is an error, not "no bridge": locked by another writer... */
     make_bridge(&b, "cccc1111cccc1111cccc1111cccc1111", "Root.Flinstone.Bob", "Root.Alternative");
@@ -1465,10 +1366,7 @@ static int test_private_bridge_store(void) {
 
     /* A store written before the bridge tables existed has no bridge: that alone is "none". */
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL);", NULL, NULL, NULL) ==
-           SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL);") == 0);
     memset(&db, 0, sizeof db);
     snprintf(db.path, sizeof db.path, "%s", path);
     ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
@@ -1519,6 +1417,12 @@ static int test_unlock_requirement(void) {
 }
 
 static char s_audit[256];
+
+/* Expands on one line, so a failure names the caller's line. */
+#define REFUSED(call, rc, audit) do { \
+    ASSERT((call) == (rc)); \
+    ASSERT(!strcmp(s_audit, (audit))); \
+} while (0)
 
 static void capture_audit(const char *actor, const char *event, const char *subject, const char *detail) {
     (void)actor;
@@ -1571,8 +1475,7 @@ static int test_session_switch(void) {
     ASSERT(switch_to("Nobody", 0, "x", NULL, NULL) == FL_RESULT_NOENT);
     ASSERT(switch_to(NULL, 0, "x", NULL, NULL) == FL_RESULT_INVAL);
     /* Same branch (PASSWORD): the target's password. */
-    ASSERT(switch_to("Bob", 0, "wrong", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:password"));
+    REFUSED(switch_to("Bob", 0, "wrong", NULL, NULL), FL_RESULT_ACCES, "su-refused:password");
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     ASSERT(switch_to("Bob", 0, NULL, NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK);
@@ -1585,40 +1488,30 @@ static int test_session_switch(void) {
     ASSERT(!strcmp(s_audit, "su-kqst-legacy:password-only account"));
     /* To a KQST-mode account: the password alone is refused (no token is enrolled for Bob). */
     ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
     ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     /* A live private bridge: the target's password and a member's proof, which needs a token. */
     make_bridge(&b, "eeee0000eeee0000eeee0000eeee0000", "Root.Flinstone.Bob", "Root.Alternative");
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:bridge-member"));
-    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
-    ASSERT(switch_to("Bob", 0, "wrong", "Alternative", "alternative") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:password"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:bridge-member");
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
+    REFUSED(switch_to("Bob", 0, "wrong", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:password");
     b.destroyed = 1;
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
     /* sudo and sudo -i need Root's token. A password-only Root has none: refused before any password
      * is checked, for every caller, elevated or not, and never through the caller's own password. */
     ASSERT(!fl_session_sudo_needs_root());
-    ASSERT(switch_to("root", 1, "alternative", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
-    ASSERT(switch_to("root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    REFUSED(switch_to("root", 1, "alternative", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(switch_to("root", 1, "root", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
     ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
     ASSERT(fl_session_is_elevated_account());
-    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
-    ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    REFUSED(switch_to("Root", 1, NULL, NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(switch_to("Root", 1, "root", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
-    ASSERT(fl_session_sudo_authenticate("flinstone", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
     ASSERT(fl_session_sudo_authenticate(NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!fl_session_has_elevation());
     /* sudo writes no legacy audit. */
@@ -1626,13 +1519,10 @@ static int test_session_switch(void) {
     /* KQST-mode Root without a token that opens: Root's password alone is refused. */
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_sudo_needs_root());
-    ASSERT(fl_session_sudo_authenticate("flinstone", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
     /* Root has no token here: refused on Root's half before the invoker's is looked at. */
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
-    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:kqst");
+    REFUSED(sudo_i_to("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:kqst");
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     fl_session_set_audit_hook(NULL);
@@ -1659,16 +1549,13 @@ static void patch_no_connects(fl_kq_driver_t *d) { d->bridge_connects = NULL; }
 static void patch_parent_grant(fl_kq_driver_t *d) { d->access_requirement = stub_access_parent_grant; }
 
 static int exec_on_session_db(const char *stmt) {
-    sqlite3 *sql = NULL;
-    int rc;
+    return kq_test_exec_sql(fl_session_user_db()->path, stmt);
+}
 
-    if (sqlite3_open(fl_session_user_db()->path, &sql) != SQLITE_OK) {
-        sqlite3_close(sql);
-        return -1;
-    }
-    rc = sqlite3_exec(sql, stmt, NULL, NULL, NULL);
-    sqlite3_close(sql);
-    return rc == SQLITE_OK ? 0 : -1;
+static int pair_stub_token(const char *label, const char *kqst) {
+    static const uint8_t zero[32];
+
+    return kq_test_pair_account(fl_session_user_db()->path, label, kqst, zero, zero, zero, 32, 0);
 }
 
 /* Each refusal below refuses outright; none falls to the password-only (legacy) branch. */
@@ -1679,7 +1566,6 @@ static int test_switch_refusals(void) {
     char uid[40], kqst[300];
     sqlite3 *lock = NULL;
     unsigned i;
-    FILE *fp;
 
     fl_session_set_audit_hook(capture_audit);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
@@ -1687,15 +1573,13 @@ static int test_switch_refusals(void) {
     s_patch = patch_no_access;
     r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
     ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
     /* A parent's grant: nothing collects one, so refused before any password is checked. */
     s_patch = patch_parent_grant;
     s_stub_grant = 1;
     r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
     ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD && r.needs_parent_grant == 1);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:parent-grant"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:parent-grant");
     s_stub_grant = 0;
     ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK); /* the stub alone lets it through */
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
@@ -1714,12 +1598,10 @@ static int test_switch_refusals(void) {
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
     s_patch = patch_no_prove;
     ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
-    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
     s_patch = patch_no_verify;
     ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
-    ASSERT(switch_to("Bob", 0, "pw", "Alternative", "alternative") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:bridge-proof"));
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
     s_patch = NULL;
 
     /* A malformed live row: the list is an error, so the switch is refused, not lowered to the
@@ -1727,8 +1609,7 @@ static int test_switch_refusals(void) {
     ASSERT(exec_on_session_db("UPDATE account_bridges SET public_key=x'00' WHERE uid="
                               "'abab0000abab0000abab0000abab0000';") == 0);
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
     b.destroyed = 1;
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
@@ -1736,8 +1617,7 @@ static int test_switch_refusals(void) {
     ASSERT(sqlite3_open(fl_session_user_db()->path, &lock) == SQLITE_OK);
     ASSERT(sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
     ASSERT(sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
     sqlite3_close(lock);
 
@@ -1748,8 +1628,7 @@ static int test_switch_refusals(void) {
         ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
     }
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:policy"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
     ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed=1;") == 0);
     ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_KQST_PASSWORD);
 
@@ -1757,25 +1636,12 @@ static int test_switch_refusals(void) {
      * refused (kqst), never the password-only branch. */
     snprintf(kqst, sizeof kqst, "%s.bob-missing.kqst", fl_session_user_db()->path);
     unlink(kqst);
-    {
-        char stmt[700];
-
-        snprintf(stmt, sizeof stmt,
-                 "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                 "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
-                 " ('Root.Flinstone.Bob','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,"
-                 "zeroblob(32));",
-                 kqst);
-        ASSERT(exec_on_session_db(stmt) == 0);
-    }
+    ASSERT(pair_stub_token("Root.Flinstone.Bob", kqst) == 0);
     ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
-    fp = fopen(kqst, "wb");
-    ASSERT(fp && fputs("not a slot token", fp) >= 0 && fclose(fp) == 0);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
+    ASSERT(kq_test_write_text(kqst, "not a slot token") == 0);
     ASSERT(exec_on_session_db("UPDATE account_keys SET signing_public=x'00' WHERE label='Root.Flinstone.Bob';") == 0);
-    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "su-refused:kqst"));
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
     ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
     ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root.Flinstone.Bob';") == 0);
@@ -1889,33 +1755,23 @@ static int audit_is_cosign(const char *action, const char *invoker_factor) {
  * checked are still the same when the lock is taken again. sudo -i switches on the same factor.
  */
 static int test_sudo_root_token(void) {
-    char kqst[300], stmt[700];
-    FILE *fp;
+    char kqst[300];
 
     fl_session_set_audit_hook(capture_audit);
     snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
-    fp = fopen(kqst, "wb");
-    ASSERT(fp && fputs("stub slot token", fp) >= 0 && fclose(fp) == 0);
-    snprintf(stmt, sizeof stmt,
-             "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-             "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
-             " ('Root','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,zeroblob(32));",
-             kqst);
-    ASSERT(exec_on_session_db(stmt) == 0);
+    ASSERT(kq_test_write_text(kqst, "stub slot token") == 0);
+    ASSERT(pair_stub_token("Root", kqst) == 0);
     s_patch = patch_root_slot;
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_sudo_needs_root());
 
     /* The caller's own password is not Root's: refused, no fallback. */
-    ASSERT(fl_session_sudo_authenticate("flinstone", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
     ASSERT(!fl_session_has_elevation());
     /* Root's password and token, but not the invoker's own password: refused (co-authorisation). */
-    ASSERT(fl_session_sudo_authenticate("root", NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
-    ASSERT(fl_session_sudo_authenticate("root", "root") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
+    REFUSED(fl_session_sudo_authenticate("root", NULL), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    REFUSED(fl_session_sudo_authenticate("root", "root"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
     ASSERT(!fl_session_has_elevation());
     /* Root's password and token, and Flinstone's own password: granted, co-signed by Root's token
      * and Flinstone's own key over the action and one nonce, both halves verified. */
@@ -1937,13 +1793,11 @@ static int test_sudo_root_token(void) {
     }
     /* A co-signature that does not verify grants nothing. */
     s_patch = patch_root_slot_bad_verify;
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:cosign"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:cosign");
     ASSERT(!fl_session_has_elevation());
     /* A driver without the co-signing ops refuses the same way. */
     s_patch = patch_root_slot_no_cosign;
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:cosign"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:cosign");
     ASSERT(!fl_session_has_elevation());
     s_patch = patch_root_slot;
 
@@ -1956,21 +1810,18 @@ static int test_sudo_root_token(void) {
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     /* Root back to password-only in the window: no grant on a token check for a mode now gone. */
     fl_session_test_set_switch_pre_lock(sudo_root_password_only_during);
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:mode"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:mode");
     ASSERT(!fl_session_has_elevation());
     fl_session_test_set_switch_pre_lock(NULL);
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     /* The invoker's mode changed in the window: refused the same way. */
     fl_session_test_set_switch_pre_lock(sudo_flinstone_kqst_during);
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:mode"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:mode");
     fl_session_test_set_switch_pre_lock(NULL);
     ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     /* Root's password changed in the window: the password that passed is checked again. */
     fl_session_test_set_switch_pre_lock(sudo_root_password_during);
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
     ASSERT(!fl_session_has_elevation());
     fl_session_test_set_switch_pre_lock(NULL);
     ASSERT(fl_session_set_password("Root", "root") == FL_RESULT_OK);
@@ -1980,12 +1831,9 @@ static int test_sudo_root_token(void) {
 
     /* sudo -i: the same two factors. The caller's password is refused as Root's; Root's alone is
      * refused without the invoker's; both switch. */
-    ASSERT(sudo_i_to("flinstone", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
-    ASSERT(sudo_i_to("root", NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
-    ASSERT(sudo_i_to("root", "wrong") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
+    REFUSED(sudo_i_to("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
+    REFUSED(sudo_i_to("root", NULL), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    REFUSED(sudo_i_to("root", "wrong"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
     ASSERT(audit_is_cosign("sudo -i", "key"));
@@ -1993,8 +1841,7 @@ static int test_sudo_root_token(void) {
     ASSERT(!strcmp(fl_session_current_user(), "Root"));
     /* An elevated account is asked too: no password-less sudo -i. Root invoking for itself gives
      * Root's factor once. */
-    ASSERT(sudo_i_to(NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    REFUSED(sudo_i_to(NULL, NULL), FL_RESULT_ACCES, "sudo-refused:password");
     ASSERT(sudo_i_to("root", NULL) == FL_RESULT_OK);
 
     s_patch = NULL;
@@ -2078,11 +1925,7 @@ static void patch_facts_slot(fl_kq_driver_t *d) {
     d->sudo_verify = stub_sudo_verify;
 }
 
-static int write_stub_token(const char *path) {
-    FILE *fp = fopen(path, "wb");
-
-    return (fp && fputs("stub kqst token", fp) >= 0 && fclose(fp) == 0) ? 0 : -1;
-}
+static int write_stub_token(const char *path) { return kq_test_write_text(path, "stub kqst token"); }
 
 static int row_generation(const char *key_id) {
     fl_user_kqst_row_t row;
@@ -2132,12 +1975,9 @@ static int test_kqst_enroll(void) {
 
     /* As Root. Wrong password, wrong facts, no file: refused, and nothing is paired. */
     ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
-    ASSERT(fl_session_enroll_kqst("flinstone", root_tok, d_root, s_root, e_root, 1, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:password"));
-    ASSERT(fl_session_enroll_kqst("root", root_tok, d_fl, s_root, e_root, 1, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:kqst"));
-    ASSERT(fl_session_enroll_kqst("root", missing, d_root, s_root, e_root, 1, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:kqst"));
+    REFUSED(fl_session_enroll_kqst("flinstone", root_tok, d_root, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:password");
+    REFUSED(fl_session_enroll_kqst("root", root_tok, d_fl, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:kqst");
+    REFUSED(fl_session_enroll_kqst("root", missing, d_root, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:kqst");
     ASSERT(fl_session_enroll_kqst("root", root_tok, NULL, s_root, e_root, 1, &gen) == FL_RESULT_INVAL);
     ASSERT(row_generation("Root") == 0);
     ASSERT(!fl_session_sudo_needs_root());
@@ -2163,8 +2003,7 @@ static int test_kqst_enroll(void) {
     ASSERT(fl_session_enroll_kqst("root", root_tok2, d_root, s_root, e_root, 1700000002, &gen) == FL_RESULT_OK);
     ASSERT(gen == 2 && row_generation("Root") == 2);
     unlink(root_tok2); /* the token Root has is gone: a password alone never replaces it */
-    ASSERT(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 3, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:old-kqst"));
+    REFUSED(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 3, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:old-kqst");
     ASSERT(row_generation("Root") == 2);
     ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
@@ -2203,10 +2042,8 @@ static int test_kqst_enroll(void) {
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     /* Flinstone's token gone: its password alone does not co-authorise. */
     unlink(fl_tok);
-    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-kqst"));
-    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-kqst"));
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:invoker-kqst");
+    REFUSED(sudo_i_to("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:invoker-kqst");
     ASSERT(!fl_session_has_elevation());
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
 
@@ -2270,21 +2107,13 @@ static int test_elevation_window_refresh(void) {
 static int test_token_write_refuses_unsafe_places(void) {
     char base[] = "/tmp/fl-kqst-safe-XXXXXX";
     char real[600], link[600], path[700], pw[33];
-    uint8_t sign[32], box[32], rnd[16];
+    uint8_t sign[32], box[32];
     unsigned char dev[16], spub[32], epub[32];
     struct stat st;
-    int i;
 
     ASSERT(mkdtemp(base) != NULL);
-    {
-        FILE *ur = fopen("/dev/urandom", "rb");
-
-        ASSERT(ur && fread(rnd, 1, sizeof rnd, ur) == sizeof rnd && fread(sign, 1, sizeof sign, ur) == sizeof sign &&
-               fread(box, 1, sizeof box, ur) == sizeof box && fread(dev, 1, sizeof dev, ur) == sizeof dev);
-        fclose(ur);
-    }
-    for (i = 0; i < 16; i++)
-        snprintf(pw + 2 * i, 3, "%02x", rnd[i]); /* a fresh password, never a literal one */
+    ASSERT(kq_test_random_hex(pw, 16) == 0 && fl_random_bytes(sign, sizeof sign) == 0 &&
+           fl_random_bytes(box, sizeof box) == 0 && fl_random_bytes(dev, sizeof dev) == 0);
 
     /* A safe place: a kqst directory this process owns, made owner-only. */
     snprintf(path, sizeof path, "%s/ok/kqst/Root.x.kqst", base);
@@ -2320,8 +2149,7 @@ static int test_token_write_refuses_unsafe_places(void) {
     mem_domain_secure_zero(pw, sizeof pw);
     mem_domain_secure_zero(sign, sizeof sign);
     mem_domain_secure_zero(box, sizeof box);
-    snprintf(path, sizeof path, "rm -rf '%s'", base);
-    ASSERT(system(path) == 0);
+    ASSERT(kq_test_rmrf(base) == 0);
     return 0;
 }
 
@@ -2353,8 +2181,7 @@ static int test_kqst_made_by_kernel(void) {
     ASSERT(!strcmp(s_audit, "kqst-make-refused:no-service"));
     fl_session_set_login_hooks(NULL, NULL, stub_opened);
     /* The wrong password: refused, nothing written. */
-    ASSERT(fl_session_make_kqst("Flinstone", "root", 1, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-make-refused:password"));
+    REFUSED(fl_session_make_kqst("Flinstone", "root", 1, &gen), FL_RESULT_ACCES, "kqst-make-refused:password");
     ASSERT(access(fl_tok, F_OK) != 0);
     ASSERT(row_generation("Root.Flinstone") == 0);
 
@@ -2375,8 +2202,7 @@ static int test_kqst_made_by_kernel(void) {
         ASSERT(!memcmp(sp, u->signing_public, 32) && !memcmp(ep, u->box_public, 32));
     }
     /* Once made, never made again over it. */
-    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 2, &gen) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "kqst-make-refused:exists"));
+    REFUSED(fl_session_make_kqst("Flinstone", "flinstone", 2, &gen), FL_RESULT_ACCES, "kqst-make-refused:exists");
 
     /* passwd re-seals the token under the new password; the old one no longer opens it. */
     ASSERT(fl_session_change_password("Flinstone", "wrong", "stone2") == FL_RESULT_ACCES);
@@ -2406,8 +2232,7 @@ static int test_kqst_made_by_kernel(void) {
     ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
     ASSERT(audit_is_cosign("sudo", "token"));
     fl_session_drop_elevation();
-    ASSERT(fl_session_sudo_authenticate("root", "root") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
+    REFUSED(fl_session_sudo_authenticate("root", "root"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
     ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
     ASSERT(audit_is_cosign("sudo -i", "token"));
     ASSERT(!strcmp(fl_session_current_user(), "Root"));
@@ -2663,7 +2488,7 @@ static int test_account_command_reload_fails_closed(void) {
     if (fl_session_set_user("Root") != FL_RESULT_OK || !fl_session_is_elevated_account())
         return 1;
     snprintf(path, sizeof path, "%s", fl_session_user_db()->path);
-    if (!path[0] || auth_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0)
+    if (!path[0] || kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0)
         return 1;
     if (sqlite3_open(path, &lock) != SQLITE_OK ||
         sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) != SQLITE_OK) {
@@ -2693,7 +2518,7 @@ static int test_account_command_reload_fails_closed(void) {
         failed = 1;
     if (!auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL) || auth_cell_is(path, "Zed", SQLITE_INTEGER, 0, NULL))
         failed = 1;
-    if (auth_exec_sql(path, "UPDATE users SET auth_mode=0 WHERE name='Root';") != 0 ||
+    if (kq_test_exec_sql(path, "UPDATE users SET auth_mode=0 WHERE name='Root';") != 0 ||
         fl_session_reload_users() != FL_RESULT_OK || !fl_session_users_loaded() ||
         fl_session_set_user("Flinstone") != FL_RESULT_OK)
         return 1;
@@ -2773,8 +2598,7 @@ static void audit_end_window_on_coauth(const char *actor, const char *event, con
 static int test_sudo_renew_after_window_ended(void) {
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     static const char action_want[] = "sudo-action:sudo; nonce=";
-    char kqst[300], stmt[700];
-    FILE *fp;
+    char kqst[300];
 
     fl_session_set_audit_hook(capture_audit);
     unsetenv("FL_CMD_PASSWORD");
@@ -2793,14 +2617,8 @@ static int test_sudo_renew_after_window_ended(void) {
     /* A KQST-mode Root: the same ended window asks Root's and Flinstone's passwords again and
      * signs the line under the new window. */
     snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
-    fp = fopen(kqst, "wb");
-    ASSERT(fp && fputs("stub slot token", fp) >= 0 && fclose(fp) == 0);
-    snprintf(stmt, sizeof stmt,
-             "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-             "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
-             " ('Root','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,zeroblob(32));",
-             kqst);
-    ASSERT(exec_on_session_db(stmt) == 0);
+    ASSERT(kq_test_write_text(kqst, "stub slot token") == 0);
+    ASSERT(pair_stub_token("Root", kqst) == 0);
     s_patch = patch_root_slot;
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
@@ -2926,9 +2744,9 @@ int main(void) {
 
     if (chdir("/tmp") != 0)
         rc = 1;
-    rmrf(jail_parent);
+    kq_test_rmrf(jail_parent);
     free(jail_parent);
-    rmrf(db_dir);
+    kq_test_rmrf(db_dir);
     if (rc == 0)
         printf("All heritage tests passed.\n");
     return rc;

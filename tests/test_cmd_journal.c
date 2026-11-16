@@ -9,6 +9,7 @@
 #include "fl_colors.h"
 #include "kq_mem_storage.h"
 #include "mem_domain.h"
+#include "tests/kq_test_util.h"
 
 #include <openssl/evp.h>
 #include <openssl/params.h>
@@ -157,18 +158,6 @@ static int seg_write(unsigned idx, const uint8_t *d, size_t n) {
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3]; }
 
-/* Hex of n drawn bytes into out (2n+1). */
-static int drawn_hex(char *out, size_t n) {
-    uint8_t raw[32];
-
-    if (n > sizeof raw || fl_random_bytes(raw, n) != 0)
-        return -1;
-    for (size_t i = 0; i < n; i++)
-        snprintf(out + 2 * i, 3, "%02x", raw[i]);
-    mem_domain_secure_zero(raw, sizeof raw);
-    return 0;
-}
-
 static int contains(const uint8_t *hay, size_t n, const char *needle, size_t m) {
     for (size_t i = 0; m && i + m <= n; i++)
         if (memcmp(hay + i, needle, m) == 0)
@@ -316,7 +305,7 @@ static int test_secret_arguments_never_reach_storage(void) {
     size_t n = 0;
 
     fresh();
-    ASSERT(drawn_hex(s1, 24) == 0 && drawn_hex(s2, 24) == 0 && drawn_hex(s3, 24) == 0 && drawn_hex(s4, 24) == 0);
+    ASSERT(kq_test_random_hex(s1, 24) == 0 && kq_test_random_hex(s2, 24) == 0 && kq_test_random_hex(s3, 24) == 0 && kq_test_random_hex(s4, 24) == 0);
     ASSERT(fl_cmdlog_open(&c, &j, NULL) == 0);
     snprintf(line, sizeof line, "passwd %s", s1);
     ASSERT(strcmp(fl_cmdlog_category(line, cat, sizeof cat), "passwd") == 0);
@@ -611,7 +600,7 @@ static int test_a_second_open_of_one_journal_is_busy(void) {
 static int test_category_edges(void) {
     char line[600], cat[FL_CMDLOG_CATEGORY_MAX], s[33];
 
-    ASSERT(drawn_hex(s, 16) == 0);
+    ASSERT(kq_test_random_hex(s, 16) == 0);
     memset(line, ' ', 300);
     snprintf(line + 300, sizeof line - 300, "passwd %s", s); /* the name is past the scan limit */
     ASSERT(strcmp(fl_cmdlog_category(line, cat, sizeof cat), "other") == 0);

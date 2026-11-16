@@ -815,7 +815,7 @@ TEST_DRIVERS_OBJS = userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) kernel/core/
 	  $(KERNEL_DRIVERS)/pci.o $(TEST_DRIVER_HAL_OBJS)
 TEST_DRIVERS_CC = $(CC) $(CFLAGS) $(TEST_SANITIZE) -I. -Ikernel -Ikernel/include -Ikernel/drivers -Ikernel/drivers/wifi -Iuserland/shell -I$(ASM_SRC_DIR) -I$(KERNEL_DRIVERS) -Ikernel/arch/aarch64
 # The KeyQuorum driver is registered and bound to its synthetic device (FL_WITH_KEYQUORUM).
-test_drivers: $(TEST_DRIVERS_OBJS) kernel/drivers/bus.o kernel/drivers/driver_model.o kernel/drivers/keyquorum/kq_driver.o $(KQ_ID_LIB)
+test_drivers: $(TEST_DRIVERS_OBJS) kernel/drivers/bus.o kernel/drivers/driver_model.o kernel/drivers/keyquorum/kq_driver.o $(KQ_ID_LIB) tests/kq_test_util.h
 	$(TEST_DRIVERS_CC) -o tests/test_drivers tests/test_drivers.c \
 	  $(TEST_DRIVERS_OBJS) kernel/drivers/bus.o kernel/drivers/driver_model.o \
 	  kernel/drivers/keyquorum/kq_driver.o $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
@@ -1025,7 +1025,7 @@ test_sqlite_schema:
 # batch-arity helpers (those pull the shell command table).
 tests/obj/%_heritage.o: userland/command/%.c | $(TEST_BATCH_GC_DIR)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -ffunction-sections -fdata-sections $(DEPFLAGS) -c -o $@ $<
-test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o tests/obj/cmd_su_heritage.o tests/obj/cmd_sudo_heritage.o tests/obj/cmd_kqst_heritage.o userland/shell/authz_subsystem.o userland/shell/session_sync.o userland/shell/session_login_env.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
+test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/obj/cmd_account_heritage.o tests/obj/cmd_authutil_heritage.o tests/obj/cmd_su_heritage.o tests/obj/cmd_sudo_heritage.o tests/obj/cmd_kqst_heritage.o userland/shell/authz_subsystem.o userland/shell/session_sync.o userland/shell/session_login_env.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_heritage.o tests/test_heritage.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_heritage tests/test_heritage.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
@@ -1038,7 +1038,7 @@ test_heritage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OB
 	./tests/test_heritage
 
 .PHONY: test_kq_checkpoint
-test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o $(AUTHZ_AUDIT_OBJS) kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o
+test_kq_checkpoint: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_storage_facade.o userland/shell/authz_subsystem.o $(AUTHZ_AUDIT_OBJS) kernel/core/vfs/fs_provider.o kernel/core/vfs/fs_command.o kernel/core/vfs/fs_events.o kernel/core/vfs/fs_policy.o kernel/core/vfs/fs_chain.o kernel/core/vfs/fs_facade.o kernel/core/vfs/path_log.o dir_asm.o tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_checkpoint.o tests/test_kq_checkpoint.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_checkpoint tests/test_kq_checkpoint.o \
 	  kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o \
@@ -1060,7 +1060,7 @@ test_kq_mem_storage: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_C
 	./tests/test_kq_mem_storage
 
 .PHONY: test_kq_delivery
-test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
+test_kq_delivery: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_kq_delivery tests/test_kq_delivery.c \
 	  kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o \
 	  kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o \
@@ -1092,7 +1092,7 @@ test_codeql_scripts:
 	python3 -m unittest discover -s .github/scripts
 
 .PHONY: test_fs_identity
-test_fs_identity:
+test_fs_identity: tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -Ikernel/freestanding/x86_64 -Ikernel/drivers/freestanding_x86_64 \
 	  -o tests/test_fs_identity tests/test_fs_identity.c kernel/freestanding/x86_64/identity.c
 	./tests/test_fs_identity
@@ -1134,7 +1134,7 @@ test_part_buf: tests/test_part_buf.c kernel/core/net/net_part_buf.h $(SHARED_FS_
 	./tests/test_part_buf
 
 .PHONY: test_kq_net
-test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o
+test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o tests/kq_net_fake.h tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_net.o tests/test_kq_net.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_net tests/test_kq_net.o \
 	  kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o kernel/core/vfs/kq_delivery.o kernel/core/vfs/kq_history_bundle.o \
@@ -1145,7 +1145,7 @@ test_kq_net: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS
 	./tests/test_kq_net
 
 .PHONY: test_kq_history_member
-test_kq_history_member: userland/command/cmd_server_history.o userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o
+test_kq_history_member: userland/command/cmd_server_history.o userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_delivery.o kernel/core/net/net_kq_delivery.o kernel/core/net/net_kq_delivery_users.o $(NET_ASM_OBJ) kernel/core/vfs/kq_history_bundle.o tests/kq_net_fake.h tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_history_member.o tests/test_kq_history_member.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_history_member tests/test_kq_history_member.o \
 	  userland/command/cmd_server_history.o \
@@ -1157,7 +1157,7 @@ test_kq_history_member: userland/command/cmd_server_history.o userland/shell/com
 	./tests/test_kq_history_member
 
 .PHONY: test_kq_service
-test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_service.c kernel/core/sched/bg_jobs.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o
+test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) kernel/core/vfs/kq_checkpoint.o kernel/core/vfs/kq_checkpoint_users.o kernel/core/vfs/kq_service.c kernel/core/sched/bg_jobs.c kernel/core/sched/workqueue.c kernel/core/sched/priority_queue.c userland/shell/authz_subsystem.o userland/shell/audit_log.o userland/shell/contract_log_dispatch.o tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_service.o tests/test_kq_service.c
 	# the code under test is compiled with the sanitizers too, not linked from the plain objects
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/kqsvc_service.o kernel/core/vfs/kq_service.c
@@ -1176,7 +1176,7 @@ test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_
 # Real-token fixture (the keyquorum CLI is never built by the default make). The test always compiles;
 # scripts/kq_real_token_fixture.sh skips the run, and says so, when the CLI (KQ_CLI_DIR) or python3 is missing.
 .PHONY: test_kq_real_token
-test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
+test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_real_token.o tests/test_kq_real_token.c
 	$(CXX) $(CXXFLAGS) $(TEST_SANITIZE) -o tests/test_kq_real_token tests/test_kq_real_token.o \
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
@@ -1416,7 +1416,7 @@ CMD_JOURNAL_TEST_OBJS = userland/shell/cmd_journal.o userland/shell/shell_tokeni
   userland/command/cmd_registry.o kernel/core/vfs/kq_mem_storage.o kernel/core/mm/mem_domain.o \
   kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ)
 .PHONY: test_cmd_journal
-test_cmd_journal: $(CMD_JOURNAL_TEST_OBJS)
+test_cmd_journal: $(CMD_JOURNAL_TEST_OBJS) tests/kq_test_util.h
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_cmd_journal tests/test_cmd_journal.c \
 	  $(CMD_JOURNAL_TEST_OBJS) $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
 	./tests/test_cmd_journal

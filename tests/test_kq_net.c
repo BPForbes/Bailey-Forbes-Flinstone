@@ -15,6 +15,8 @@
 #include "kq_history_bundle.h"
 #include "fl/mem_asm.h"
 #include "user_db.h"
+#include "tests/kq_net_fake.h"
+#include "tests/kq_test_util.h"
 
 #include <dirent.h>
 #include <limits.h>
@@ -34,36 +36,10 @@
 #define MYA "Root.Flinstone.Mya"
 #define STEVE "Root.Flinstone.Steve"
 
-/* ---- a fake server: three members, no sockets --------------------------------- */
-
-static fl_net_server_member_t s_members[3];
-static fl_net_server_t *s_srv = (fl_net_server_t *)&s_members; /* opaque to the module */
-
-size_t fl_net_server_member_count(const fl_net_server_t *srv) {
-    (void)srv;
-    return 3;
-}
-
-const fl_net_server_member_t *fl_net_server_member_at(const fl_net_server_t *srv, size_t i) {
-    (void)srv;
-    return i < 3 ? &s_members[i] : NULL;
-}
-
-void fl_net_server_set_kq_hook(fl_net_server_kq_hook_fn hook) { (void)hook; }
-void fl_net_client_set_kq_hook(fl_net_client_kq_hook_fn hook) { (void)hook; }
-
-fl_result_t fl_net_session_send_frame(fl_net_sock_handle_t h, uint8_t op, const uint8_t *p,
-                                      uint16_t n) {
-    (void)h; (void)op; (void)p; (void)n;
-    return FL_RESULT_OK;
-}
-
 /* ---- recording transport --------------------------------------------------------- */
 
-static const fl_net_server_member_t *s_actor;
 static int s_to_steve[0x80];
 static int s_to_mya[0x80];
-static char s_last_err[512];
 
 static uint8_t s_mya_report[18 + FL_KQ_REPORT_FRAME_MAX];
 static uint16_t s_mya_report_len;
@@ -71,11 +47,7 @@ static uint16_t s_mya_report_len;
 static void host_send(fl_net_server_t *srv, const fl_net_server_member_t *to, uint8_t opcode,
                       const uint8_t *payload, uint16_t plen) {
     (void)srv;
-    if (opcode == 0x7Fu) {
-        size_t n = plen < sizeof s_last_err - 1 ? plen : sizeof s_last_err - 1;
-        memcpy(s_last_err, payload, n);
-        s_last_err[n] = '\0';
-    }
+    kq_net_fake_note_error(opcode, payload, plen);
     if (to == &s_members[2]) {
         s_to_steve[opcode & 0x7Fu]++;
         fl_net_kq_client_handle(NULL, opcode, payload, plen);
@@ -101,50 +73,9 @@ static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *
     fl_net_kq_host_handle(s_srv, s_actor, opcode, payload, plen);
 }
 
-static int64_t s_clock = 1000000;
-static int64_t fake_now(void) { return s_clock; }
-
 /* ---- fixtures -------------------------------------------------------------------- */
 
 static char s_dir[256];
-static fl_user_db_t s_db;
-
-static const fl_user_db_t *the_users(void) { return &s_db; }
-
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        rmrf(sub);
-    }
-    closedir(d);
-    rmdir(path);
-}
-
-static int write_text(const char *path, const char *text) {
-    FILE *f = fopen(path, "wb");
-    if (!f)
-        return -1;
-    fputs(text, f);
-    return fclose(f);
-}
-
-static void member(int i, const char *principal, int is_host) {
-    memset(&s_members[i], 0, sizeof s_members[i]);
-    s_members[i].in_use = 1;
-    s_members[i].is_host = (uint8_t)is_host;
-    s_members[i].member_id = (fl_net_server_member_id_t)(i + 1);
-    s_members[i].peer_handle = FL_NET_SOCK_INVALID;
-    snprintf(s_members[i].principal, sizeof s_members[i].principal, "%.63s", principal);
-}
 
 static int encode_from_mya(const char *name, const char *text, fl_kq_encoded_t *enc) {
     char src[PATH_MAX];
@@ -152,7 +83,7 @@ static int encode_from_mya(const char *name, const char *text, fl_kq_encoded_t *
     int rc;
 
     snprintf(src, sizeof src, "%s/%s", s_dir, name);
-    if (write_text(src, text) != 0 || fl_user_db_open_key(&s_db, "Mya", "pw-mya", sign) != FL_RESULT_OK)
+    if (kq_test_write_text(src, text) != 0 || fl_user_db_open_key(&s_db, "Mya", "pw-mya", sign) != FL_RESULT_OK)
         return -1;
     rc = fl_kq_cp_encode(&s_db, MYA, sign, STEVE, fl_user_db_box_public(&s_db, STEVE), src,
                          "2026-10-20T09:00:00.000Z", enc) == FL_KQ_CP_OK ? 0 : -1;
@@ -874,7 +805,7 @@ int main(void) {
     RUN(test_history_download_over_the_wire);
     RUN(test_the_production_history_letters_open_for_the_requester);
     fl_net_kq_reset();
-    rmrf(s_dir);
+    kq_test_rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum delivery wire tests passed.\n");
     return rc;

@@ -15,6 +15,8 @@
 #include "mem_domain.h"
 #include "server_shared_fs.h"
 #include "user_db.h"
+#define KQ_TEST_UTIL_KQ
+#include "tests/kq_test_util.h"
 
 #include <dirent.h>
 #include <limits.h>
@@ -45,14 +47,6 @@ static void path_in(char *out, size_t cap, const char *name) {
     snprintf(out, cap, "%s/%s", s_dir, name);
 }
 
-static int write_text(const char *path, const char *text) {
-    FILE *f = fopen(path, "wb");
-    if (!f)
-        return -1;
-    fputs(text, f);
-    return fclose(f);
-}
-
 static int read_text(const char *path, char *out, size_t cap) {
     FILE *f = fopen(path, "rb");
     size_t n;
@@ -62,24 +56,6 @@ static int read_text(const char *path, char *out, size_t cap) {
     out[n] = '\0';
     fclose(f);
     return 0;
-}
-
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        rmrf(sub);
-    }
-    closedir(d);
-    rmdir(path);
 }
 
 typedef struct {
@@ -144,7 +120,7 @@ static int contains(const fl_kq_buf_t *b, const char *needle) {
  * whose lifecycle probe gates the KeyQuorum ops. */
 static int prepare(world_t *w, const char *src, const char *text, const char *at,
                    fl_kq_encoded_t *enc, uint8_t sig[64]) {
-    if (write_text(src, text) != 0 ||
+    if (kq_test_write_text(src, text) != 0 ||
         fl_kq_cp_encode(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
                         src, at, enc) != FL_KQ_CP_OK)
         return -1;
@@ -237,7 +213,7 @@ static int test_co_signed_delivery(void) {
     mya_pub = fl_user_db_signing_public(&w.db, MYA);
     path_in(src, sizeof src, "plan.txt");
     path_in(dest, sizeof dest, "steve-plan.txt");
-    ASSERT(write_text(src, "quarterly plan v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "quarterly plan v1\n") == 0);
 
     /* Encode (Mya): sealed to Steve, plaintext not in the letter. */
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
@@ -280,7 +256,7 @@ static int test_co_signed_delivery(void) {
     fl_kq_encoded_free(&enc);
 
     /* Mya edits; the second revision arrives as NEWER and replaces Steve's copy. */
-    ASSERT(write_text(src, "quarterly plan v2\n") == 0);
+    ASSERT(kq_test_write_text(src, "quarterly plan v2\n") == 0);
     ASSERT(prepare_permitted(&w, src, "quarterly plan v2\n", T2, &enc, sig) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
@@ -301,8 +277,8 @@ static int test_untracked_destination_is_never_overwritten(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "notes.txt");
     path_in(dest, sizeof dest, "existing.txt");
-    ASSERT(write_text(src, "notes\n") == 0);
-    ASSERT(write_text(dest, "mine\n") == 0);
+    ASSERT(kq_test_write_text(src, "notes\n") == 0);
+    ASSERT(kq_test_write_text(dest, "mine\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -332,7 +308,7 @@ static int test_a_failed_write_installs_nothing(void) {
     snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
     /* A directory where the acceptance record's staging file must go makes that write fail. */
     snprintf(block, sizeof block, "%s.part", seen);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -379,7 +355,7 @@ static int test_landing_names_that_are_links_are_not_followed(void) {
     snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
     snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
     snprintf(part, sizeof part, "%s.part", side);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -392,7 +368,7 @@ static int test_landing_names_that_are_links_are_not_followed(void) {
     ASSERT(unlink(dest) == 0);
 
     /* A link at the acceptance record's name is refused, not read through. */
-    ASSERT(write_text(out, "outside\n") == 0);
+    ASSERT(kq_test_write_text(out, "outside\n") == 0);
     ASSERT(symlink(out, seen) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_IO);
@@ -431,7 +407,7 @@ static int test_landing_into_the_quarantine_is_refused(void) {
     ASSERT(mkdir(base, 0700) == 0 && mkdir(dir, 0700) == 0);
     snprintf(dir, sizeof dir, "%s/server_shared/expired", base);
     ASSERT(mkdir(dir, 0700) == 0);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -472,8 +448,8 @@ static int test_a_damaged_history_is_refused(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "damaged.txt");
     snprintf(side, sizeof side, "%s%s", src, FL_KQ_CONTAINER_SUFFIX);
-    ASSERT(write_text(src, "x\n") == 0);
-    ASSERT(write_text(side, "not a KQTF container") == 0);
+    ASSERT(kq_test_write_text(src, "x\n") == 0);
+    ASSERT(kq_test_write_text(side, "not a KQTF container") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_INVALID);
     teardown(&w);
@@ -809,7 +785,7 @@ static int test_newer_needs_the_accepted_container(void) {
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_IO);
     /* Damaged. */
-    ASSERT(write_text(side, "not a KQTF container") == 0);
+    ASSERT(kq_test_write_text(side, "not a KQTF container") == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_INVALID);
     /* A valid container, but not the one accepted for this file. */
@@ -945,7 +921,7 @@ static int test_checkpoints_use_the_storage_table(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "routed.txt");
     path_in(dest, sizeof dest, "routed-copy.txt");
-    ASSERT(write_text(src, "routed\n") == 0);
+    ASSERT(kq_test_write_text(src, "routed\n") == 0);
 
     use_counting();
     ASSERT(fl_kq_cp_storage() == &k_counting);
@@ -995,7 +971,7 @@ static int test_a_refused_commit_installs_nothing(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "refused.txt");
     path_in(dest, sizeof dest, "refused-copy.txt");
-    ASSERT(write_text(src, "refused\n") == 0);
+    ASSERT(kq_test_write_text(src, "refused\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -1029,7 +1005,7 @@ static int test_an_unreadable_container_is_not_replaced(void) {
 
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "unlooked.txt");
-    ASSERT(write_text(src, "unlooked\n") == 0);
+    ASSERT(kq_test_write_text(src, "unlooked\n") == 0);
     use_counting();
     s_counts.fail_exists = 1;
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
@@ -1054,7 +1030,7 @@ static int test_decode_uses_the_held_directory(void) {
     path_in(src, sizeof src, "held.txt");
     path_in(land, sizeof land, "land-held");
     path_in(moved, sizeof moved, "land-held-moved");
-    ASSERT(write_text(src, "held\n") == 0);
+    ASSERT(kq_test_write_text(src, "held\n") == 0);
     ASSERT(mkdir(land, 0700) == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
@@ -1132,7 +1108,7 @@ static int test_checkpoints_through_the_facade(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "face.txt");
     path_in(dest, sizeof dest, "face-copy.txt");
-    ASSERT(write_text(src, "through the facade\n") == 0);
+    ASSERT(kq_test_write_text(src, "through the facade\n") == 0);
     fs_events_init();
     fs_events_subscribe(FS_EV_FILE_SAVED, on_saved, NULL);
     ASSERT((prov = fs_local_provider_create()) != NULL);
@@ -1173,32 +1149,20 @@ static int test_checkpoints_through_the_facade(void) {
     return 0;
 }
 
-/* A container beside path made by the driver: empty, or with two heads (two edits on one head,
- * imported into one copy). */
-static int put_container(const char *path, const fl_kq_buf_t *c) {
-    char kqtf[PATH_MAX];
-
-    snprintf(kqtf, sizeof kqtf, "%s%s", path, FL_KQ_CONTAINER_SUFFIX);
-    return fl_fs_write_file_atomic(kqtf, c->data, c->len);
-}
-
+/* A two-head container beside path, made by the driver: two edits on one head, imported into one copy. */
 static int make_forked(world_t *w, const char *path) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    fl_kq_buf_t base = {0}, one = {0}, left = {0}, right = {0}, both = {0};
+    fl_kq_buf_t base = {0}, one = {0}, both = {0};
     uint8_t id[16], rev[32];
     int rc = -1;
 
     memset(id, 0x46, sizeof id);
     if (drv->file_new(id, "forked.txt", MYA, &base) == KQ_FILE_OK &&
         drv->check_in(&base, MYA, T1, (const uint8_t *)"v1\n", 3, w->mya_sign, &one, rev) == KQ_FILE_OK &&
-        drv->check_in(&one, MYA, T2, (const uint8_t *)"a\n", 2, w->mya_sign, &left, rev) == KQ_FILE_OK &&
-        drv->check_in(&one, MYA, T2, (const uint8_t *)"b\n", 2, w->mya_sign, &right, rev) == KQ_FILE_OK &&
-        drv->merge(&left, &right, MYA, T2, &both) == KQ_FILE_OK && put_container(path, &both) == 0)
+        kq_test_fork(drv, &one, MYA, w->mya_sign, T2, T2, T2, &both) == 0 && kq_test_put_container(path, &both) == 0)
         rc = 0;
     fl_kq_buf_free(&base);
     fl_kq_buf_free(&one);
-    fl_kq_buf_free(&left);
-    fl_kq_buf_free(&right);
     fl_kq_buf_free(&both);
     return rc;
 }
@@ -1230,7 +1194,7 @@ static int test_head_author_names_the_single_head(void) {
     ASSERT(fl_kq_cp_head_author(forked, who, sizeof who) == FL_KQ_CP_FORKED && who[0] == '\0');
 
     memset(id, 0x45, sizeof id);
-    ASSERT(drv->file_new(id, "bare.txt", MYA, &empty) == KQ_FILE_OK && put_container(bare, &empty) == 0);
+    ASSERT(drv->file_new(id, "bare.txt", MYA, &empty) == KQ_FILE_OK && kq_test_put_container(bare, &empty) == 0);
     fl_kq_buf_free(&empty);
     strcpy(who, "stale");
     ASSERT(fl_kq_cp_head_author(bare, who, sizeof who) == FL_KQ_CP_INVALID && who[0] == '\0');
@@ -1429,7 +1393,7 @@ int main(void) {
     RUN(test_offer_wire_layout_is_fixed);
     RUN(test_reports_are_held_and_capped);
     RUN(test_reasons_and_results);
-    rmrf(s_dir);
+    kq_test_rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum checkpoint tests passed.\n");
     return rc;
