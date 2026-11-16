@@ -83,6 +83,8 @@ void fl_color_error(const char *fmt, ...);
 void fl_color_success(const char *fmt, ...);
 /* Yellow, "[Server] " prefix (stdout); also used for the interactive nick prompt. */
 void fl_color_warn(const char *fmt, ...);
+/* Yellow, "[WARNING] " prefix (stderr): a local warning, not a server message. */
+void fl_color_warn_local(const char *fmt, ...);
 /* Yellow, no tag — for interactive prompts (no trailing newline). */
 void fl_color_prompt_yellow(const char *fmt, ...);
 

@@ -82,6 +82,12 @@ void fl_color_success(const char *fmt, ...) {
     fl_color_vfprintf_tagged(stdout, KGRN, "[Server] ", fmt, ap);
     va_end(ap);
 }
+void fl_color_warn_local(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fl_color_vfprintf_tagged(stderr, KYEL, "[WARNING] ", fmt, ap);
+    va_end(ap);
+}
 void fl_color_warn(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
