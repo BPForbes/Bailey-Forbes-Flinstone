@@ -97,6 +97,7 @@ run_make "test_userspace_connection" test_userspace_connection
 run_make "test_invariants" test_invariants
 run_make "test_issue222" test_issue222
 run_make "test_audit_log" test_audit_log
+run_make "test_cmd_journal" test_cmd_journal
 run_make "test_fs_jail" test_fs_jail
 run_make "test_heritage" test_heritage
 run_make "test_sqlite_schema" test_sqlite_schema

@@ -1418,6 +1418,16 @@ tests/test_shell_tokenize: userland/shell/shell_tokenize.c
 test_shell_tokenize: tests/test_shell_tokenize
 	@./tests/test_shell_tokenize
 
+# Signed command log (FL-04): userland/shell/cmd_journal.c over the in-memory storage table.
+CMD_JOURNAL_TEST_OBJS = userland/shell/cmd_journal.o userland/shell/shell_tokenize.o userland/shell/fl_colors.o \
+  userland/command/cmd_registry.o kernel/core/vfs/kq_mem_storage.o kernel/core/mm/mem_domain.o \
+  kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ)
+.PHONY: test_cmd_journal
+test_cmd_journal: $(CMD_JOURNAL_TEST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_cmd_journal tests/test_cmd_journal.c \
+	  $(CMD_JOURNAL_TEST_OBJS) $(OPENSSL_LIBS) -pthread -Wl,-z,noexecstack
+	./tests/test_cmd_journal
+
 tests/test_net_wifi_host_he: kernel/core/net/net_wifi_he.c
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_net_wifi_host_he tests/test_net_wifi_host_he.c \
 	  kernel/core/net/net_wifi_he.c -Wl,-z,noexecstack
