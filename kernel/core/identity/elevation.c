@@ -61,30 +61,6 @@ fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_ele
     return FL_RESULT_BUSY;
 }
 
-int fl_elevation_active(fl_elevation_token_t token) {
-    int64_t now = 0;
-    size_t i;
-    int ok = 0;
-
-    if (token == FL_ELEVATION_TOKEN_NONE)
-        return 0;
-    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
-        return 0;
-
-    pthread_mutex_lock(&s_elev_mu);
-    for (i = 0; i < FL_ELEV_MAX_SLOTS; i++) {
-        if (s_slots[i].used && s_slots[i].token == token) {
-            if (s_slots[i].expires_ns > now)
-                ok = 1;
-            else
-                mem_domain_zero(&s_slots[i], sizeof(s_slots[i]));
-            break;
-        }
-    }
-    pthread_mutex_unlock(&s_elev_mu);
-    return ok;
-}
-
 /* s_elev_mu is held. The slot of an active token, or NULL (an expired one is wiped here). */
 static fl_elev_slot_t *active_slot_locked(fl_elevation_token_t token, int64_t now) {
     size_t i;
@@ -102,14 +78,33 @@ static fl_elev_slot_t *active_slot_locked(fl_elevation_token_t token, int64_t no
     return NULL;
 }
 
+int fl_elevation_active(fl_elevation_token_t token) {
+    int64_t now = 0;
+    int ok;
+
+    if (token == FL_ELEVATION_TOKEN_NONE)
+        return 0;
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
+        return 0;
+
+    pthread_mutex_lock(&s_elev_mu);
+    ok = active_slot_locked(token, now) != NULL;
+    pthread_mutex_unlock(&s_elev_mu);
+    return ok;
+}
+
 fl_result_t fl_elevation_refresh(fl_elevation_token_t token, int64_t *expires_ns_out) {
     fl_elev_slot_t *slot;
     int64_t now = 0;
     fl_result_t rc = FL_RESULT_NOENT;
 
-    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK)
-        return FL_RESULT_ERR;
+    /* The clock is read under the lock: a refresh that read an earlier time and locked later would
+     * otherwise set back a window another refresh has already moved on. */
     pthread_mutex_lock(&s_elev_mu);
+    if (fl_time_monotonic_ns(&now) != FL_RESULT_OK) {
+        pthread_mutex_unlock(&s_elev_mu);
+        return FL_RESULT_ERR;
+    }
     slot = active_slot_locked(token, now);
     if (slot) {
         slot->expires_ns = now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
