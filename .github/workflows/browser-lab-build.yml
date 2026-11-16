@@ -43,7 +43,7 @@ permissions:
 jobs:
   validate:
     name: Build, test, and audit browser candidate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: 25
     # Least privilege: repository, language, release, and commit reads come with
