@@ -66,6 +66,7 @@ tests/test_kq_mem_storage
 tests/test_cmd_journal
 tests/test_kq_net
 tests/test_kq_history_member
+tests/test_interpreter_sudo_gate
 tests/test_part_buf
 tests/test_net_codec
 tests/test_kq_wire

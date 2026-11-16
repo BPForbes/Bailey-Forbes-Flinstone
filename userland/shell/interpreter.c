@@ -22,6 +22,23 @@
 #include <pthread.h>
 
 /*
+ * The sudo window's signing gate (FL-20 #399): inside the window every command is an elevated action,
+ * signed by Root's key and the account's, so it runs before any builtin handles the line (help, history,
+ * make and the other early handlers included). A sudo is left to its own path, which signs it through
+ * cmd_sudo_sign_action and is the only thing that starts the window's clock again. The first word is
+ * read with the tokenizer execute_command_str uses; a blank line signs nothing.
+ */
+static void sign_elevated_line(const char *line, const char *buffer) {
+    char first[512];
+    char *argv[2];
+
+    snprintf(first, sizeof first, "%s", buffer);
+    if (fl_shell_tokenize_line(first, argv, 2) < 1 || strcmp(argv[0], "sudo") == 0)
+        return;
+    cmd_sudo_sign_elevated(line);
+}
+
+/*
  * execute_command_str:
  *   Parses and executes the command provided in 'line'.
  *   Returns 0 on success; otherwise a nonzero value.
@@ -39,6 +56,7 @@ int execute_command_str(const char *line) {
     char buffer[512];
     strncpy(buffer, line, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
+    sign_elevated_line(line, buffer);
     char *tokenBuf = strdup(buffer);
     if (!tokenBuf)
         goto finish;
@@ -94,11 +112,6 @@ int execute_command_str(const char *line) {
         free(cmdLine);
         goto finish;
     }
-    /* Inside the sudo window every command is an elevated action, signed by Root's key and the
-     * account's (FL-20 #399); only a sudo starts the window's clock again. */
-    if (strcmp(args[0], "sudo") != 0)
-        cmd_sudo_sign_elevated(line);
-
     if (strcmp(args[0], "sudo") == 0) {
         /* -i / -k: no password gate; cmd_sudo_run handles revoke and root login. */
         if (argc >= 2 && strcmp(args[1], "-k") == 0) {
