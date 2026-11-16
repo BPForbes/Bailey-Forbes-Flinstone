@@ -1517,7 +1517,7 @@ static int test_unlock_requirement(void) {
     return 0;
 }
 
-static char s_audit[96];
+static char s_audit[256];
 
 static void capture_audit(const char *actor, const char *event, const char *subject, const char *detail) {
     (void)actor;
@@ -1546,7 +1546,12 @@ static void sudo_root_password_only_during(void) {
     (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD);
 }
 
-static void sudo_root_password_during(void) { (void)fl_session_set_password("Root", "other"); }
+/* A reset puts a token account back to password sign-in (its keys are new); token mode is put back
+ * here so that only the password differs. */
+static void sudo_root_password_during(void) {
+    (void)fl_session_set_password("Root", "other");
+    (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST);
+}
 
 static void sudo_flinstone_kqst_during(void) {
     (void)fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST);
@@ -1796,7 +1801,91 @@ static int stub_slot_open_root(const uint8_t *kqst, size_t klen, const char *lab
                                                                                          : FL_KQ_ACCOUNT_INVALID;
 }
 
-static void patch_root_slot(fl_kq_driver_t *d) { d->slot_open = stub_slot_open_root; }
+/*
+ * sudo_sign / sudo_verify stand-ins for the co-signature (the real ones are covered by
+ * test_kq_real_token and KeyQuorum's own tests): a half is 64 bytes of its role number, and the pair
+ * verifies only when both halves are there and the public keys are the ones the store holds (Root's
+ * pairing, and the invoker's pairing or record, both named by key id). Each call records what it
+ * signed.
+ */
+static char s_cosign_action[64];
+static int s_cosign_signs, s_cosign_verifies;
+static uint8_t s_cosign_nonce[16];
+
+static int stub_sudo_sign(int role, const char *invoker, const char *authority, const uint8_t *action,
+                          size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],
+                          uint8_t sig_out[64]) {
+    (void)invoker, (void)authority, (void)secret;
+    s_cosign_signs++;
+    snprintf(s_cosign_action, sizeof s_cosign_action, "%.*s", (int)action_len, (const char *)action);
+    memcpy(s_cosign_nonce, nonce, 16);
+    memset(sig_out, role, 64);
+    return FL_KQ_ACCOUNT_OK;
+}
+
+static int stub_sudo_verify(const char *invoker, const char *authority, const uint8_t *action,
+                            size_t action_len, const uint8_t nonce[16], const uint8_t invoker_public[32],
+                            const uint8_t invoker_sig[64], const uint8_t authority_public[32],
+                            const uint8_t authority_sig[64]) {
+    const fl_user_db_t *db = fl_session_user_db();
+    const fl_user_record_t *inv = invoker ? fl_user_db_find_by_key(db, invoker) : NULL;
+    unsigned char dev[16], inv_pub[32], root_pub[32], enc[32];
+
+    (void)action, (void)action_len;
+    s_cosign_verifies++;
+    if (!inv || !authority || strcmp(authority, "Root") != 0 ||
+        fl_user_db_kqst_pairing(db, "Root", dev, root_pub, enc) != FL_RESULT_OK)
+        return 0;
+    if (inv->auth_mode == FL_USER_AUTH_PASSWORD_KQST) {
+        if (fl_user_db_kqst_pairing(db, inv->key_id, dev, inv_pub, enc) != FL_RESULT_OK)
+            return 0;
+    } else {
+        memcpy(inv_pub, inv->signing_public, 32);
+    }
+    return memcmp(invoker_public, inv_pub, 32) == 0 && memcmp(authority_public, root_pub, 32) == 0 &&
+           invoker_sig[0] == FL_KQ_SUDO_INVOKER &&
+           invoker_sig[63] == FL_KQ_SUDO_INVOKER && authority_sig[0] == FL_KQ_SUDO_AUTHORITY &&
+           authority_sig[63] == FL_KQ_SUDO_AUTHORITY && memcmp(nonce, s_cosign_nonce, 16) == 0;
+}
+
+static void patch_root_slot(fl_kq_driver_t *d) {
+    d->slot_open = stub_slot_open_root;
+    d->sudo_sign = stub_sudo_sign;
+    d->sudo_verify = stub_sudo_verify;
+}
+
+static int stub_sudo_verify_never(const char *invoker, const char *authority, const uint8_t *action,
+                                  size_t action_len, const uint8_t nonce[16],
+                                  const uint8_t invoker_public[32], const uint8_t invoker_sig[64],
+                                  const uint8_t authority_public[32], const uint8_t authority_sig[64]) {
+    (void)invoker, (void)authority, (void)action, (void)action_len, (void)nonce;
+    (void)invoker_public, (void)invoker_sig, (void)authority_public, (void)authority_sig;
+    return 0;
+}
+
+static void patch_root_slot_bad_verify(fl_kq_driver_t *d) {
+    patch_root_slot(d);
+    d->sudo_verify = stub_sudo_verify_never;
+}
+
+static void patch_root_slot_no_cosign(fl_kq_driver_t *d) {
+    patch_root_slot(d);
+    d->sudo_sign = NULL;
+}
+
+/* The audit detail of a co-signed sudo: the action, which of the invoker's keys signed, a nonce. */
+static int audit_is_cosign(const char *action, const char *invoker_factor) {
+    char want[200];
+    const char *nonce;
+    size_t n;
+
+    snprintf(want, sizeof want, "sudo-coauth:%s; cosign=%s; nonce=", action, invoker_factor);
+    n = strlen(want);
+    if (strncmp(s_audit, want, n) != 0)
+        return 0;
+    nonce = s_audit + n;
+    return strlen(nonce) == 32 && strspn(nonce, "0123456789abcdef") == 32;
+}
 
 /*
  * FL-12 owner decision (#403): with a KQST-mode Root, sudo takes Root's password and token, never the
@@ -1832,12 +1921,35 @@ static int test_sudo_root_token(void) {
     ASSERT(fl_session_sudo_authenticate("root", "root") == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
     ASSERT(!fl_session_has_elevation());
-    /* Root's password and token, and Flinstone's own password: granted, audited with both. */
+    /* Root's password and token, and Flinstone's own password: granted, co-signed by Root's token
+     * and Flinstone's own key over the action and one nonce, both halves verified. */
     s_audit[0] = '\0';
+    s_cosign_signs = s_cosign_verifies = 0;
     ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit, "sudo-coauth:sudo; invoker password"));
+    ASSERT(audit_is_cosign("sudo", "key"));
+    ASSERT(s_cosign_signs == 2 && s_cosign_verifies == 1 && !strcmp(s_cosign_action, "sudo"));
     ASSERT(fl_session_has_elevation());
     fl_session_drop_elevation();
+    {
+        /* Two sudos never share a nonce. */
+        char first[sizeof s_audit];
+
+        snprintf(first, sizeof first, "%s", s_audit);
+        ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+        ASSERT(audit_is_cosign("sudo", "key") && strcmp(first, s_audit) != 0);
+        fl_session_drop_elevation();
+    }
+    /* A co-signature that does not verify grants nothing. */
+    s_patch = patch_root_slot_bad_verify;
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:cosign"));
+    ASSERT(!fl_session_has_elevation());
+    /* A driver without the co-signing ops refuses the same way. */
+    s_patch = patch_root_slot_no_cosign;
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:cosign"));
+    ASSERT(!fl_session_has_elevation());
+    s_patch = patch_root_slot;
 
     /* Logout during the check moves the login generation: nothing is granted to what follows. */
     fl_session_test_set_switch_pre_lock(sudo_logout_during);
@@ -1866,6 +1978,9 @@ static int test_sudo_root_token(void) {
     ASSERT(!fl_session_has_elevation());
     fl_session_test_set_switch_pre_lock(NULL);
     ASSERT(fl_session_set_password("Root", "root") == FL_RESULT_OK);
+    /* An ancestor's reset gives new keys, so the old token no longer fits: back to password sign-in. */
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Root")->auth_mode == FL_USER_AUTH_PASSWORD);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
 
     /* sudo -i: the same two factors. The caller's password is refused as Root's; Root's alone is
      * refused without the invoker's; both switch. */
@@ -1877,7 +1992,8 @@ static int test_sudo_root_token(void) {
     ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit, "sudo-coauth:sudo -i; invoker password"));
+    ASSERT(audit_is_cosign("sudo -i", "key"));
+    ASSERT(!strcmp(s_cosign_action, "sudo -i Root"));
     ASSERT(!strcmp(fl_session_current_user(), "Root"));
     /* An elevated account is asked too: no password-less sudo -i. Root invoking for itself gives
      * Root's factor once. */
@@ -1960,7 +2076,11 @@ static int stub_slot_open_facts(const uint8_t *kqst, size_t klen, const char *la
     return FL_KQ_ACCOUNT_OK;
 }
 
-static void patch_facts_slot(fl_kq_driver_t *d) { d->slot_open = stub_slot_open_facts; }
+static void patch_facts_slot(fl_kq_driver_t *d) {
+    d->slot_open = stub_slot_open_facts;
+    d->sudo_sign = stub_sudo_sign;
+    d->sudo_verify = stub_sudo_verify;
+}
 
 static int write_stub_token(const char *path) {
     FILE *fp = fopen(path, "wb");
@@ -2056,10 +2176,10 @@ static int test_kqst_enroll(void) {
     ASSERT(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 4, &gen) == FL_RESULT_OK);
     ASSERT(gen == 1);
 
-    /* sudo as Flinstone, password-only: Root's password and token, and Flinstone's password. */
+    /* sudo as Flinstone, password-only: co-signed by Root's token and Flinstone's own key. */
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit, "sudo-coauth:sudo; invoker password"));
+    ASSERT(audit_is_cosign("sudo", "key"));
     fl_session_drop_elevation();
 
     /* Flinstone pairs its own token with the command (password on the next line). */
@@ -2078,12 +2198,12 @@ static int test_kqst_enroll(void) {
     ASSERT(saved_auth_mode("Flinstone") == FL_USER_AUTH_PASSWORD_KQST);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
 
-    /* Now Flinstone's half is its password and its token. */
+    /* Now Flinstone's half is signed with its token. */
     ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit, "sudo-coauth:sudo; invoker token"));
+    ASSERT(audit_is_cosign("sudo", "token"));
     fl_session_drop_elevation();
     ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit, "sudo-coauth:sudo -i; invoker token"));
+    ASSERT(audit_is_cosign("sudo -i", "token"));
     ASSERT(!strcmp(fl_session_current_user(), "Root"));
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     /* Flinstone's token gone: its password alone does not co-authorise. */
@@ -2111,6 +2231,134 @@ static int test_kqst_enroll(void) {
     ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label IN ('Root','Root.Flinstone');") == 0);
     unlink(root_tok);
     unlink(fl_tok);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* A key service stand-in: token sign-ins need one to take the opened keys. */
+static fl_result_t stub_opened(const fl_user_record_t *account, const uint8_t secret[32], uint64_t gen) {
+    (void)account, (void)secret, (void)gen;
+    return FL_RESULT_OK;
+}
+
+static int file_mode_is(const char *path, mode_t want) {
+    struct stat st;
+
+    return stat(path, &st) == 0 && (st.st_mode & 0777) == want;
+}
+
+/*
+ * The kernel makes and pairs each account's token itself (owner decision on PR 416), with the real
+ * KeyQuorum driver: the account's own keys sealed under its password to a fresh device id, in an
+ * owner-only file beside the account store. Then a password change re-seals it, an ancestor's reset
+ * puts the account back to password sign-in, a sign-in makes the token, and sudo is co-signed by
+ * Root's and the invoker's real keys.
+ */
+static int test_kqst_made_by_kernel(void) {
+    char fl_tok[600], root_tok[600], bob_tok[600], db_path[512], junk[600];
+    char *make_argv[] = {"kqst", "enroll", NULL};
+    int64_t gen = 0;
+
+    snprintf(db_path, sizeof db_path, "%s", fl_session_user_db()->path);
+    ASSERT(fl_kq_account_token_path(db_path, "Root.Flinstone", fl_tok, sizeof fl_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root", root_tok, sizeof root_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root.Flinstone.Bob", bob_tok, sizeof bob_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a/b", junk, sizeof junk) != 0); /* never a path out */
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob"));
+    unlink(fl_tok), unlink(root_tok), unlink(bob_tok);
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    /* No key service to take a token sign-in: nothing is made (it would lock the account out). */
+    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 1, &gen) == FL_RESULT_NOSYS);
+    ASSERT(!strcmp(s_audit, "kqst-make-refused:no-service"));
+    fl_session_set_login_hooks(NULL, NULL, stub_opened);
+    /* The wrong password: refused, nothing written. */
+    ASSERT(fl_session_make_kqst("Flinstone", "root", 1, &gen) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "kqst-make-refused:password"));
+    ASSERT(access(fl_tok, F_OK) != 0);
+    ASSERT(row_generation("Root.Flinstone") == 0);
+
+    /* The right one: the account's own keys in an owner-only token, paired, saved. */
+    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 1700000100, &gen) == FL_RESULT_OK && gen == 1);
+    ASSERT(!strcmp(s_audit, "kqst-made:generation=1"));
+    ASSERT(file_mode_is(fl_tok, 0600) && row_generation("Root.Flinstone") == 1);
+    ASSERT(saved_auth_mode("Flinstone") == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "root", NULL) != FL_KQ_ACCOUNT_OK);
+    {
+        /* The token holds the keys the account already had: its identity is unchanged. */
+        const fl_user_record_t *u = fl_user_db_find(fl_session_user_db(), "Flinstone");
+        unsigned char dev[16], sp[32], ep[32];
+
+        ASSERT(u && fl_user_db_kqst_pairing(fl_session_user_db(), u->key_id, dev, sp, ep) == FL_RESULT_OK);
+        ASSERT(!memcmp(sp, u->signing_public, 32) && !memcmp(ep, u->box_public, 32));
+    }
+    /* Once made, never made again over it. */
+    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 2, &gen) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "kqst-make-refused:exists"));
+
+    /* passwd re-seals the token under the new password; the old one no longer opens it. */
+    ASSERT(fl_session_change_password("Flinstone", "wrong", "stone2") == FL_RESULT_ACCES);
+    ASSERT(fl_session_change_password("Flinstone", "flinstone", "stone2") == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "kqst-resealed:"));
+    ASSERT(fl_kq_open_account("Flinstone", "stone2", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) != FL_KQ_ACCOUNT_OK);
+    ASSERT(file_mode_is(fl_tok, 0600) && row_generation("Root.Flinstone") == 1);
+    ASSERT(fl_session_change_password("Flinstone", "stone2", "flinstone") == FL_RESULT_OK);
+    /* With the token gone the password is not changed: the account would be locked out. */
+    ASSERT(rename(fl_tok, bob_tok) == 0);
+    ASSERT(fl_session_change_password("Flinstone", "flinstone", "stone2") == FL_RESULT_ERR);
+    ASSERT(!strcmp(s_audit, "kqst-reseal-refused:open"));
+    ASSERT(fl_session_verify_account_password("Flinstone", "flinstone"));
+    ASSERT(rename(bob_tok, fl_tok) == 0);
+
+    /* Root gets its token through the command, and sudo is co-signed by both real keys. */
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    ASSERT(cmd_kqst_run(2, make_argv) == 0);
+    ASSERT(!strcmp(s_audit, "kqst-made:generation=1"));
+    ASSERT(cmd_kqst_run(2, make_argv) != 0); /* it has one now */
+    unsetenv("FL_CMD_PASSWORD");
+    ASSERT(file_mode_is(root_tok, 0600));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo", "token"));
+    fl_session_drop_elevation();
+    ASSERT(fl_session_sudo_authenticate("root", "root") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
+    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo -i", "token"));
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    /* A password account's sign-in has the kernel make its token; the next sign-in uses it. */
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(file_mode_is(bob_tok, 0600) && row_generation("Root.Flinstone.Bob") == 1);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(fl_kq_open_account("Bob", "pw", NULL) == FL_KQ_ACCOUNT_OK);
+    /* An ancestor's reset gives Bob new keys: back to password sign-in, and the next sign-in makes
+     * a token that fits them (generation 2). */
+    ASSERT(fl_session_set_password("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob")->auth_mode == FL_USER_AUTH_PASSWORD);
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(row_generation("Root.Flinstone.Bob") == 2);
+    ASSERT(fl_kq_open_account("Bob", "pw", NULL) == FL_KQ_ACCOUNT_OK);
+
+    fl_session_set_login_hooks(NULL, NULL, NULL);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_save_users() == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label IN "
+                              "('Root','Root.Flinstone','Root.Flinstone.Bob');") == 0);
+    unlink(root_tok);
+    unlink(fl_tok);
+    unlink(bob_tok);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     fl_session_set_audit_hook(NULL);
     return 0;
@@ -2413,13 +2661,16 @@ static int test_identity_switch_denied_before_prompt(void) {
 
 int main(void) {
     char db_path[256];
+    char db_dir[] = "/tmp/fl_heritage_storeXXXXXX";
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
     char *jail_parent;
     int rc = 0;
 
     (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 1);
-    if (temp_db(db_path, sizeof db_path) != 0)
+    /* The store gets a directory of its own: the tokens the kernel makes go beside it. */
+    if (!mkdtemp(db_dir))
         return 1;
+    snprintf(db_path, sizeof db_path, "%s/users.db", db_dir);
     (void)setenv("FL_USERS_DB_PATH", db_path, 1);
     if (!mkdtemp(tmpl))
         return 1;
@@ -2453,6 +2704,7 @@ int main(void) {
     RUN(test_sudo_root_token);
     RUN(test_sudo_commands_need_root_token);
     RUN(test_kqst_enroll);
+    RUN(test_kqst_made_by_kernel);
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);
@@ -2463,7 +2715,7 @@ int main(void) {
         rc = 1;
     rmrf(jail_parent);
     free(jail_parent);
-    unlink(db_path);
+    rmrf(db_dir);
     if (rc == 0)
         printf("All heritage tests passed.\n");
     return rc;

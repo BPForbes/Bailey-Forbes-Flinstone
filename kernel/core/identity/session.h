@@ -106,6 +106,17 @@ fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
                                    const unsigned char signing_public[32],
                                    const unsigned char encryption_public[32], int64_t minted_at,
                                    int64_t *generation_out);
+/**
+ * Give the account name its slot token from the kernel itself: its own signing and box keys, opened
+ * with password, sealed with password to a fresh random device id into a KQST beside the account
+ * store, then paired and switched to token sign-in (as fl_session_enroll_kqst does, same rollback).
+ * The account keeps its keys. OK (generation_out, may be NULL), ACCES ("exists": it already has a
+ * token; "password"; "changed"), NOSYS (no driver can seal one: the freestanding image or a test
+ * stub), ERR ("no-key", "key", "seal", "store"), NOENT or INVAL. Audited as "kqst-made" or
+ * "kqst-make-refused". Called at the account's sign-in, by useradd, and by kqst enroll.
+ */
+fl_result_t fl_session_make_kqst(const char *name, const char *password, int64_t minted_at,
+                                 int64_t *generation_out);
 /** 1 when Root is a KQST-mode account, so sudo can ask for Root's password and token; 0 when Root
  *  is password-only, and sudo and sudo -i are refused. */
 int         fl_session_sudo_needs_root(void);

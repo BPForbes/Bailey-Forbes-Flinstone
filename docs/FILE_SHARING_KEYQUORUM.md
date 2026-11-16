@@ -718,7 +718,7 @@ changes that.
 picks the portable crypto backends) and links it with `kernel/drivers/keyquorum/kq_driver.c` and
 `kernel/freestanding/x86_64/kq_platform.c` (`KQ_FREESTANDING=0` builds the image without it). At boot the
 kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linked ABI
-(`FL_KQ_ABI_VERSION` 6), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
+(`FL_KQ_ABI_VERSION` 7), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
 (`fl_fs_kq_bind_identity`) only when that same check passes; on a mismatch the plain demo accounts stay.
 
 - **Size.** The image is 910 sectors (about 455 KiB; 942 with the security lab; gate 1024) and its bss ends at `0x9ae40` (`0x9ee20` with the
@@ -834,8 +834,8 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   the session asks again and refuses (`bridge-changed`) unless the factor and the bridge are still the same. The
   command asks for the bridge member only once the target's password (Root's for `sudo -i`) is verified, and
   refuses an over-long member name. `sudo` without a switch (`fl_session_sudo_authenticate`) asks for Root's
-  password and token, and is refused when Root has no token. Both `sudo` forms are co-authorised by the
-  invoker too (below). Every refusal is audited through the session's audit hook
+  password and token, and is refused when Root has no token. Both `sudo` forms are co-signed by Root's token and
+  the invoker's own key (below). Every refusal is audited through the session's audit hook
   (`su-refused` / `sudo-refused` and a reason word; never a password, key or token byte); the terminal shows the
   same `authentication failed` whatever the reason, except the `sudo` refusal for a Root with no token (below). `fl_session_set_user` stays an unchecked set for tests; the
   end of `su -c` uses `fl_session_restore_user`, which takes the old identity back only while the login it was
@@ -851,40 +851,69 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   password) and audited as `su-kqst-legacy`. Where the factor names a token, a KQST-mode account never switches
   on a password alone; where KeyQuorum names the password factor (the same branch, above or below), the target's
   password is the whole factor for a KQST-mode account too, because that is KeyQuorum's rule. On the default
-  image `sudo` and `sudo -i` are refused until Root is given its token with `kqst enroll` (below).
-- **Co-authorisation (owner decision on PR 416).** Each `sudo` and `sudo -i` is vouched for by two identities:
-  Root (the master identity), by its password and token as above, and the invoking account, by its own factor.
-  Logged in as Flinstone, `sudo` asks `[sudo] Root password:` and then `[sudo] Flinstone password:`; the second
-  password must be Flinstone's and, when Flinstone is a KQST account, also opens Flinstone's token. A
-  password-only invoker co-authorises with its password alone. Root invoking for itself gives Root's factor
-  once. Refusals are audited as `sudo-refused` with `invoker-password` or `invoker-kqst`; under the final lock
-  the invoker's mode and password are checked again (`mode`, `invoker-password` for `sudo`; `changed` for
-  `sudo -i`). A grant is audited as `sudo-coauth`, actor the invoker's key id, subject `Root`, detail
-  `sudo; invoker token` or `sudo; invoker password` (`sudo -i; ...` for the switch). The co-authorisation is
-  at authentication: the elevation token it grants lasts as it did before (its TTL, `sudo -k`), and every
-  command run under it is covered by that one event. It is not a cryptographic co-signature: no statement is
-  signed by both keys, because KeyQuorum exports no signing op for it (the account ops sign bridge requests
-  only, and using them for sudo would make a sudo signature a valid bridge request). A true co-signature needs a
-  KeyQuorum export with its own domain (for example a `kq_account_sudo_sign` / `_verify` pair over the action,
-  the two key ids and a fresh nonce) and an ABI and pin bump here.
-- **Giving an account its token (`kqst enroll`).** `keyquorum-device init <dir>` prints the device id;
-  `keyquorum-device provision <dir> --label <key id>` makes the slot token under `<dir>/vault/slot-<key id>/
-  token.kqst`, sealed under a passphrase it asks for, and prints the slot's `signing` and `encryption` public
-  keys. The passphrase must be the account's password. Logged in as that account, `kqst enroll <token.kqst>
-  <device-id> <signing-public> <encryption-public>` reads the password on the next line and calls
-  `fl_session_enroll_kqst` (`session.c`): the password must be the account's, the token must open with it and
-  match the three facts (`fl_kq_check_token`, KeyQuorum's `kq_slot_open`), and an account that already has a
-  token must open that one too, so a password alone never replaces a token. Then the `account_keys` row is
+  image the kernel gives Root its token itself at Root's first sign-in (below); until then `sudo` and `sudo -i`
+  are refused, and the terminal says to sign in as Root once or run `kqst enroll` as Root.
+- **Co-signature (owner decision on PR 416).** Each `sudo` and `sudo -i` is signed by two keys: Root's (the
+  master identity), from Root's token opened with Root's password, and the invoking account's own, opened with
+  its password (from its token when it is a KQST account, else its signing key sealed in the account store).
+  Logged in as Flinstone, `sudo` asks `[sudo] Root password:` and then `[sudo] Flinstone password:`.
+  `fl_kq_sudo_cosign` (`kq_account.c`) draws one fresh 16-byte nonce, has each key sign the action through the
+  driver's `sudo_sign` (KeyQuorum's `kq_sudo_sign`: domain `KQ-SUDO-COSIGN-v1`, the role, both key ids, the
+  signer, the action and the nonce, each length-prefixed; ABI 7), and grants only when `sudo_verify`
+  (`kq_sudo_verify`) accepts both halves under the public keys the account store holds: Root's pairing, and the
+  invoker's pairing or record. Keys that opened but are not the stored ones sign, and do not count. The action
+  signed is `sudo`, or `sudo -i <target key id>` for the switch. Root invoking for itself signs once. Refusals
+  are audited as `sudo-refused` with `invoker-password`, `invoker-kqst` (its token did not open),
+  `invoker-key` (its sealed key did not open), `kqst` (Root's token did not open) or `cosign` (no co-signing op,
+  or the pair did not verify); under the final lock the invoker's mode and password are checked again (`mode`,
+  `invoker-password` for `sudo`; `changed` for `sudo -i`). A grant is audited as `sudo-coauth`, actor the
+  invoker's key id, subject `Root`, detail `sudo; cosign=key|token; nonce=<32 hex digits>` (`sudo -i; ...` for
+  the switch). The signatures are made at authentication: the elevation token they grant lasts as it did before
+  (its TTL, `sudo -k`), and every command run under it is covered by that one event. The freestanding image has
+  no co-signing ops (NULL), and its `sudo` is separate code, unchanged.
+- **Tokens the kernel makes (owner decision on PR 416).** Nobody types a token path, device id or key: the kernel
+  gives each account its KQST itself (`fl_session_make_kqst`, `session.c`). The account's own signing and box keys,
+  opened with its password from the account store, are sealed with that password to a fresh random device id
+  (`fl_random_bytes`) by the driver's `slot_seal` (KeyQuorum's `kq_slot_seal`, ABI 7), and written owner-only
+  (0600, in a 0700 directory, through a temporary file, `fsync` and `rename`) to `<directory of the account
+  store>/kqst/<key id>.kqst` (`fl_kq_account_token_path`, `fl_kq_write_account_token`). The account keeps its
+  keys, so its identity, bridges and signatures are unchanged; the public keys the token yields are checked
+  against the record before anything is paired. Then the `account_keys` row is written and the account switches
+  to `FL_USER_AUTH_PASSWORD_KQST`, with the same rollback as `kqst enroll`. This happens when `useradd` creates an
+  account, when a password account signs in (its next sign-in uses the token), and on `kqst enroll` with no
+  arguments, which asks for the password. It is never done at `sudo` time, so `sudo` still needs a Root that
+  already has its token (FL-12). Nothing is made where no driver can seal (the freestanding image) or no key
+  service is running to take token sign-ins (a token sign-in fails closed without it, so a token would lock the
+  account out); a failure never blocks the sign-in or `useradd`, and the next sign-in tries again. Audited as
+  `kqst-made` (`generation=<n>`) or `kqst-make-refused` with `exists`, `no-driver`, `no-service`, `no-key`,
+  `password`, `key`, `store`, `seal` or `changed`. Security model: a token the kernel makes sits on the system
+  disk, sealed under the account's password (Argon2 inside `kq_slot_seal`), so it adds a second key and a
+  co-signature over every `sudo`, and an audit trail, but not a separate possession factor: whoever has both the
+  disk and the password has the token. For a token on its own device, the four-argument `kqst enroll` (below)
+  pairs one that `keyquorum-device provision` made instead.
+- **Password changes.** `passwd` on a KQST account re-seals its token (`fl_session_change_password`): the token
+  is opened with the current password, the new password is saved, and the same keys are sealed under the new
+  password to the same device id and path; if that fails, the old password is put back and saved and `passwd`
+  fails. A token that does not open (missing, or on a device not plugged in) refuses the change. Audited as
+  `kqst-resealed` or `kqst-reseal-refused` (`open`, `changed`, `store`, `seal`). An ancestor's reset
+  (`passwd <name>`) gives the account new keys, which the old token does not hold, so the account goes back to
+  password sign-in and its next sign-in makes a new token (the next generation).
+- **Giving an account a token kept elsewhere (`kqst enroll <token> ...`).** `keyquorum-device init <dir>` prints
+  the device id; `keyquorum-device provision <dir> --label <key id>` makes the slot token under
+  `<dir>/vault/slot-<key id>/token.kqst`, sealed under a passphrase it asks for, and prints the slot's `signing`
+  and `encryption` public keys. The passphrase must be the account's password. Logged in as that account,
+  `kqst enroll <token.kqst> <device-id> <signing-public> <encryption-public>` reads the password on the next line
+  and calls `fl_session_enroll_kqst` (`session.c`): the password must be the account's, the token must open with
+  it and match the three facts (`fl_kq_check_token`, KeyQuorum's `kq_slot_open`), and an account that already has
+  a token must open that one too, so a password alone never replaces a token. Then the `account_keys` row is
   written (`fl_user_db_kqst_register`: purpose `own`, minted by the account itself, the next generation, the
   token's full path so it stays on its device, no ledger entry yet) and the account switches to
   `FL_USER_AUTH_PASSWORD_KQST` and is saved; a failed save puts the row and the mode back. It needs no
   elevation, since the password and a token that opens with it are the proof, and it is only ever for the
   logged-in account. Audited as `kqst-enrol` (`generation=<n>`) or `kqst-enrol-refused` with `password`,
-  `old-kqst`, `kqst`, `changed`, `superseded` or `store`. Logged in as Root, this gives the master identity its
-  token, which is what lets `sudo` work. From then on Root's login needs the token too. `passwd` does not
-  re-seal a token: changing a KQST account's password leaves its token sealed under the old one, so the
-  account cannot log in, and `kqst enroll` refuses a new token too (the token it has no longer opens with the
-  new password). Re-sealing a token on a password change, or a recovery path for a lost token, is not built. `kqst status [name]` shows whether an account logs in with a token.
+  `old-kqst`, `kqst`, `changed`, `superseded` or `store`. A token made this way carries keys of its own, so
+  sudo is co-signed with the token's key, which the pairing names. A recovery path for a lost token is not
+  built. `kqst status [name]` shows whether an account logs in with a token.
 - **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
   facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
   signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any
@@ -900,7 +929,10 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
 - **Real tokens.** `make test_kq_real_token` mints three KQSTs (Bob, Ann and Root), a fourth device and a private bridge with the
   `keyquorum` CLI built from the submodule (not part of the default `make`; skipped with a message without it),
   opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), crosses
-  the bridge at `su`, enrols Root's token through `fl_session_enroll_kqst` and runs `sudo` co-authorised by
-  Root's and Bob's real tokens. The freestanding image has none of this (its access and bridge driver ops are NULL: the
+  the bridge at `su`, enrols Root's token through `fl_session_enroll_kqst` and runs `sudo` co-signed by
+  Root's and Bob's real tokens, then checks the real `sudo_sign` / `sudo_verify` directly (another action, swapped
+  halves, or Root's key in the invoker's place, fail). `make test_heritage` covers the tokens the kernel makes,
+  with the real driver: sealed, paired, opened, re-sealed by `passwd`, made at sign-in, and used for a co-signed
+  `sudo`. The freestanding image has none of this (its access and bridge driver ops are NULL: the
   SECFEAT image had no room for them). A bridge's reach (`fl_heritage_bridge_connects`) also goes through the
   driver (`bridge_connects`); no driver or no op does not connect.

@@ -243,6 +243,30 @@ struct fl_kq_driver {
                              const uint8_t (*unlocked_box_secret)[32],
                              const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
                              size_t minimum_devices, uint8_t seed_out[32]);
+
+    /*
+     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble.
+     * One-to-one over kq_sudo_sign / kq_sudo_verify (keyquorum_identity.h) and kq_slot_seal
+     * (keyquorum_slots.h), the KQ_ACCOUNT_* code (or 1/0 for verify) returned unchanged.
+     * sudo_sign signs one half of an elevation by invoker under authority (role KQ_SUDO_INVOKER
+     * with the invoker's own key, KQ_SUDO_AUTHORITY with Root's) over the action and a fresh
+     * 16-byte nonce; sudo_verify is 1 only when both halves verify under the public keys the
+     * caller's registry holds. slot_seal seals an account's own signing and box secrets with its
+     * password to a device id into a KQST (KQ_SLOT_TOKEN_LEN(strlen(label)) bytes) and returns the
+     * two public keys derived from them; the caller wipes the secrets. Hosted only: NULL in the
+     * freestanding image (no account store there), and a caller reads NULL as "refused".
+     */
+    int (*sudo_sign)(int role, const char *invoker, const char *authority, const uint8_t *action,
+                     size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],
+                     uint8_t sig_out[64]);
+    int (*sudo_verify)(const char *invoker, const char *authority, const uint8_t *action,
+                       size_t action_len, const uint8_t nonce[16], const uint8_t invoker_public[32],
+                       const uint8_t invoker_sig[64], const uint8_t authority_public[32],
+                       const uint8_t authority_sig[64]);
+    int (*slot_seal)(const char *label, const char *passphrase, const uint8_t device_id[16],
+                     const uint8_t signing_secret[32], const uint8_t encryption_secret[32],
+                     uint8_t *token_out, size_t cap, size_t *token_len,
+                     uint8_t signing_public_out[32], uint8_t encryption_public_out[32]);
 };
 
 /**

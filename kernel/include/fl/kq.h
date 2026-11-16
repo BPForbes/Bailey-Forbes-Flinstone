@@ -112,6 +112,44 @@ int fl_kq_check_token(const char *key_id, const char *password, const char *kqst
 /** Open and wipe both secrets; status only (for refusal checks and tooling). */
 int fl_kq_open_account(const char *user, const char *password, const char *kqst_path_or_null);
 
+/** Longest path of a token the kernel makes (the account store's FL_USER_KQST_PATH_MAX). */
+#define FL_KQ_TOKEN_PATH_MAX 512u
+/**
+ * Where the kernel keeps key_id's token: "<directory of db_path>/kqst/<key_id>.kqst". 0, or -1 when
+ * it does not fit in cap or key_id is empty or holds a '/'.
+ */
+int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap);
+/**
+ * Seal an account's own keys (signing_secret, box_secret) with password to device_id into a KQST
+ * and write it to path (owner-only, through "<path>.new" and a rename, so the old token stays
+ * whole if this fails). On KQ_ACCOUNT_OK the two public keys derived from the secrets are written
+ * for the store's pairing. The caller wipes the secrets. KQ_ACCOUNT_INVALID when the driver has no
+ * slot_seal (the freestanding image) or the file cannot be written.
+ */
+int fl_kq_write_account_token(const char *key_id, const char *password,
+                              const uint8_t signing_secret[32], const uint8_t box_secret[32],
+                              const unsigned char device_id[16], const char *path,
+                              unsigned char signing_public_out[32],
+                              unsigned char encryption_public_out[32]);
+
+/** fl_kq_sudo_cosign results. */
+#define FL_KQ_COSIGN_OK        0
+#define FL_KQ_COSIGN_AUTHORITY 1 /* Root's token did not open with Root's password */
+#define FL_KQ_COSIGN_INVOKER   2 /* the invoker's token or key did not open with its password */
+#define FL_KQ_COSIGN_SIGN      3 /* no driver op, no nonce, or a signature that did not verify */
+/**
+ * Co-sign a sudo (KeyQuorum's kq_sudo_sign / kq_sudo_verify): Root's token is opened with
+ * root_password and the invoker's key with invoker_password (its token when invoker_kqst, else its
+ * sealed signing key), a fresh nonce is drawn, both sign action, and both signatures must verify
+ * under the public keys the account store holds. On FL_KQ_COSIGN_OK nonce_out and the two
+ * signatures hold the record for the audit; otherwise the signatures are zeroed. Every secret is
+ * wiped before it returns. Called without the session lock.
+ */
+int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
+                      const char *root_name, const char *root_password, const char *action,
+                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
+                      uint8_t root_sig_out[64]);
+
 #ifdef __cplusplus
 }
 #endif

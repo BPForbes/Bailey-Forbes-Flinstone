@@ -78,6 +78,21 @@ static const fl_user_record_t *account(const char *name) {
     return fl_user_db_find(fl_session_user_db(), name);
 }
 
+/* Remove the token the kernel may have made for name at an earlier sign-in, and its pairing: a test
+ * of a token-mode account that has no token. */
+static void drop_token(const char *name) {
+    const fl_user_record_t *u = account(name);
+    fl_user_kqst_row_t none;
+    char tok[512];
+
+    if (!u)
+        return;
+    if (fl_user_db_kqst_path(fl_session_user_db(), u->key_id, tok, sizeof tok) == FL_RESULT_OK)
+        (void)unlink(tok);
+    memset(&none, 0, sizeof none);
+    (void)fl_user_db_kqst_row_restore(fl_session_user_db(), u->key_id, &none);
+}
+
 static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     uint8_t key[32], expect[32];
     kq_signing_mode_t mode = 0;
@@ -144,6 +159,7 @@ static int test_kqst_login_commits_only_after_token_open(void) {
     ASSERT(db && root);
     ASSERT(fl_session_login("Root", "root") == FL_RESULT_OK); /* known session before the KQST attempt */
     ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    drop_token("Flinstone"); /* the kernel may have made one at an earlier sign-in */
     ASSERT(sem_init(&s_kqst_gate_entered, 0, 0) == 0);
     ASSERT(sem_init(&s_kqst_gate_release, 0, 0) == 0);
     s_observer_saw[0] = '\0';
@@ -186,9 +202,14 @@ static int test_box_key_residency(void) {
     ASSERT(fl_kq_obtain_box_key(NULL, got) == FL_RESULT_INVAL && fl_kq_obtain_box_key(flin->key_id, NULL) == FL_RESULT_INVAL);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
     ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* wiped with the session */
+    /* The first sign-in had the kernel make Flinstone's token, so this one is a token sign-in: its
+     * box key comes online again, opened from the token, for the new session only. */
+    ASSERT(account("Flinstone")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
-    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* a new session starts without it */
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_OK && memcmp(got, box, 32) == 0);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
+    ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* wiped with the session */
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     mem_domain_secure_zero(box, sizeof box);
     mem_domain_secure_zero(got, sizeof got);
     return 0;
@@ -240,6 +261,7 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
 
     ASSERT(db && fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    drop_token("Flinstone"); /* the kernel may have made one at an earlier sign-in */
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_ACCES);
     ASSERT(fl_kq_service_online_count() == 0);
     ASSERT(fl_session_login("Flinstone", "wrong") == FL_RESULT_ACCES);
@@ -267,6 +289,7 @@ static int test_kqst_open_refusal_matrix(void) {
     flin = account("Flinstone");
     ASSERT(flin);
     ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    drop_token("Flinstone"); /* the kernel may have made one at an earlier sign-in */
 
     req = fl_kq_unlock_requirement("Flinstone", "Root", 0);
     ASSERT(req.factor == FL_KQ_ACCESS_KQST_PASSWORD); /* KeyQuorum: the target is Root */
@@ -980,6 +1003,7 @@ static int register_device(const char *label, unsigned char dev) {
     memset(id, dev, sizeof id);
     if (sqlite3_open(getenv("FL_USERS_DB_PATH"), &sql) != SQLITE_OK)
         return 0;
+    (void)sqlite3_busy_timeout(sql, 5000); /* the session's own connection may be writing */
     if (sqlite3_prepare_v2(sql,
                            "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
                            "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) "

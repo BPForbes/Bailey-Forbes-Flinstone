@@ -15,9 +15,13 @@
 #include "session.h"
 #include "user_db.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 fl_kq_requirement_t fl_kq_requirement_from_snapshot(const struct fl_user_record *current,
                                                    const struct fl_user_record *target, int sudo,
@@ -417,4 +421,196 @@ int fl_kq_open_account(const char *user, const char *password, const char *kqst_
 
     mem_domain_secure_zero(signing_secret, sizeof signing_secret);
     return st;
+}
+
+/*
+ * Tokens the kernel makes itself (PR 416, owner decision: the kernel provisions KeyQuorum tokens on
+ * its own). An account's KQST lives beside the account store, in "<store dir>/kqst/<key id>.kqst",
+ * owner-only. It seals the keys the account already has (its signing key and box key), so the
+ * account's public keys and everything it signed stay valid.
+ */
+int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap) {
+    const char *slash;
+    size_t dir_len;
+    int n;
+
+    if (!db_path || !key_id || !key_id[0] || !out || cap == 0 || strchr(key_id, '/'))
+        return -1;
+    slash = strrchr(db_path, '/');
+    dir_len = slash ? (size_t)(slash - db_path) : 0;
+    if (slash && dir_len == 0)
+        n = snprintf(out, cap, "/kqst/%s.kqst", key_id);
+    else if (slash)
+        n = snprintf(out, cap, "%.*s/kqst/%s.kqst", (int)dir_len, db_path, key_id);
+    else
+        n = snprintf(out, cap, "kqst/%s.kqst", key_id);
+    if (n < 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return -1;
+    }
+    return 0;
+}
+
+/* Write bytes to path through "<path>.new" (created owner-only, never over an existing file) and a
+ * rename, so a reader sees the old token or the new one, never part of one. */
+static int write_token_file(const char *path, const uint8_t *bytes, size_t len) {
+    char tmp[FL_KQ_TOKEN_PATH_MAX + 8];
+    char dir[FL_KQ_TOKEN_PATH_MAX];
+    const char *slash = strrchr(path, '/');
+    size_t off = 0;
+    int fd;
+
+    if (snprintf(tmp, sizeof tmp, "%s.new", path) >= (int)sizeof tmp)
+        return -1;
+    if (slash) {
+        size_t dlen = (size_t)(slash - path);
+
+        if (dlen >= sizeof dir)
+            return -1;
+        memcpy(dir, path, dlen);
+        dir[dlen] = '\0';
+        if (dlen && mkdir(dir, 0700) != 0 && errno != EEXIST)
+            return -1;
+    }
+    (void)unlink(tmp); /* a leftover of a cut-short run */
+    fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return -1;
+    while (off < len) {
+        ssize_t w = write(fd, bytes + off, len - off);
+
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w <= 0) {
+            close(fd);
+            unlink(tmp);
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    if (fsync(fd) != 0 || close(fd) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+int fl_kq_write_account_token(const char *key_id, const char *password,
+                              const uint8_t signing_secret[32], const uint8_t box_secret[32],
+                              const unsigned char device_id[16], const char *path,
+                              unsigned char signing_public_out[32],
+                              unsigned char encryption_public_out[32]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    uint8_t token[FL_KQ_SLOT_TOKEN_LEN(FL_HERITAGE_KEY_ID_MAX)];
+    size_t tlen = 0;
+    int st;
+
+    if (!drv || !drv->slot_seal)
+        return FL_KQ_ACCOUNT_INVALID;
+    if (!key_id || !password || !password[0] || !signing_secret || !box_secret || !device_id ||
+        !path || !path[0] || strlen(path) >= FL_KQ_TOKEN_PATH_MAX || !signing_public_out ||
+        !encryption_public_out)
+        return FL_KQ_ACCOUNT_INVALID;
+    st = drv->slot_seal(key_id, password, device_id, signing_secret, box_secret, token, sizeof token,
+                        &tlen, signing_public_out, encryption_public_out);
+    if (st == FL_KQ_ACCOUNT_OK && (tlen == 0 || tlen > sizeof token))
+        st = FL_KQ_ACCOUNT_INVALID;
+    if (st == FL_KQ_ACCOUNT_OK && write_token_file(path, token, tlen) != 0)
+        st = FL_KQ_ACCOUNT_INVALID;
+    mem_domain_secure_zero(token, sizeof token);
+    return st;
+}
+
+/*
+ * The signing secret an account co-signs a sudo with: its token's (opened with the password) for a
+ * KQST account, else its own signing key, sealed under the password in the account store. The
+ * public key it must verify under comes from the store too: the token's pairing, or the record's
+ * signing key. On FL_KQ_ACCOUNT_OK the secret is written (caller wipes); otherwise it is zeroed.
+ */
+static int open_cosigner(const char *name, const char *password, int kqst, uint8_t secret_out[32],
+                         unsigned char public_out[32], char key_id_out[FL_HERITAGE_KEY_ID_MAX]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    const fl_user_db_t *db = fl_session_user_db();
+    fl_user_record_t u;
+    unsigned char dev[16], enc_pub[32];
+    uint8_t box[32];
+    int st;
+
+    mem_domain_secure_zero(secret_out, 32);
+    if (!drv || !db || !name || !password || fl_session_snapshot_account(name, &u) != FL_RESULT_OK ||
+        !u.key_id[0])
+        return FL_KQ_ACCOUNT_INVALID;
+    snprintf(key_id_out, FL_HERITAGE_KEY_ID_MAX, "%s", u.key_id);
+    if (kqst) {
+        if (fl_user_db_kqst_pairing(db, u.key_id, dev, public_out, enc_pub) != FL_RESULT_OK)
+            return FL_KQ_ACCOUNT_INVALID;
+        st = fl_kq_open_account_keys(name, password, NULL, secret_out, box);
+        mem_domain_secure_zero(box, sizeof box);
+        mem_domain_secure_zero(&u, sizeof u);
+        return st;
+    }
+    if (!u.has_key || !drv->account_open) {
+        mem_domain_secure_zero(&u, sizeof u);
+        return FL_KQ_ACCOUNT_INVALID;
+    }
+    memcpy(public_out, u.signing_public, 32);
+    st = drv->account_open(password, u.signing_sealed, sizeof u.signing_sealed, secret_out);
+    mem_domain_secure_zero(&u, sizeof u);
+    if (st != FL_KQ_ACCOUNT_OK)
+        mem_domain_secure_zero(secret_out, 32);
+    return st;
+}
+
+int fl_kq_sudo_cosign(const char *invoker_name, const char *invoker_password, int invoker_kqst,
+                      const char *root_name, const char *root_password, const char *action,
+                      uint8_t nonce_out[16], uint8_t invoker_sig_out[64],
+                      uint8_t root_sig_out[64]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    char inv_key[FL_HERITAGE_KEY_ID_MAX], root_key[FL_HERITAGE_KEY_ID_MAX];
+    uint8_t inv_secret[32], root_secret[32];
+    unsigned char inv_pub[32], root_pub[32];
+    size_t alen;
+    int rc = FL_KQ_COSIGN_SIGN;
+
+    if (!nonce_out || !invoker_sig_out || !root_sig_out || !action)
+        return FL_KQ_COSIGN_SIGN;
+    mem_domain_zero(invoker_sig_out, 64);
+    mem_domain_zero(root_sig_out, 64);
+    alen = strlen(action);
+    if (!drv || !drv->sudo_sign || !drv->sudo_verify || alen == 0 || alen > FL_KQ_SUDO_ACTION_MAX)
+        return FL_KQ_COSIGN_SIGN;
+    if (open_cosigner(root_name, root_password, 1, root_secret, root_pub, root_key) !=
+        FL_KQ_ACCOUNT_OK) {
+        mem_domain_secure_zero(root_secret, sizeof root_secret);
+        return FL_KQ_COSIGN_AUTHORITY;
+    }
+    if (open_cosigner(invoker_name, invoker_password, invoker_kqst, inv_secret, inv_pub, inv_key) !=
+        FL_KQ_ACCOUNT_OK) {
+        rc = FL_KQ_COSIGN_INVOKER;
+        goto wipe;
+    }
+    if (fl_random_bytes(nonce_out, 16) != 0)
+        goto wipe;
+    if (drv->sudo_sign(FL_KQ_SUDO_INVOKER, inv_key, root_key, (const uint8_t *)action, alen,
+                       nonce_out, inv_secret, invoker_sig_out) != FL_KQ_ACCOUNT_OK ||
+        drv->sudo_sign(FL_KQ_SUDO_AUTHORITY, inv_key, root_key, (const uint8_t *)action, alen,
+                       nonce_out, root_secret, root_sig_out) != FL_KQ_ACCOUNT_OK)
+        goto wipe;
+    /* Verified against the store's public keys, never the ones just used: a token or sealed key
+     * that opened to some other key would sign, and must not count. */
+    if (drv->sudo_verify(inv_key, root_key, (const uint8_t *)action, alen, nonce_out, inv_pub,
+                         invoker_sig_out, root_pub, root_sig_out) == 1)
+        rc = FL_KQ_COSIGN_OK;
+wipe:
+    mem_domain_secure_zero(inv_secret, sizeof inv_secret);
+    mem_domain_secure_zero(root_secret, sizeof root_secret);
+    if (rc != FL_KQ_COSIGN_OK) {
+        mem_domain_zero(invoker_sig_out, 64);
+        mem_domain_zero(root_sig_out, 64);
+    }
+    return rc;
 }

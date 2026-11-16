@@ -36,7 +36,7 @@
 #define FL_CONTRACT_P4_9_KEYQUORUM_CONTRACT_DEFINED 1
 
 /** KeyQuorum files ABI this driver is built against (`KQ_FILE_ABI_VERSION`). */
-#define FL_KQ_ABI_VERSION 6
+#define FL_KQ_ABI_VERSION 7
 /** Valid signatures the host needs before it releases a letter: author and recipient. */
 #define FL_KQ_HOST_THRESHOLD 2u
 /** Conditions the recipient needs before it writes the file (`kq_file_readiness`). */
@@ -66,6 +66,13 @@
 #define FL_KQ_ACCOUNT_INVALID (-1)
 #define FL_KQ_ACCOUNT_NO_ROOM (-3)
 #define FL_KQ_ACCOUNT_WRONG_PASSWORD (-4)
+/* Co-signed sudo (`keyquorum_identity.h`, ABI 7): the two roles and the longest action, and the
+ * size of a KQST sealed for a key id of n bytes (`keyquorum_slots.h`). Copies, checked against
+ * KeyQuorum's by _Static_assert in kq_driver.c. */
+#define FL_KQ_SUDO_INVOKER 1
+#define FL_KQ_SUDO_AUTHORITY 2
+#define FL_KQ_SUDO_ACTION_MAX 4096u
+#define FL_KQ_SLOT_TOKEN_LEN(n) ((size_t)(4 + 1 + 16 + 12 + 16 + 2 + 16 + 32 + 32) + (size_t)(n))
 
 /* Access policy (`keyquorum_access.h`, ABI 4): the factor a login, `su` or `sudo` demands, and
  * bridge-proof statuses (`keyquorum_bridge.h`), a separate namespace. Copies, checked against

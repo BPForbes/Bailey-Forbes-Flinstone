@@ -48,6 +48,7 @@ int cmd_useradd_run(int argc, char **argv) {
     int64_t now = 0;
     fl_user_record_t added;
     int have_added = 0;
+    fl_result_t token_rc;
 
     if (ensure_privilege())
         return 1;
@@ -92,7 +93,8 @@ int cmd_useradd_run(int argc, char **argv) {
     }
     uid = fl_session_next_uid();
     rc = fl_session_add_user_under(creator, name, pass, uid, 0, now);
-    cmd_wipe_password(pw, sizeof(pw));
+    if (rc != FL_RESULT_OK)
+        cmd_wipe_password(pw, sizeof(pw));
     if (rc == FL_RESULT_BUSY) {
         fprintf(stderr, "useradd: %s already exists\n", name);
         return 1;
@@ -102,6 +104,7 @@ int cmd_useradd_run(int argc, char **argv) {
         return 1;
     }
     if (fl_session_save_users() != FL_RESULT_OK) {
+        cmd_wipe_password(pw, sizeof(pw));
         if (account_reload_db_from_disk() != 0) {
             fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
             return 1;
@@ -110,10 +113,22 @@ int cmd_useradd_run(int argc, char **argv) {
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
+    /*
+     * The kernel gives the new account its KeyQuorum token itself, sealed under the password just
+     * set (owner decision on PR 416). Without one the account still signs in with its password, and
+     * its first sign-in tries again.
+     */
+    token_rc = fl_session_make_kqst(name, pass, now, NULL);
+    cmd_wipe_password(pw, sizeof(pw));
     if (fl_session_snapshot_account(name, &added) == FL_RESULT_OK)
         have_added = 1;
     fl_audit_identity_event(creator, "useradd", have_added ? added.key_id : name, NULL);
     printf("useradd: added %s (uid=%u, key %s)\n", name, (unsigned)uid, have_added ? added.key_id : "?");
+    if (token_rc == FL_RESULT_OK)
+        printf("useradd: %s signs in with its password and its KeyQuorum token\n", name);
+    else if (token_rc != FL_RESULT_NOSYS)
+        fprintf(stderr, "useradd: could not make a KeyQuorum token for %s; its first sign-in tries again\n",
+                name);
     if (have_added && fs_jail_is_active()) {
         char home[4096];
 
@@ -281,7 +296,8 @@ int cmd_passwd_run(int argc, char **argv) {
     fl_audit_identity_event(actor, "passwd", target_key, NULL);
     printf("passwd: password updated for %s\n", user);
     if (rel != FL_HERITAGE_REL_SELF)
-        printf("passwd: %s has a new signing key; its bridges must be requested again\n", user);
+        printf("passwd: %s has a new signing key; its bridges must be requested again, and its next "
+               "sign-in makes it a new KeyQuorum token\n", user);
     return 0;
 }
 

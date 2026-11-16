@@ -34,6 +34,10 @@ _Static_assert(FL_KQ_ACCOUNT_INVALID == KQ_ACCOUNT_INVALID, "account INVALID dif
 _Static_assert(FL_KQ_ACCOUNT_NO_ROOM == KQ_ACCOUNT_NO_ROOM, "account NO_ROOM differs");
 _Static_assert(FL_KQ_ACCOUNT_WRONG_PASSWORD == KQ_ACCOUNT_WRONG_PASSWORD,
                "account WRONG_PASSWORD differs");
+_Static_assert(FL_KQ_SUDO_INVOKER == KQ_SUDO_INVOKER, "sudo INVOKER differs");
+_Static_assert(FL_KQ_SUDO_AUTHORITY == KQ_SUDO_AUTHORITY, "sudo AUTHORITY differs");
+_Static_assert(FL_KQ_SUDO_ACTION_MAX == KQ_SUDO_ACTION_MAX, "sudo action limit differs");
+_Static_assert(FL_KQ_SLOT_TOKEN_LEN(7) == KQ_SLOT_TOKEN_LEN(7), "slot token length differs");
 _Static_assert(FL_KQ_ACCESS_NONE == KQ_ACCESS_NONE, "access NONE differs");
 _Static_assert(FL_KQ_ACCESS_PASSWORD == KQ_ACCESS_PASSWORD, "access PASSWORD differs");
 _Static_assert(FL_KQ_ACCESS_KQST_PASSWORD == KQ_ACCESS_KQST_PASSWORD, "access KQST_PASSWORD differs");
@@ -405,6 +409,29 @@ static int drv_assembly_assemble(const uint8_t *assembly, size_t alen,
                                 unlocked_box_secret, unlocked_device_id, nunlocked,
                                 minimum_devices, seed_out);
 }
+
+/* Co-signed sudo and token sealing (ABI 7): hosted only, like the ops above. */
+static int drv_sudo_sign(int role, const char *invoker, const char *authority,
+                         const uint8_t *action, size_t action_len, const uint8_t nonce[16],
+                         const uint8_t secret[32], uint8_t sig_out[64]) {
+    return kq_sudo_sign(role, invoker, authority, action, action_len, nonce, secret, sig_out);
+}
+
+static int drv_sudo_verify(const char *invoker, const char *authority, const uint8_t *action,
+                           size_t action_len, const uint8_t nonce[16],
+                           const uint8_t invoker_public[32], const uint8_t invoker_sig[64],
+                           const uint8_t authority_public[32], const uint8_t authority_sig[64]) {
+    return kq_sudo_verify(invoker, authority, action, action_len, nonce, invoker_public,
+                          invoker_sig, authority_public, authority_sig);
+}
+
+static int drv_slot_seal(const char *label, const char *passphrase, const uint8_t device_id[16],
+                         const uint8_t signing_secret[32], const uint8_t encryption_secret[32],
+                         uint8_t *token_out, size_t cap, size_t *token_len,
+                         uint8_t signing_public_out[32], uint8_t encryption_public_out[32]) {
+    return kq_slot_seal(label, passphrase, device_id, signing_secret, encryption_secret,
+                        token_out, cap, token_len, signing_public_out, encryption_public_out);
+}
 #endif
 
 static const fl_driver_ops_t s_kq_lifecycle = {
@@ -468,6 +495,9 @@ static const fl_kq_driver_t s_kq_driver = {
     .assembly_split = drv_assembly_split,
     .assembly_generation = drv_assembly_generation,
     .assembly_assemble = drv_assembly_assemble,
+    .sudo_sign = drv_sudo_sign,
+    .sudo_verify = drv_sudo_verify,
+    .slot_seal = drv_slot_seal,
 #endif
 };
 

@@ -62,7 +62,8 @@ below it, never for an account above it, a sibling or another branch.
 | `bridge revoke <id>` | Either side, or an ancestor of either |
 | `bridge assembly <parent> [--reissue]` | An elevated session, for the parent or an ancestor: deals the parent's signing seed among its child accounts (KeyQuorum parent-key assembly, stored in `account_assembly`) so the parent can sign while only enough children are online. `--reissue` is refused: the account store has no signing-key rotation that keeps the password (see `docs/FILE_SHARING_KEYQUORUM.md`) |
 | `bridge kq-import <store> <uid> [--roster-only]` | An elevated session, for the logged-in account: copies a KeyQuorum **private** bridge into the account store (see `docs/FILE_SHARING_KEYQUORUM.md`, Bridges) |
-| `kqst enroll <token> <device> <signing> <encryption>` | The logged-in account, for itself only (no elevation: its password and a token that opens with it are the proof). Pairs the account with its KeyQuorum slot token (KQST) and switches it to password-and-token login; logged in as Root, this is how Root gets its token (see `docs/FILE_SHARING_KEYQUORUM.md`, "Giving an account its token") |
+| `kqst enroll` | The logged-in account, for itself only (no elevation: its password is the proof). The kernel seals the account's own keys into a KeyQuorum slot token (KQST) beside the account store, pairs it and switches the account to password-and-token login. Usually not needed: `useradd` and an account's first sign-in do the same (see `docs/FILE_SHARING_KEYQUORUM.md`, "Tokens the kernel makes") |
+| `kqst enroll <token> <device> <signing> <encryption>` | The logged-in account, for itself only (no elevation: its password and a token that opens with it are the proof). Pairs the account with a KQST kept elsewhere, such as on a USB stick (see `docs/FILE_SHARING_KEYQUORUM.md`, "Giving an account a token kept elsewhere") |
 | `kqst [status [name]]` | Anyone: whether an account logs in with a token, and the token's device id |
 
 ## Account homes (jail)
@@ -86,10 +87,12 @@ elevated session cannot reach another branch's home without a bridge. `sudo` and
 (which becomes Root) ask for what KeyQuorum's access rule names: Root's password and Root's
 slot token, never the caller's own password in its place. A password-only Root has no token, so both are
 refused (an already elevated account needs no `sudo` elevation, as before, but its `sudo -i`
-is refused too) until Root is a KQST account (owner decision, FL-12 #403): `kqst enroll`, logged
-in as Root, gives Root its token. Beside Root's factor, every `sudo` and `sudo -i` is
-co-authorised by the invoking account: its own password, and its own token too when it is a
-KQST account (owner decision on PR 416; see `FILE_SHARING_KEYQUORUM.md`, "Login, `su` and `sudo`"). `sudo -i` is recorded as a
+is refused too) until Root is a KQST account (owner decision, FL-12 #403). The kernel makes each
+account's token itself (owner decision on PR 416): at `useradd`, at the account's first sign-in,
+or on `kqst enroll`, so Root has its token once Root has signed in once. Every `sudo` and
+`sudo -i` is then co-signed: Root's token and the invoking account's own key (its token's, for a
+KQST account) each sign the action with one fresh nonce, and both signatures must verify under the
+keys the account store holds (see `FILE_SHARING_KEYQUORUM.md`, "Co-signature"). `sudo -i` is recorded as a
 `type=identity event=sudo-i` audit line. Homes are created
 owner-only on `useradd`, `profile` and `su -`, which now starts in the account's home.
 
@@ -167,7 +170,7 @@ not repeat it. Public offers (`-all`) are not gated by it.
   for yourself and accounts below you, its bridges. `login` now prints the key id.
 - With `FL_AUDIT=1`, every `type=shell` and `type=authz` audit line carries
   `actor=<key id>`, and account changes add `type=identity` lines
-  (`event=useradd|userdel|passwd|bridge-request|bridge-accept|bridge-revoke|kqst-enrol|sudo-coauth`,
+  (`event=useradd|userdel|passwd|bridge-request|bridge-accept|bridge-revoke|kqst-enrol|kqst-made|kqst-resealed|sudo-coauth`,
   `subject=<key id>`, `detail=bridge=<id>`). No password ever reaches the audit trail. The
   FL1 command-history format is unchanged.
 

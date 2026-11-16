@@ -162,7 +162,8 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (!fl_session_sudo_needs_root()) {
         rc = fl_session_sudo_authenticate(NULL, NULL);
         if (rc != FL_RESULT_OK) {
-            fprintf(stderr, "sudo: Root has no KeyQuorum token (KQST); sudo needs Root's password and token\n");
+            fprintf(stderr, "sudo: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
+                            "`kqst enroll` as Root, and the kernel makes it\n");
             return 1;
         }
     } else {
@@ -171,7 +172,7 @@ int cmd_sudo_require_auth_reason(const char *reason) {
             fprintf(stderr, "sudo: password read failed\n");
             return 1;
         }
-        /* Co-authorisation (owner decision on PR 416): the invoker vouches for the action too. */
+        /* Co-signature (owner decision on PR 416): the invoker's key signs the action beside Root's. */
         if (cmd_read_invoker_password("sudo", mine, sizeof(mine), &asked) != 0) {
             cmd_wipe_password(pw, sizeof(pw));
             fprintf(stderr, "sudo: password read failed\n");
@@ -306,8 +307,8 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     if (rc != FL_RESULT_OK) {
         /* One message for every other refusal; the reason is in the audit only. */
         if (no_root_token)
-            fprintf(stderr, "%s: Root has no KeyQuorum token (KQST); sudo -i needs Root's password and token\n",
-                    cmd);
+            fprintf(stderr, "%s: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
+                            "`kqst enroll` as Root, and the kernel makes it\n", cmd);
         else
             fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;

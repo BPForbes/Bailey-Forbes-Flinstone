@@ -2,9 +2,14 @@
  * kqst: pair an account with its KeyQuorum slot token (KQST).
  *
  *   kqst [status [account]]   whether the account logs in with a token, and the device it is on
+ *   kqst enroll               the kernel makes this account's token itself and pairs it
  *   kqst enroll <token> <device-id> <signing-public> <encryption-public>
  *
- * enroll pairs the logged-in account with a token that `keyquorum-device provision <dir> --label
+ * Accounts normally never need this: the kernel seals each account's own keys into a token kept
+ * beside the account store when the account is created and when a password account signs in
+ * (owner decision on PR 416). `kqst enroll` with no arguments does the same on demand, after
+ * reading the password. The four-argument form is the fallback for a token kept elsewhere, such as
+ * on a USB stick: it pairs the logged-in account with a token that `keyquorum-device provision <dir> --label
  * <key id>` made: its file, the device id `keyquorum-device init` printed, and the two public keys
  * provision printed. The token must open with the account's password, which is read on the next
  * line, and match those facts; an account that already has a token must open that one too. The
@@ -95,7 +100,7 @@ static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_h
         printf("kqst: %s (%s) now logs in with its password and token (generation %lld)\n", name, key,
                (long long)generation);
         if (!strcmp(key, FL_HERITAGE_ROOT_KEY))
-            printf("kqst: sudo now asks for Root's password and token, and the caller's own password\n");
+            printf("kqst: sudo now asks for Root's password and the caller's, and both tokens co-sign it\n");
         return 0;
     case FL_RESULT_BUSY:
         fprintf(stderr, "kqst: the login changed meanwhile; nothing was paired\n");
@@ -106,6 +111,43 @@ static int kqst_enroll(const char *token, const char *dev_hex, const char *sig_h
     default:
         /* One message for every refusal; the reason is in the audit only. */
         fprintf(stderr, "kqst: the token did not open with this account's password and those facts\n");
+        return 1;
+    }
+}
+
+/* kqst enroll with no arguments: the kernel makes and pairs the logged-in account's token. */
+static int kqst_make(void) {
+    char name[FL_USER_NAME_MAX], key[FL_HERITAGE_KEY_ID_MAX], pw[256];
+    int64_t now = 0, generation = 0;
+    fl_result_t rc;
+
+    snprintf(name, sizeof name, "%s", fl_session_current_user());
+    snprintf(key, sizeof key, "%s", fl_session_current_key_id());
+    if (cmd_read_password("Password: ", pw, sizeof pw) != 0) {
+        cmd_wipe_password(pw, sizeof pw);
+        fprintf(stderr, "kqst: password read failed\n");
+        return 1;
+    }
+    if (fl_time_wall_sec(&now) != FL_RESULT_OK)
+        now = 0;
+    rc = fl_session_make_kqst(name, pw, now, &generation);
+    cmd_wipe_password(pw, sizeof pw);
+    switch (rc) {
+    case FL_RESULT_OK:
+        printf("kqst: %s (%s) now logs in with its password and token (generation %lld)\n", name, key,
+               (long long)generation);
+        if (!strcmp(key, FL_HERITAGE_ROOT_KEY))
+            printf("kqst: sudo now asks for Root's password and the caller's, and both tokens co-sign it\n");
+        return 0;
+    case FL_RESULT_NOSYS:
+        fprintf(stderr, "kqst: this build has no KeyQuorum driver to make a token with\n");
+        return 1;
+    case FL_RESULT_ERR:
+        fprintf(stderr, "kqst: could not make or save the token; nothing was paired\n");
+        return 1;
+    default:
+        /* One message for every refusal; the reason is in the audit only. */
+        fprintf(stderr, "kqst: %s already has a token, or the password is wrong\n", name);
         return 1;
     }
 }
@@ -121,9 +163,12 @@ int cmd_kqst_run(int argc, char **argv) {
 
         return kqst_status(who);
     }
+    if (!strcmp(argv[1], "enroll") && argc == 2)
+        return kqst_make();
     if (!strcmp(argv[1], "enroll") && argc == 6)
         return kqst_enroll(argv[2], argv[3], argv[4], argv[5]);
     fprintf(stderr, "usage: kqst [status [account]]\n"
+                    "       kqst enroll\n"
                     "       kqst enroll <token.kqst> <device-id> <signing-public> <encryption-public>\n");
     return 1;
 }

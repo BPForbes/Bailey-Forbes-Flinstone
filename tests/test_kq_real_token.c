@@ -24,7 +24,7 @@
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL [%s:%d]: %s\n", __FILE__, __LINE__, #c); return 1; } } while (0)
 
 static char s_bob_pw[128], s_ann_pw[128], s_root_pw[128];
-static char s_audit_last[64];
+static char s_audit_last[128];
 
 static const char *env(const char *name) {
     const char *v = getenv(name);
@@ -801,7 +801,7 @@ static int test_parent_key_assembly(void) {
 
 /*
  * Root's own real KQST, paired through the store's enrolment path (owner decision on PR 416), then
- * sudo co-authorised by two real tokens: Root's (Root's passphrase) and the invoker Bob's (Bob's).
+ * sudo co-signed by two real tokens: Root's (Root's passphrase) and the invoker Bob's (Bob's).
  */
 static int test_root_enrol_and_sudo(void) {
     unsigned char dev[16], sig[32], enc[32], wrong[32];
@@ -837,9 +837,48 @@ static int test_root_enrol_and_sudo(void) {
     ASSERT(fl_session_sudo_authenticate(s_root_pw, s_ann_pw) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit_last, "sudo-refused:invoker-password"));
     ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
-    ASSERT(!strcmp(s_audit_last, "sudo-coauth:sudo; invoker token"));
+    /* Co-signed: Bob's token and Root's each signed "sudo" with one nonce, and KeyQuorum verified
+     * both halves under the public keys the store pairs with them. */
+    {
+        static const char want[] = "sudo-coauth:sudo; cosign=token; nonce=";
+        const char *nonce = s_audit_last + sizeof want - 1;
+
+        ASSERT(!strncmp(s_audit_last, want, sizeof want - 1));
+        ASSERT(strlen(nonce) == 32 && strspn(nonce, "0123456789abcdef") == 32);
+    }
     ASSERT(fl_session_has_elevation());
     fl_session_drop_elevation();
+    {
+        /* The real ops directly: a half signed by the wrong key, or for another action, fails. */
+        const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
+        uint8_t bob_sec[32], root_sec[32], bob_box[32], root_box[32], nonce[16], s_inv[64], s_auth[64];
+        unsigned char d[16], bob_pub[32], root_pub[32], e[32];
+        const fl_user_record_t *bob = fl_user_db_find(fl_session_user_db(), "Bob");
+        static const uint8_t act[] = "sudo", other[] = "sudo -i Root";
+
+        ASSERT(bob && kq && kq->sudo_sign && kq->sudo_verify);
+        ASSERT(fl_user_db_kqst_pairing(fl_session_user_db(), bob->key_id, d, bob_pub, e) == FL_RESULT_OK);
+        ASSERT(fl_user_db_kqst_pairing(fl_session_user_db(), "Root", d, root_pub, e) == FL_RESULT_OK);
+        ASSERT(fl_kq_open_account_keys("Bob", s_bob_pw, NULL, bob_sec, bob_box) == FL_KQ_ACCOUNT_OK);
+        ASSERT(fl_kq_open_account_keys("Root", s_root_pw, NULL, root_sec, root_box) == FL_KQ_ACCOUNT_OK);
+        memset(nonce, 7, sizeof nonce);
+        ASSERT(kq->sudo_sign(FL_KQ_SUDO_INVOKER, bob->key_id, "Root", act, 4, nonce, bob_sec, s_inv) ==
+               FL_KQ_ACCOUNT_OK);
+        ASSERT(kq->sudo_sign(FL_KQ_SUDO_AUTHORITY, bob->key_id, "Root", act, 4, nonce, root_sec, s_auth) ==
+               FL_KQ_ACCOUNT_OK);
+        ASSERT(kq->sudo_verify(bob->key_id, "Root", act, 4, nonce, bob_pub, s_inv, root_pub, s_auth) == 1);
+        ASSERT(kq->sudo_verify(bob->key_id, "Root", other, sizeof other - 1, nonce, bob_pub, s_inv,
+                               root_pub, s_auth) == 0);
+        ASSERT(kq->sudo_verify(bob->key_id, "Root", act, 4, nonce, bob_pub, s_auth, root_pub, s_inv) == 0);
+        /* Root's key alone, signing both halves, is not a co-signature. */
+        ASSERT(kq->sudo_sign(FL_KQ_SUDO_INVOKER, bob->key_id, "Root", act, 4, nonce, root_sec, s_inv) ==
+               FL_KQ_ACCOUNT_OK);
+        ASSERT(kq->sudo_verify(bob->key_id, "Root", act, 4, nonce, bob_pub, s_inv, root_pub, s_auth) == 0);
+        kq->wipe(bob_sec, 32);
+        kq->wipe(root_sec, 32);
+        kq->wipe(bob_box, 32);
+        kq->wipe(root_box, 32);
+    }
     return 0;
 }
 
