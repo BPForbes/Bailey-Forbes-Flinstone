@@ -200,18 +200,29 @@
   function guestUserNameOk(name) {
     return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,14}$/.test(name);
   }
-  function guestRegisterLines(name, password) {
-    if (!guestUserNameOk(name)) return "";
+  // switchuser follows su (owner decision, FL-14 #406): the session's own account is free, another
+  // account asks for its password. Each helper returns steps: { line, secret }. A secret step answers
+  // the guest's Password: prompt, and the page sends it only once that prompt has appeared.
+  const sameUser = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+  function switchSteps(name, password, currentUser) {
+    const steps = [{ line: `switchuser ${name}`, secret: false }];
+    if (!sameUser(name, currentUser)) steps.push({ line: String(password || ""), secret: true });
+    return steps;
+  }
+  function guestRegisterLines(name, password, rootPassword, currentUser) {
+    if (!guestUserNameOk(name)) return [];
     const secret = String(password || name).trim() || name;
-    return `switchuser Root\nuseradd ${name}\n${secret}\n`;
+    return switchSteps("Root", rootPassword, currentUser).concat(
+      { line: `useradd ${name}`, secret: false }, { line: secret, secret: true });
   }
-  function guestSwitchLines(name) {
-    if (!guestUserNameOk(name)) return "";
-    return `switchuser ${name}\n`;
+  function guestSwitchLines(name, password, currentUser) {
+    if (!guestUserNameOk(name)) return [];
+    return switchSteps(name, password, currentUser);
   }
-  function guestNewSessionLines(name) {
+  function guestNewSessionLines(name, password) {
+    // A new session starts as Flinstone.
     const user = guestUserNameOk(name) ? name : "Flinstone";
-    return `session new\nswitchuser ${user}\n`;
+    return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
   return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };

@@ -78,10 +78,22 @@ assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv 
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
-assert.strictEqual(guestRegisterLines("alice", "secret"), "switchuser Root\nuseradd alice\nsecret\n");
-assert.strictEqual(guestSwitchLines("alice"), "switchuser alice\n");
-assert.strictEqual(guestNewSessionLines("alice"), "session new\nswitchuser alice\n");
-assert.strictEqual(guestNewSessionLines(""), "session new\nswitchuser Flinstone\n");
+{
+  // switchuser follows su (FL-14 #406): own account free, another account asks its password.
+  // Passwords are drawn at run time; a secret step is only ever the answer to Password:.
+  const draw = () => require("crypto").randomBytes(9).toString("hex");
+  const pw = draw(), rootPw = draw();
+  const step = (line, secret = false) => ({ line, secret });
+  assert.deepStrictEqual(guestRegisterLines("alice", pw, rootPw, "Flinstone"),
+    [step("switchuser Root"), step(rootPw, true), step("useradd alice"), step(pw, true)]);
+  assert.deepStrictEqual(guestRegisterLines("alice", pw, rootPw, "root"),
+    [step("switchuser Root"), step("useradd alice"), step(pw, true)]);
+  assert.deepStrictEqual(guestRegisterLines("bad user", pw, rootPw, "Flinstone"), []);
+  assert.deepStrictEqual(guestSwitchLines("alice", pw, "Flinstone"), [step("switchuser alice"), step(pw, true)]);
+  assert.deepStrictEqual(guestSwitchLines("Alice", pw, "alice"), [step("switchuser Alice")]);
+  assert.deepStrictEqual(guestNewSessionLines("alice", pw), [step("session new"), step("switchuser alice"), step(pw, true)]);
+  assert.deepStrictEqual(guestNewSessionLines("", pw), [step("session new"), step("switchuser Flinstone")]);
+}
 assert(!guestUserNameOk("bad user"));
 assert(isFormTypingTarget({ nodeType: 1, tagName: "INPUT", isContentEditable: false }));
 assert(!isFormTypingTarget({ nodeType: 1, tagName: "DIV", isContentEditable: false }));
@@ -96,6 +108,8 @@ assert(labJsSrc.includes("shell>"), "guest-line waits must accept the WASM shell
 assert(!/account-login", "account-new-session", "account-register", "account-name", "account-secret"/.test(labJsSrc),
   "account name/password fields must stay enabled so Playwright and operators can type before Ready");
 assert(labJsSrc.includes("syncRelayPrincipal"), "switchuser must reconnect the relay seat");
+assert(labJsSrc.includes("step.secret && !asked"), "a password step is sent only after the guest asks for one");
+assert(labJsSrc.includes("account-root-secret"), "Register user must ask for Root's password");
 assert(labJsSrc.includes("sendingMsg"), "chat submit must ignore a second submit while sending");
 assert(labJsSrc.includes("void connectRelay()"), "Ready must auto-join the shared chat room");
 assert.strictEqual(

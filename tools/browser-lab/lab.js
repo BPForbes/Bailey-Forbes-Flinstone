@@ -635,18 +635,34 @@
     await enqueueGuest(() => emulator.sendText(value));
     return true;
   }
+  // script: a string of plain command lines, or [{ line, secret }] steps from lab-core. A secret
+  // step (a password) is sent only when the guest has just asked for one, so a password is never
+  // typed as a command; otherwise nothing more is sent.
   async function sendGuestLines(script, patterns) {
     if (!guestReady()) {
       text("account-status", "Guest is not ready — wait for Ready, then retry.");
       return false;
     }
-    const lines = String(script || "").split("\n");
-    if (lines[lines.length - 1] === "") lines.pop();
-    for (let i = 0; i < lines.length; i++) {
+    let steps = script;
+    if (!Array.isArray(steps)) {
+      const lines = String(script || "").split("\n");
+      if (lines[lines.length - 1] === "") lines.pop();
+      steps = lines.map(line => ({ line, secret: false }));
+    }
+    let asked = false;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.secret && !asked) {
+        text("account-status", "The guest did not ask for a password, so nothing more was sent.");
+        return false;
+      }
       const from = serialTail.length;
-      if (!await sendGuest(`${lines[i]}\n`)) return false;
+      if (!await sendGuest(`${step.line}\n`)) return false;
       const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
       await waitSerial(pattern, 4000, from);
+      const said = serialTail.slice(from);
+      asked = /Password:/.test(said);
+      if (/unknown user|authentication failed/.test(said)) return false;
     }
     return true;
   }
@@ -877,36 +893,41 @@
 
   const form = document.getElementById("switch-user");
   if (form) {
+    const accountName = () => document.getElementById("account-name").value.trim();
+    const accountPassword = () => document.getElementById("account-secret")?.value || "";
     form.addEventListener("submit", async event => {
       event.preventDefault();
-      const name = document.getElementById("account-name").value.trim();
-      const script = core.guestSwitchLines(name);
-      if (!script) return;
-      await sendGuestLines(script, [/SWITCHUSER user=|unknown user/]);
+      const steps = core.guestSwitchLines(accountName(), accountPassword(), principal());
+      if (!steps.length) return;
+      await sendGuestLines(steps, [/Password:|SWITCHUSER user=|unknown user/, /SWITCHUSER user=|authentication failed/]);
       screen.focus();
     });
     document.getElementById("account-new-session").onclick = async () => {
-      const name = document.getElementById("account-name").value.trim();
-      await sendGuestLines(core.guestNewSessionLines(name), [
+      await sendGuestLines(core.guestNewSessionLines(accountName(), accountPassword()), [
         /SESSION \d+ user=/,
-        /SWITCHUSER user=|unknown user/,
+        /Password:|SWITCHUSER user=|unknown user/,
+        /SWITCHUSER user=|authentication failed/,
       ]);
       screen.focus();
     };
     document.getElementById("account-register")?.addEventListener("click", async () => {
-      const name = document.getElementById("account-name").value.trim();
-      const secret = document.getElementById("account-secret")?.value || name;
-      const script = core.guestRegisterLines(name, secret);
-      if (!script) return;
+      const name = accountName();
+      // Registering is Root's: the page asks for Root's password, as the guest does.
+      const rootPassword = document.getElementById("account-root-secret")?.value || "";
+      const steps = core.guestRegisterLines(name, accountPassword() || name, rootPassword, principal());
+      if (!steps.length) return;
       const from = serialTail.length;
-      const sent = await sendGuestLines(script, [
-        /SWITCHUSER user=Root|unknown user/,
-        /Password:|unknown command|need elevation|usage:/,
-        /\bok\b|authentication failed/,
-      ]);
+      const patterns = steps.map(step => step.line.startsWith("switchuser ")
+        ? /Password:|SWITCHUSER user=Root|unknown user/
+        : step.line.startsWith("useradd ")
+          ? /Password:|unknown command|need elevation|usage:/
+          : /\bok\b|authentication failed|SWITCHUSER user=Root/);
+      const sent = await sendGuestLines(steps, patterns);
       const chunk = serialTail.slice(from);
       if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
         rememberUser(name);
+      if (!sent && /authentication failed/.test(chunk))
+        text("account-status", "That password was not accepted.");
       renderSessions();
       screen.focus();
     });

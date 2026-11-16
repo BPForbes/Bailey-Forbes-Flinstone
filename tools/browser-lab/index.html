@@ -110,11 +110,12 @@
           </section>
           <section class="accounts glass-card" aria-label="Users and sessions">
             <h2>Users and sessions</h2>
-            <p>Built-in accounts are <code>Flinstone</code> and <code>Root</code> (names match regardless of case). Register a lab user (as Root), then switch or open a new session as that user.</p>
+            <p>Built-in accounts are <code>Flinstone</code> and <code>Root</code> (names match regardless of case). Register a lab user (it asks for Root's password), then switch or open a new session as that user with its password.</p>
             <div id="session-tabs"></div>
             <form id="switch-user">
               <label>User <input id="account-name" name="account" autocomplete="username" value="Root"></label>
               <label>Password <input id="account-secret" name="secret" type="password" autocomplete="new-password" value="root"></label>
+              <label>Root password (to register) <input id="account-root-secret" name="root-secret" type="password" autocomplete="off" value="root"></label>
               <button id="account-login" type="submit">Switch user</button>
               <button id="account-new-session" type="button">New session as user</button>
               <button id="account-register" type="button">Register user</button>

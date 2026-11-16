@@ -32,7 +32,8 @@ async function openLab(name) {
   await page.locator("#status").filter({ hasText: /^Ready$/ }).waitFor({ timeout: 90000 });
   // A visitor registers their own user (built-in accounts publish no keys) and switches to it.
   await page.fill("#account-name", name);
-  await page.fill("#account-secret", name);
+  // The account's password is drawn at run time; Register asks for Root's (the public demo seed).
+  await page.fill("#account-secret", require("crypto").randomBytes(9).toString("hex"));
   await page.click("#account-register");
   await page.waitForFunction(n => (document.getElementById("wasm-term")?.textContent || "").includes(`useradd ${n}`),
                              name, { timeout: 20000 });
