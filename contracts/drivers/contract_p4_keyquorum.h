@@ -66,17 +66,15 @@
 #define FL_KQ_ACCOUNT_INVALID (-1)
 #define FL_KQ_ACCOUNT_NO_ROOM (-3)
 #define FL_KQ_ACCOUNT_WRONG_PASSWORD (-4)
-/* Co-signed sudo (`keyquorum_identity.h`, ABI 7): the two roles and the longest action, and the
- * size of a KQST sealed for a key id of n bytes (`keyquorum_slots.h`). Copies, checked against
- * KeyQuorum's by _Static_assert in kq_driver.c. */
+/* Co-signed sudo roles, longest action and KQST size for a key id of n bytes (ABI 7). Copies of
+ * KeyQuorum's values, checked by _Static_assert in kq_driver.c. */
 #define FL_KQ_SUDO_INVOKER 1
 #define FL_KQ_SUDO_AUTHORITY 2
 #define FL_KQ_SUDO_ACTION_MAX 4096u
 #define FL_KQ_SLOT_TOKEN_LEN(n) ((size_t)(4 + 1 + 16 + 12 + 16 + 2 + 16 + 32 + 32) + (size_t)(n))
 
-/* Access policy (`keyquorum_access.h`, ABI 4): the factor a login, `su` or `sudo` demands, and
- * bridge-proof statuses (`keyquorum_bridge.h`), a separate namespace. Copies, checked against
- * KeyQuorum's by _Static_assert in kq_driver.c. Append only; never renumber. */
+/* Access factors (ABI 4) and bridge-proof statuses, separate namespaces. Copies of KeyQuorum's
+ * values, checked by _Static_assert in kq_driver.c. Append only; never renumber. */
 #define FL_KQ_ACCESS_NONE 0
 #define FL_KQ_ACCESS_PASSWORD 1
 #define FL_KQ_ACCESS_KQST_PASSWORD 2

@@ -2,18 +2,13 @@
 #define FL_CMD_JOURNAL_H
 
 /*
- * Signed command log, hosted only: a separate, versioned, append-only journal of what the shell was
- * asked to run. Every record is signed through a signer interface (KeyQuorum later) and carries the
- * SHA-256 of the record before it, so a reader can check order and integrity.
- *
- * What is recorded: a CATEGORY of the command, never its arguments. The category is the first word
- * of the line when it names a known shell command (the command registry, fl_shell_cmd_lookup, plus
- * the line-mode builtins), and "other" for anything else. Arguments, and so passwords typed on the
- * line, never reach the journal.
- *
- * Record (one per event, big-endian, length-delimited; built and read with net_codec.h). The signature covers every byte after
- * record_len up to (not including) sig_len; record_len is implied by the content and a reader
- * requires the parsed fields to fill it exactly, and the record hash covers all of it:
+ * Signed, hash-chained, append-only command journal (hosted only). Records a command CATEGORY, never
+ * its arguments. Fails closed: no ATTEMPT record, no command. See docs/COMMAND_LOG.md.
+ */
+
+/*
+ * Record layout (big-endian, length-delimited). The signature covers the bytes after record_len up to
+ * sig_len; the record hash covers the whole record, and parsed fields must fill record_len exactly.
  *
  *   u32  record_len            whole record, this field included
  *   u8   magic[4]              "FLCL"
@@ -35,17 +30,6 @@
  *   u8   cosig_present         0 now; 1 adds nonce[16], u8 len + second signer id,
  *                              u8 len + second signature (room for the sudo co-signature)
  *   u8   sig_len, signature
- *
- * Failure policy (fail closed): when the ATTEMPT record cannot be written, fl_cmdlog_attempt returns
- * FL_CMDLOG_REFUSE and a short reason; the caller prints it with fl_cmdlog_print_refusal and does not
- * run the command. A COMPLETION write failure cannot undo a command that already ran:
- * fl_cmdlog_complete returns -1 and a reason, the caller warns with fl_cmdlog_print_completion_gap,
- * and recovery reports that attempt as "outcome unknown".
- *
- * Storage, crash recovery, retention, device/key binding, concurrency (no cross-process lock: one
- * directory per process) and lockout are in docs/COMMAND_LOG.md. NOT PROVEN POWER-LOSS DURABLE.
- *
- * Not wired in yet: nothing outside the tests calls fl_cmdlog_attempt.
  */
 
 #include "kq_storage.h"
@@ -81,20 +65,10 @@ typedef enum {
 
 enum { FL_CMDLOG_TIME_LOCAL = 0, FL_CMDLOG_TIME_TRUSTED = 1 };
 
-/*
- * Who signs. KeyQuorum has no generic, domain-separated single-signer C API yet.
- * TODO: add a KeyQuorum call that signs and verifies (domain, message) with an account's key and its
- * driver wrapper in kernel/drivers/keyquorum/kq_driver.c, then provide a signer over them. Until then
- * tests use a test-only signer.
- *
- * sign: writes the signature of msg under domain into sig_out (cap FL_CMDLOG_SIG_MAX) and its
- * length into *sig_len; 0 on success. verify: 1 when sig is key_id's valid signature of msg under
- * domain, 0 when not, negative when it cannot tell. key_id: the signer's id, recorded in each
- * record (at most FL_CMDLOG_LABEL_MAX - 1 bytes).
- */
+/* Signer interface. sign returns 0 on success; verify returns 1 valid, 0 invalid, negative unknown. */
 typedef struct {
     void *ctx;
-    const char *key_id;
+    const char *key_id; /* recorded in each record; at most FL_CMDLOG_LABEL_MAX - 1 bytes */
     int (*sign)(void *ctx, const char *domain, const uint8_t *msg, size_t len, uint8_t *sig_out,
                 size_t *sig_len);
     int (*verify)(void *ctx, const char *key_id, const char *domain, const uint8_t *msg, size_t len,
@@ -155,12 +129,9 @@ typedef enum { FL_CMDLOG_ALLOW = 0, FL_CMDLOG_REFUSE = 1 } fl_cmdlog_decision_t;
 typedef struct fl_cmdlog fl_cmdlog_t;
 
 /*
- * Walks every segment in order and checks the format, the signing domain, that every record is
- * signed by signer->key_id and verifies, one journal and device id throughout (expect_device, when
- * not NULL, must match), the sequence and the hash chain, and that no segment lies past where the
- * walk stopped; reports an incomplete tail and every unclosed ATTEMPT. Returns 0 when
- * report->status is FL_CMDLOG_V_OK (an incomplete tail or unclosed attempts are reported, not
- * failures), -1 otherwise.
+ * Verifies every segment in order: format, domain, signatures, ids, sequence and hash chain.
+ * Returns 0 when report->status is FL_CMDLOG_V_OK (an incomplete tail or unclosed attempts are
+ * reported, not failures), -1 otherwise. expect_device may be NULL.
  */
 int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_cmdlog_signer_t *signer,
                      const uint8_t *expect_device, const fl_cmdlog_limits_t *limits,
@@ -169,40 +140,33 @@ int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_c
 enum { FL_CMDLOG_OPEN_OK = 0, FL_CMDLOG_OPEN_ERROR = -1, FL_CMDLOG_OPEN_BUSY = -2 };
 
 /*
- * Opens (or starts) the journal in cfg->dir: verifies what is there, against cfg->device_id and the
- * signer's key id, and continues its chain. FL_CMDLOG_OPEN_OK; FL_CMDLOG_OPEN_ERROR when the journal
- * does not verify or belongs to another device or key (it is evidence, and appending would hide it;
- * report->status says why) or on a bad config; FL_CMDLOG_OPEN_BUSY when this process already has the
- * same (storage, dir) open. report (may be NULL) receives the recovery report.
+ * Opens or starts the journal in cfg->dir after verifying it. Returns OPEN_OK, OPEN_ERROR when the
+ * journal does not verify, is foreign or the config is bad (nothing is appended), OPEN_BUSY when
+ * this process already has the same (storage, dir) open. report may be NULL.
  */
 int fl_cmdlog_open(const fl_cmdlog_config_t *cfg, fl_cmdlog_t **out, fl_cmdlog_report_t *report);
 /* Only after every caller using j has returned. */
 void fl_cmdlog_close(fl_cmdlog_t *j);
 
-/*
- * The redacted category of a command line: "other" unless the first word is a known command. Never
- * copies anything past the first word. Returns out.
- */
+/* Writes the redacted category of line to out ("other" unless the first word is a known command). */
 const char *fl_cmdlog_category(const char *line, char *out, size_t cap);
 
 /*
- * Records an ATTEMPT before a command runs. FL_CMDLOG_ALLOW: the record is signed and stored, and
- * *corr names it for fl_cmdlog_complete. FL_CMDLOG_REFUSE: it could not be (or j is NULL); reason
- * (cap at least FL_CMDLOG_REASON_MAX recommended) says why, and the command must not run.
+ * Records an ATTEMPT before a command runs. Returns ALLOW with *corr set, or REFUSE with a reason
+ * (also when j is NULL): the command must not run.
  */
 fl_cmdlog_decision_t fl_cmdlog_attempt(fl_cmdlog_t *j, const char *principal, const char *line,
                                        fl_cmdlog_corr_t *corr, char *reason, size_t reason_cap);
 
-/* Records the COMPLETION of corr with the command's rc. 0, or -1 with a reason (outcome unknown). */
+/* Records the COMPLETION of corr with rc. Returns 0, or -1 with a reason (outcome unknown). */
 int fl_cmdlog_complete(fl_cmdlog_t *j, const fl_cmdlog_corr_t *corr, int rc, char *reason,
                        size_t reason_cap);
 
-/* Records that corr was refused after its attempt (e.g. authorization) with refusal code code. */
+/* Records a REFUSAL of corr with the refusal code. Returns 0, or -1 with a reason. */
 int fl_cmdlog_refused(fl_cmdlog_t *j, const fl_cmdlog_corr_t *corr, int code, char *reason,
                       size_t reason_cap);
 
-/* The caller's messages: red "[ERROR] command refused: ..." (fl_color_error) and a yellow
- * "[WARNING] ..." completion-gap warning (fl_color_warn_local), both on stderr. */
+/* Print the refusal error and the completion-gap warning on stderr. */
 void fl_cmdlog_print_refusal(const char *reason);
 void fl_cmdlog_print_completion_gap(const char *reason);
 

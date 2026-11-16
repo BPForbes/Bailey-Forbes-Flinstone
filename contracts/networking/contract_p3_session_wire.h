@@ -123,7 +123,7 @@
  * KeyQuorum history download (second KeyQuorum range, routed to the same hook as KQ_*).
  * REQ: [request id 16][delivery id 16]. DATA: [request id 16][offset u32 BE][total u32 BE][bytes <= 480];
  * the bytes are the history bundle (kq_history_bundle.h): two complete KQPB letters, kind 15 then kind 17.
- * 0x53 to 0x5F are left free for the next feature that needs a range (FL-27's ledger frames).
+ * 0x53 to 0x5F are left free for the next range.
  */
 #define FL_NET_SESSION_OP_KQH_FIRST        0x50u
 #define FL_NET_SESSION_OP_KQH_REQ          0x50u
@@ -131,11 +131,9 @@
 #define FL_NET_SESSION_OP_KQH_LAST         0x51u
 
 /**
- * KeyQuorum refusal report. The recipient of a refused co-signed delivery sends the signed KQER it
- * wrote beside the refused file to the host (after the refusing KQ_ACK); the host checks the sender is that
- * delivery's recipient and that the delivery was refused, then forwards the frame, unchanged, to the
- * delivery's sender. REPORT: [delivery id 16][len u16 BE][KQER bytes, len <= FL_KQ_REPORT_FRAME_MAX]. Best
- * effort: a sender that is not connected misses it, and the host keeps nothing.
+ * KeyQuorum refusal report, recipient to host, forwarded unchanged to the delivery's sender.
+ * REPORT: [delivery id 16][len u16 BE][KQER bytes, len <= FL_KQ_REPORT_FRAME_MAX].
+ * Best effort: the host keeps nothing.
  */
 #define FL_NET_SESSION_OP_KQR_FIRST        0x52u
 #define FL_NET_SESSION_OP_KQR_REPORT       0x52u

@@ -80,16 +80,13 @@ fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
                                     unsigned char device_id[16], unsigned char signing_public[32],
                                     unsigned char encryption_public[32]);
 
-/*
- * One account_keys row, copied whole, so a caller that replaces it can put it back exactly as it
- * was (present = 0: there was no row, and a restore deletes the one written since).
- */
+/* One account_keys row, copied whole so a caller that replaces it can restore it exactly. */
 #define FL_USER_KQST_PATH_MAX   512u
 #define FL_USER_KQST_TEXT_MAX   128u
 #define FL_USER_KQST_HASH_MAX   64u
 
 typedef struct fl_user_kqst_row {
-    int           present;
+    int           present; /* 0: there was no row; a restore deletes the one written since */
     char          purpose[FL_USER_KQST_TEXT_MAX];
     int64_t       holds_share;
     char          minted_by[FL_USER_KQST_TEXT_MAX];
@@ -106,30 +103,25 @@ typedef struct fl_user_kqst_row {
 } fl_user_kqst_row_t;
 
 /**
- * Pair key_id with the slot token at kqst_path (enrolment): writes its account_keys row, replacing
- * any earlier one, with generation one past the earlier row's (1 for the first). purpose "own",
- * minted_by key_id (the account enrolled its own token), minted_at as given, no ledger entry yet
- * (ledger_seq 0, a 32-byte zero event hash). The path is stored as given. INVAL for a malformed
- * argument (empty or over-long path); *generation_out (may be NULL) is the row's generation.
+ * Pairs key_id with the slot token at kqst_path, replacing any earlier account_keys row; the
+ * generation is one past the earlier row's (1 for the first). generation_out may be NULL.
+ * Returns INVAL for a malformed argument (empty or over-long path).
  */
 fl_result_t fl_user_db_kqst_register(const fl_user_db_t *db, const char *key_id, const char *kqst_path,
                                      const unsigned char device_id[16],
                                      const unsigned char signing_public[32],
                                      const unsigned char encryption_public[32], int64_t minted_at,
                                      int64_t *generation_out);
-/** Copy key_id's account_keys row (present = 0 when there is none). */
+/** Copies key_id's account_keys row (present = 0 when there is none). */
 fl_result_t fl_user_db_kqst_row_get(const fl_user_db_t *db, const char *key_id, fl_user_kqst_row_t *out);
-/** Put back a row copied by fl_user_db_kqst_row_get: rewritten whole, or deleted when not present. */
+/** Restores a row copied by fl_user_db_kqst_row_get: rewritten whole, or deleted when not present. */
 fl_result_t fl_user_db_kqst_row_restore(const fl_user_db_t *db, const char *key_id,
                                         const fl_user_kqst_row_t *row);
 
 /*
- * Private bridges (KeyQuorum's, mirrored in the account store's account_bridges and
- * account_bridge_members tables; not the account-to-account bridges of bridge.c). The store is the
- * caller's own trusted record, read at call time like account_keys: a bridge is live when its row
- * says destroyed = 0 and its facts are well formed (generation 1..UINT32_MAX, a 16-byte salt, a
- * 32-byte public key, at least two members with valid heritage labels and 32-byte signing keys).
- * fl_user_db_bridge_put, _put_with_key, _put_sealed_key and _import_from_kq are the store's writers.
+ * Private bridges (KeyQuorum's; not the account-to-account bridges of bridge.c), read from the
+ * account store at call time. A bridge is live when destroyed = 0 and its facts are well formed:
+ * generation 1..UINT32_MAX, 16-byte salt, 32-byte public key, at least two valid members.
  */
 #define FL_USER_BRIDGE_UID_MAX     65u /* KeyQuorum's uid (32 hex) and its NUL, with room */
 #define FL_USER_BRIDGE_MEMBERS_MAX 16u
@@ -153,88 +145,73 @@ typedef struct fl_user_bridge {
     fl_user_bridge_member_t members[FL_USER_BRIDGE_MEMBERS_MAX];
 } fl_user_bridge_t;
 
-/** Writes a bridge's facts and its member roster (replacing the row and its members' keys). */
+/** Writes a bridge's facts and member roster, replacing the row and its members' keys. */
 fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *bridge);
 /**
- * fl_user_db_bridge_put plus member label's sealed bridge key and wrap salt, in ONE transaction: the
- * roster and the key land together or not at all. INVAL for a malformed bridge or key, NOENT when label is
- * not on the roster (nothing is written).
+ * fl_user_db_bridge_put plus member label's sealed bridge key and wrap salt, in one transaction.
+ * Returns INVAL for a malformed bridge or key, NOENT when label is not on the roster (nothing written).
  */
 fl_result_t fl_user_db_bridge_put_with_key(const fl_user_db_t *db, const fl_user_bridge_t *bridge, const char *label,
                                            const unsigned char *sealed, size_t len,
                                            const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 
 /**
- * Copies bridge uid from a KeyQuorum store (the SQLite file `keyquorum private-bridge import` /
- * `inbox open` writes; opened read-only, one snapshot) into this account store. local_label, when given,
- * is the account whose sealed bridge key and wrap salt come with it (KeyQuorum holds only a local member's);
- * NULL imports the roster alone, which is enough to verify but not to prove. NOENT: no such bridge, the
- * label is not on its roster, or KeyQuorum holds no sealed key for it. NOMEM: a roster larger than
- * FL_USER_BRIDGE_MEMBERS_MAX (never truncated). ERR: any column of the wrong type or size. A bridge
- * KeyQuorum marks destroyed is stored destroyed. BUSY: this store already holds that bridge at a newer
- * generation; one destroyed here at the same generation stays destroyed. Validates no package and
- * unseals nothing.
+ * Copies bridge uid from a KeyQuorum store, with local_label's sealed key when not NULL. Unseals
+ * nothing. Returns NOENT (no bridge, label or sealed key), NOMEM (roster over the cap, never
+ * truncated), ERR (bad column), BUSY (a newer generation is held). Destroyed stays destroyed.
  */
 fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char *kq_store_path, const char *uid,
                                              const char *local_label);
 
 /**
- * Stores member label's sealed copy of the bridge secret together with its wrap salt (one statement:
- * neither is ever written alone). NOENT when the member row does not exist.
+ * Stores member label's sealed bridge secret with its wrap salt in one statement, never one alone.
+ * Returns NOENT when the member row does not exist.
  */
 fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
                                              const unsigned char *sealed, size_t len,
                                              const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 /**
- * The bridge uid's current facts as the store holds them now (destroyed included, so the caller
- * passes them to the verifier unchanged). The row and its roster are one deferred snapshot.
- * NOENT for an unknown or malformed row; ERR when the store cannot be read.
+ * Reads bridge uid's current facts (destroyed included) and roster as one deferred snapshot.
+ * Returns NOENT for an unknown or malformed row, ERR when the store cannot be read.
  */
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out);
 /**
- * Every live bridge (see above) into out[0..cap), in uid order; *count is how many. The uid list
- * and each roster are one deferred snapshot, so a row cannot flip to destroyed between them.
- * Never a partial list: a row with destroyed = 0 that is malformed or cannot be read, or any
- * failed read, is ERR, and more live rows than cap is NOMEM (*count 0 on both). Only a store
- * whose schema has no account_bridges table (written before the bridge tables) is OK with no bridge.
+ * Fills out[0..cap) with every live bridge in uid order, from one deferred snapshot. Never a partial
+ * list: a malformed or unreadable live row is ERR and more live rows than cap is NOMEM (*count 0).
+ * A store with no account_bridges table is OK with no bridge.
  */
 fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
                                     size_t *count);
 /**
- * Member label's sealed bridge key and the wrap salt stored with it. NOENT unless both are present
- * and the right sizes (a sealed key without its salt, or a salt without its key, opens nothing).
- * *len is the sealed key's length. The caller wipes nothing secret: the key is sealed.
+ * Reads member label's sealed bridge key (*len bytes) and its wrap salt.
+ * Returns NOENT unless both are present and the right sizes.
  */
 fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
                                          unsigned char *sealed, size_t cap, size_t *len,
                                          unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 /**
- * Facts and one member's sealed key from one read-only deferred snapshot. A missing or malformed
- * bridge leaves *out zeroed. A bridge that reads and whose sealed key does not is returned with
- * the facts still filled, so the caller can tell the two apart. Prove uses this; the two public
- * reads above are each their own snapshot.
+ * Reads the facts and one member's sealed key from one read-only deferred snapshot. A missing or
+ * malformed bridge leaves *out zeroed; a missing sealed key leaves *out filled.
  */
 fl_result_t fl_user_db_bridge_snapshot(const fl_user_db_t *db, const char *uid, const char *label,
                                        fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
                                        size_t *len,
                                        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 
-/** Writer reservation over the account database. The body is not part of the header. */
+/** Writer reservation over the account database (opaque). */
 typedef struct fl_user_bridge_hold fl_user_bridge_hold_t;
 /**
- * Read-write open, busy_timeout 0, BEGIN IMMEDIATE. Holds the SQLite writer slot until
- * fl_user_db_bridge_release, which rolls the transaction back (it writes nothing). BUSY when
- * another writer already holds the database; ACCES when it cannot be reserved for any other
- * reason. The same account_bridges tables as the public readers.
+ * Takes the SQLite writer slot (BEGIN IMMEDIATE, busy_timeout 0) until fl_user_db_bridge_release,
+ * which rolls back. Returns BUSY when another writer holds the database, ACCES on any other failure.
  */
 fl_result_t fl_user_db_bridge_reserve(const fl_user_db_t *db, fl_user_bridge_hold_t **out);
 void        fl_user_db_bridge_release(fl_user_bridge_hold_t *hold);
-/** Live bridges on a reserved connection. Same results as fl_user_db_bridges_live. */
+/** Reads live bridges on a reserved connection; results as fl_user_db_bridges_live. */
 fl_result_t fl_user_db_bridge_live_held(fl_user_bridge_hold_t *hold, fl_user_bridge_t *out, size_t cap,
                                         size_t *count);
 /**
- * Facts on a reserved connection, and when label is non-NULL that member's sealed key, as one
- * snapshot. A missing sealed key leaves *out filled.
+ * Reads the facts on a reserved connection and, when label is non-NULL, that member's sealed key,
+ * as one snapshot. A missing sealed key leaves *out filled.
  */
 fl_result_t fl_user_db_bridge_read_held(fl_user_bridge_hold_t *hold, const char *uid, const char *label,
                                         fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
@@ -324,7 +301,7 @@ void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
  */
 fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
                                       unsigned char *secret);
-/** The box-key open from a record copy, same as fl_user_db_open_key_record. */
+/** Opens the box key from a record copy, as fl_user_db_open_key_record does for the signing key. */
 fl_result_t fl_user_db_open_box_record(const fl_user_record_t *account, const char *password,
                                       unsigned char *secret);
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
@@ -354,19 +331,16 @@ int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
                               fl_user_secret_kind_t kind, const unsigned char *secret);
 
 /*
- * Parent-key assembly records (account_assembly): the opaque KQAS bytes KeyQuorum's kq_assembly_split
- * wrote for parent_label (an account key id), with the generation they were dealt at and the
- * threshold KeyQuorum fixed for that many holders. Every share inside is sealed to one child's box key,
- * so the record is safe at rest; nothing here reads or decides it (the driver's assembly ops do).
- * A writer brings an older store up to date first (a store from before the table gains it).
+ * Parent-key assembly records (account_assembly): the opaque KQAS bytes for a parent key id, with
+ * their generation and threshold. Every share inside is sealed to one child's box key.
  */
 #define FL_USER_ASSEMBLY_MAX 16384u
-/** Replaces parent_label's record (one row per parent). INVAL for a bad label, empty or oversized bytes. */
+/** Replaces parent_label's record. Returns INVAL for a bad label or empty or oversized bytes. */
 fl_result_t fl_user_db_assembly_put(const fl_user_db_t *db, const char *parent_label, unsigned generation,
                                     unsigned threshold, const unsigned char *bytes, size_t len);
 /**
- * parent_label's record into out (cap bytes); *len, *generation and *threshold are set. NOENT when the parent has
- * none (including a store from before the table), NOMEM when cap is too small, ERR for a malformed row.
+ * Reads parent_label's record into out and sets *len, *generation and *threshold.
+ * Returns NOENT when there is none, NOMEM when cap is too small, ERR for a malformed row.
  */
 fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_label, unsigned char *out,
                                     size_t cap, size_t *len, unsigned *generation, unsigned *threshold);

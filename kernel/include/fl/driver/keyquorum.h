@@ -179,18 +179,15 @@ struct fl_kq_driver {
                      uint8_t encryption_secret_out[32]);
 
     /*
-     * Head author (file ABI version 5), appended after slot_open: the author label of c's single
-     * head revision. KQ_FILE_OK, or KQ_FILE_FORKED (two heads), KQ_FILE_NO_REVISION, KQ_FILE_NO_ROOM
-     * or KQ_FILE_INVALID; out is "" on every failure.
+     * Head author (file ABI version 5), appended after slot_open. Returns KQ_FILE_OK, FORKED (two
+     * heads), NO_REVISION, NO_ROOM or INVALID; out is "" on every failure.
      */
     int (*head_author)(const fl_kq_buf_t *c, char *out, size_t cap);
 
     /*
-     * Access policy and private-bridge proof (file ABI version 4), appended after head_author:
-     * one-to-one over kq_access_requirement and kq_bridge_prove / kq_bridge_verify, the KQ_ACCESS_*
-     * factor or KQ_BRIDGE_* status returned unchanged. The caller passes only bridges its store holds
-     * as live and wipes the secrets it passed. NULL in the freestanding image (no account store; the
-     * SECFEAT image has no room for them).
+     * Access policy and private-bridge proof (file ABI version 4), appended after head_author. Return
+     * the KQ_ACCESS_* factor or KQ_BRIDGE_* status unchanged. The caller passes only live bridges and
+     * wipes the secrets it passed. NULL in the freestanding image.
      */
     int (*access_requirement)(const char *current, const char *target, int sudo,
                               const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
@@ -208,18 +205,17 @@ struct fl_kq_driver {
                          size_t clen, const uint8_t *artifact, size_t alen);
 
     /*
-     * Bridge reach, appended after bridge_verify (kq_bridge_connects): 1 when a bridge between end_a
-     * and end_b connects actor to scope, else 0. The shape of the hierarchy only; liveness is the
-     * caller's check. NULL in the freestanding image, read as "does not connect".
+     * Bridge reach (kq_bridge_connects), appended after bridge_verify. Returns 1 when a bridge between
+     * end_a and end_b connects actor to scope; liveness is the caller's check. NULL in the
+     * freestanding image, read as "does not connect".
      */
     int (*bridge_connects)(const char *end_a, const char *end_b, const char *actor,
                            const char *scope);
 
     /*
-     * Parent-key assembly (file ABI version 6), appended after bridge_connects: one-to-one over
-     * kq_assembly_* (keyquorum_assembly.h), the KQ_ASSEMBLY_* status returned unchanged; the quorum
-     * rule lives in KeyQuorum. The caller wipes seed_out and every secret it passed. NULL in the
-     * freestanding image (its archive does not export them), read as "refused".
+     * Parent-key assembly (file ABI version 6), appended after bridge_connects. Return the
+     * KQ_ASSEMBLY_* status unchanged. The caller wipes seed_out and every secret it passed. NULL in
+     * the freestanding image, read as "refused".
      */
     unsigned (*assembly_threshold)(unsigned holders);
     int (*assembly_split)(const uint8_t seed[32], unsigned generation,
@@ -234,11 +230,9 @@ struct fl_kq_driver {
                              size_t minimum_devices, uint8_t seed_out[32]);
 
     /*
-     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble:
-     * one-to-one over kq_sudo_sign / kq_sudo_verify and kq_slot_seal, the KQ_ACCOUNT_* code (1/0 for
-     * sudo_verify, which needs both halves) returned unchanged. slot_seal writes
-     * KQ_SLOT_TOKEN_LEN(strlen(label)) bytes; the caller wipes the secrets. NULL in the freestanding
-     * image (no account store), read as "refused".
+     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble. Return
+     * the KQ_ACCOUNT_* code unchanged (sudo_verify: 1/0). slot_seal writes KQ_SLOT_TOKEN_LEN(label
+     * length) bytes. The caller wipes the secrets. NULL in the freestanding image: "refused".
      */
     int (*sudo_sign)(int role, const char *invoker, const char *authority, const uint8_t *action,
                      size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],

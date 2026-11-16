@@ -1,10 +1,8 @@
 #ifndef FL_FREESTANDING_BOOTINFO_H
 #define FL_FREESTANDING_BOOTINFO_H
 /*
- * Boot-info handoff: stage 2 (stage2.asm) fills this struct in low memory, outside the
- * kernel's bss, and enters the kernel with its address in rdi. fl_kernel_main validates it with
- * fl_bootinfo_validate before anything else starts. The layout is shared with bootinfo.inc,
- * which tests/test_fs_bootmap.c checks against this header.
+ * Boot-info handoff: stage 2 fills this struct in low memory and enters the kernel with its address
+ * in rdi. The layout is shared with bootinfo.inc.
  */
 #include "bootmap.h"
 
@@ -45,9 +43,8 @@ _Static_assert(sizeof(fl_boot_info_t) == FL_BOOTINFO_SIZE, "boot info size is sh
 _Static_assert(FL_BOOTINFO_ADDR + FL_BOOTINFO_SIZE <= FL_BOOTINFO_E820_ADDR, "boot info overlaps the E820 buffer");
 _Static_assert(FL_BOOTINFO_E820_ADDR + FL_BOOTINFO_E820_CAP * 24u <= FL_PAGE_TABLES, "E820 buffer overlaps the page tables");
 
-/* FL_BOOTMAP_OK, or the reason the handoff is unusable (FL_BOOTMAP_E_INVAL, or
- * FL_BOOTMAP_E_TRUNCATED for a truncated E820 map). kernel_start, bss_start and kernel_end are the
- * image's own linker symbols: the loader must agree with them. */
+/* Validates the handoff against the image's linker symbols. Returns FL_BOOTMAP_OK, FL_BOOTMAP_E_INVAL,
+ * or FL_BOOTMAP_E_TRUNCATED for a truncated E820 map. */
 int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t bss_start, uint64_t kernel_end);
 
 #endif

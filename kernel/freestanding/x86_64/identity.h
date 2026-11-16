@@ -5,13 +5,9 @@
 #define FL_FS_MAX_USERS 8
 
 /*
- * Optional KeyQuorum account ops. NULL (the QEMU image and the host smoke binary) keeps the
- * demo passwords in the account table. The WebAssembly lab installs a table before
- * fl_fs_identity_init: enroll seals a signing key and a box key under the password through the
- * driver, and identity then stores no password. unlock is 1 when that seal opens. switch_allowed
- * is consulted only when it is non-NULL, as an extra refusal before the password; switchuser to
- * another account always needs that account's password, as su does on the hosted shell.
- * change_password re-seals (0 on success). forget drops the sealed keys at userdel.
+ * Optional KeyQuorum account ops; NULL keeps the demo passwords in the account table. Install before
+ * fl_fs_identity_init. unlock returns 1 when the seal opens; change_password returns 0 on success.
+ * switch_allowed, when non-NULL, is an extra refusal before the password check.
  */
 typedef struct fl_fs_identity_kq_ops {
     int (*enroll)(const char *creator, const char *name, const char *password);
@@ -28,11 +24,11 @@ const char *fl_fs_identity_user(int session);
 int fl_fs_identity_elevated(int session);
 int fl_fs_identity_login(int session, const char *name, const char *password);
 int fl_fs_identity_su(int session, const char *name, const char *password);
-/* 1 when an account of that name exists (any case). */
+/* Returns 1 when an account of that name exists (any case). */
 int fl_fs_identity_has_user(const char *name);
 /* The session's own account needs no password; another account needs its password (NULL refuses). */
 int fl_fs_identity_switchuser(int session, const char *name, const char *password);
-/* sudo -i, after the sudo password was accepted: become Root with no second check. */
+/* Becomes Root with no second check; call only after the sudo password was accepted. */
 int fl_fs_identity_enter_root(int session);
 int fl_fs_identity_user_index(int session);
 void fl_fs_identity_logout(int session);

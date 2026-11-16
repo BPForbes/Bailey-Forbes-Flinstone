@@ -23,102 +23,58 @@ void        fl_session_begin_sudo_scope(void);
 void        fl_session_end_sudo_scope(void);
 
 fl_result_t fl_session_login(const char *name, const char *password);
-/**
- * Sets the session's account with no check at all: for restoring the identity a command already held
- * (the end of su -c) and for tests. A new identity is taken only through fl_session_switch_user.
- */
+/** Sets the session's account with no check; for restores and tests only. */
 fl_result_t fl_session_set_user(const char *name);
-/** What su -c takes back at its end: the account and the login it was current in, read together. */
+/** The account and login generation su -c restores at its end. */
 typedef struct fl_session_restore_point {
     char     user[FL_USER_NAME_MAX];
     uint64_t login_generation;
 } fl_session_restore_point_t;
-/**
- * Fills out with the current account and the current login generation under one hold of the session
- * lock, so a login that completes meanwhile can never pair one login's account with another login's
- * generation. INVAL for a NULL out.
- */
+/** Fills out with the current account and login generation under one hold of the session lock. */
 fl_result_t fl_session_capture_restore_point(fl_session_restore_point_t *out);
 /**
- * The restore at the end of su -c: takes name back only while login_generation (both from one
- * fl_session_capture_restore_point taken before the switch) is still the current login. A login or
- * logout in between leaves the session as it is: BUSY, audited as "su-restore-refused". INVAL for
- * generation 0; otherwise as fl_session_set_user.
+ * Restores name only while login_generation is still the current login.
+ * Returns BUSY when a login or logout ran in between, INVAL for generation 0, else as fl_session_set_user.
  */
 fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation);
-/** 1 when password is the named account's password (checked under the session lock), else 0. */
+/** Returns 1 when password is the named account's password, else 0. */
 int         fl_session_verify_account_password(const char *name, const char *password);
 
 /**
- * An identity switch (su, sudo -i). The commands collect what KeyQuorum's rule asks for; the session
- * asks fl_kq_unlock_requirement again itself and decides, so no caller can choose a weaker factor.
- *   NONE                 nothing more (the same account, without sudo).
- *   PASSWORD             password is the target's.
- *   KQST_PASSWORD        password is the token holder's (Root's for sudo, else the target's) and opens
- *                        its slot token. For sudo -i, a password-only Root is refused ("no-root-kqst"),
- *                        whoever asks. For su, a password-only (legacy) target is accepted on its
- *                        password, audited as "su-kqst-legacy".
- *   PASSWORD_BRIDGE_KQST the target's password, plus bridge_member opening their token with
- *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
- *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
- *                        to collect one.
- * The password is checked outside the final lock. That lock is taken before a BEGIN IMMEDIATE
- * reservation of the account database, and both are released on every path. Under them the factor
- * is recomputed from the reserved snapshot, and a proof is accepted only when the canonical digest
- * of the current facts matches the digest the proof returned. A proof that no longer matches is
- * "bridge-changed". A factor, holder mode, password record, or caller elevation that changed is
- * "changed". A login or logout in between is BUSY "superseded". A writer already holding the
- * database is BUSY "busy".
- * Every refusal is audited through the audit hook ("su-refused" / "sudo-refused", the two key ids
- * and a reason word; never a password, key or token byte) and nothing names the reason on the
- * terminal. FL_RESULT_OK, ACCES (refused), BUSY (a login or logout ran meanwhile, or the writer
- * slot is taken), NOENT (no such account) or INVAL.
+ * An identity switch request (su, sudo -i). The session recomputes the factor from
+ * fl_kq_unlock_requirement itself, so no caller can choose a weaker one; a switch needing a parent's
+ * grant is refused. Refusals are audited without any secret byte.
  */
 typedef struct fl_session_switch_request {
     const char *target;
     int         sudo;
-    const char *password;
-    const char *bridge_member;
+    const char *password;               /* the target's, or the token holder's for a KQST factor */
+    const char *bridge_member;          /* PASSWORD_BRIDGE_KQST only */
     const char *bridge_member_password;
-    /** sudo -i only: the invoking account's own password (its half of the co-authorisation; it
-     *  also opens the invoker's token when the invoker is a KQST-mode account). Unused when the
-     *  invoker is Root. */
-    const char *invoker_password;
+    const char *invoker_password;       /* sudo -i only; unused when the invoker is Root */
 } fl_session_switch_request_t;
+/**
+ * Performs the switch. Returns OK, ACCES (refused), BUSY (a login or logout ran meanwhile, or the
+ * account database writer slot is taken), NOENT (no such account) or INVAL.
+ */
 fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
 
 /**
- * sudo without a switch (an elevation token), co-authorised by two identities. KeyQuorum asks for
- * Root's key, so root_password must be Root's and open Root's token. A password-only Root has no
- * token: sudo is refused ("no-root-kqst") before any password is checked, and there is no fallback
- * to the caller's own password. Beside Root's factor, the invoking account gives its own:
- * invoker_password must be its password and, for a KQST-mode invoker, open its token
- * ("invoker-password" / "invoker-kqst" when not). Root invoking for itself gives Root's factor once.
- * OK also binds the elevation token to that same login: a login or logout during the check returns
- * BUSY and grants nothing; a change to either account's mode ("mode") or password in that window is
- * refused. A grant is audited as "sudo-coauth" naming the invoker's factor. Any other refusal is
- * ACCES.
+ * Grants an elevation token co-authorised by Root's factor and the invoker's own.
+ * Returns OK (token bound to this login), BUSY when a login or logout ran during the check, else
+ * ACCES. A password-only Root is always refused; there is no fallback to the caller's password.
  */
 fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password);
 /**
- * Sign one elevated action. While the sudo window is open the action is
- * signed by Root's key and the account's key together (audited "sudo-action" with the nonce); renew
- * non-zero (a sudo) also starts the window's clock again. When the window has ended it does nothing:
- * the account acts with its own key. When Root's key is not available the elevation is taken away,
- * audited "sudo-deelevated", and *deelevated (may be NULL) is set; the account goes on unelevated.
- * Root acts with its own key and has no window. Called without the session lock.
+ * Signs one elevated action with Root's key and the account's key while the sudo window is open;
+ * renew non-zero restarts the window. When Root's key is unavailable the elevation is removed and
+ * *deelevated (may be NULL) is set. Call without the session lock.
  */
 fl_result_t fl_session_elevated_action(const char *action, int renew, int *deelevated);
 /**
- * Pair the logged-in account with its KeyQuorum slot token (KQST) and switch it to KQST login.
- * password is the account's password, which must also open the token; the token must match
- * device_id, signing_public and encryption_public (what keyquorum-device provision printed for a
- * slot labelled with the account's key id). An account that already has a token must open that one
- * too: a password alone never replaces a token. kqst_path is stored as given, so the token stays on
- * its device. OK (generation_out, may be NULL, is the pairing's generation), ACCES (refused:
- * "password", "old-kqst", "kqst", "changed"), BUSY (a login or logout ran meanwhile), ERR (the store
- * could not be written; nothing changed), NOENT (nobody is logged in) or INVAL. Audited as
- * "kqst-enrol" or "kqst-enrol-refused".
+ * Pairs the logged-in account with its slot token (KQST). An existing token must also open: a
+ * password alone never replaces a token. Returns OK, ACCES (refused), BUSY (login or logout
+ * meanwhile), ERR (store not written; nothing changed), NOENT (nobody logged in) or INVAL.
  */
 fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
                                    const unsigned char device_id[16],
@@ -126,21 +82,15 @@ fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
                                    const unsigned char encryption_public[32], int64_t minted_at,
                                    int64_t *generation_out);
 /**
- * Give the account name its slot token from the kernel itself: its own signing and box keys, opened
- * with password, sealed with password to a fresh random device id into a KQST beside the account
- * store, then paired and switched to token sign-in (as fl_session_enroll_kqst does, same rollback).
- * The account keeps its keys. OK (generation_out, may be NULL), ACCES ("exists": it already has a
- * token; "password"; "changed"), NOSYS (no driver can seal one: the freestanding image or a test
- * stub), ERR ("no-key", "key", "seal", "store"), NOENT or INVAL. Audited as "kqst-made" or
- * "kqst-make-refused". Called at the account's sign-in, by useradd, and by kqst enroll.
+ * Seals the account's own keys into a new KQST beside the account store and pairs it. Returns OK,
+ * ACCES (token exists, wrong password or changed), NOSYS (no sealing driver), ERR, NOENT or INVAL.
  */
 fl_result_t fl_session_make_kqst(const char *name, const char *password, int64_t minted_at,
                                  int64_t *generation_out);
-/** 1 when Root is a KQST-mode account, so sudo can ask for Root's password and token; 0 when Root
- *  is password-only, and sudo and sudo -i are refused. */
+/** Returns 1 when Root is a KQST-mode account; 0 means sudo and sudo -i are refused. */
 int         fl_session_sudo_needs_root(void);
 
-/** Where the session reports identity events (the shell installs fl_audit_identity_event). */
+/** Receiver of session identity events. */
 typedef void (*fl_session_audit_fn)(const char *actor_key, const char *event, const char *subject_key,
                                     const char *detail);
 void fl_session_set_audit_hook(fl_session_audit_fn fn);
@@ -169,10 +119,8 @@ typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *accou
                                                    const uint8_t secret[32], uint64_t login_generation);
 typedef void (*fl_session_offline_fn)(const char *account);
 /**
- * The box (X25519) secret a KQST login opened next to the signing secret. Runs right after online_opened
- * succeeded, for the same login generation; the service keeps it for the life of the session and wipes it at
- * logout. A refusal refuses the login like online_opened does. Optional: with NULL the box secret is wiped
- * as soon as the token has opened.
+ * Receives the box (X25519) secret a KQST login opened, right after online_opened for the same
+ * login generation. A refusal refuses the login. With a NULL hook the session wipes the secret.
  */
 typedef fl_result_t (*fl_session_online_box_fn)(const fl_user_record_t *account, const uint8_t box_secret[32],
                                                 uint64_t login_generation);
@@ -181,15 +129,11 @@ void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_
                                 fl_session_online_opened_fn opened);
 /** Tests only: runs after the session lock is released and before the KQST open. */
 void fl_session_test_set_kqst_pre_open(void (*fn)(void));
-/**
- * Tests only: runs immediately before the final lock of a switch, after the factor was satisfied
- * and before the writer reservation. The session lock is not held.
- */
+/** Tests only: runs just before the final lock of a switch; the session lock is not held. */
 void fl_session_test_set_switch_pre_lock(void (*fn)(void));
 /**
- * Tests only: runs after the final recheck has succeeded and before the identity commit, while
- * the session lock and the writer reservation are both held. Must not call any fl_session_* that
- * takes the session lock.
+ * Tests only: runs before the identity commit with the session lock and the writer reservation held.
+ * Must not call any fl_session_* that takes the session lock.
  */
 void fl_session_test_set_switch_pre_commit(void (*fn)(void));
 
@@ -211,15 +155,13 @@ fl_user_db_t *fl_session_user_db_mut(void);
 const fl_user_db_t *fl_session_user_db(void);
 fl_result_t fl_session_save_users(void);
 
-/** 1 when the session account store is loaded. */
+/** Returns 1 when the session account store is loaded. */
 int         fl_session_users_loaded(void);
-/** Next free uid in the loaded session store. */
+/** Returns the next free uid in the loaded session store. */
 uint32_t    fl_session_next_uid(void);
 /**
- * The user_db mutators and the disk reload, run with the session mutex held so a switch that
- * already holds a user-record pointer cannot race them. The mutex is taken before any SQLite
- * those calls open. A store that is not loaded returns FL_RESULT_ERR (reload returns the load
- * result and clears the session when the file is bad).
+ * The user_db mutators and the disk reload, run with the session mutex held (taken before any SQLite
+ * open). Return FL_RESULT_ERR when the store is not loaded.
  */
 fl_result_t fl_session_add_user(const char *name, const char *password, uint32_t uid, int is_elevated);
 fl_result_t fl_session_add_user_under(const char *creator_key, const char *name, const char *password,

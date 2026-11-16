@@ -32,7 +32,7 @@
 /** How the author's key was obtained for a signature (recorded in the history event). */
 typedef enum {
     KQ_SIGNING_OWN = 1,       /* the author is signed in and signs with their own key */
-    KQ_SIGNING_ASSEMBLED = 2  /* a parent assembled from its children's shares (KeyQuorum parent-key assembly) */
+    KQ_SIGNING_ASSEMBLED = 2  /* a parent key assembled from its children's shares */
 } kq_signing_mode_t;
 
 /** A heartbeat older than this is a stalled service. The loop wakes every FL_KQ_SERVICE_TICK_MS. */
@@ -56,28 +56,23 @@ fl_result_t fl_kq_service_online_from_login(const char *account, const char *pas
 fl_result_t fl_kq_service_online_opened(const fl_user_record_t *account, const uint8_t secret[32],
                                         uint64_t login_generation);
 /**
- * Keep the account's box (X25519) secret, as a KQST login opened it, next to its signing secret for the life
- * of the session. Same generation rules as online_opened, and the account must already be online (ACCES
- * otherwise). Wiped with the signing secret at logout. Caller wipes box_secret after return.
+ * Keeps the account's box (X25519) secret beside its signing secret until logout. Generation rules as
+ * online_opened. Returns ACCES when the account is not online. Caller wipes box_secret after return.
  */
 fl_result_t fl_kq_service_online_box(const fl_user_record_t *account, const uint8_t box_secret[32],
                                      uint64_t login_generation);
-/** A copy of the box secret of the account signed in under key id author_key_id, for the caller to wipe. ACCES
- *  when that account is not signed in or came in by a login that opened no box key. Only that account's own
- *  label has a key: the box key belongs to the label it was minted for. */
+/** Copies the box secret of the account signed in as author_key_id. Caller wipes out.
+ *  Returns ACCES when that account is not signed in or its login opened no box key. */
 fl_result_t fl_kq_obtain_box_key(const char *author_key_id, uint8_t out[32]);
 void fl_kq_service_offline(const char *account);
 size_t fl_kq_service_online_count(void);
 
-/** A copy of the signing secret to sign as author_key_id, for the caller to wipe. ACCES when that account is
- *  not signed in and, for a parent whose assembly record the account store holds, cannot be assembled from
- *  the children online now (KQ_SIGNING_ASSEMBLED when it can; audited kq-assembled / kq-assemble-refused).
- *  Nothing can assemble a leaf. */
+/** Copies the signing secret to sign as author_key_id; *mode says how it was obtained. Caller wipes out.
+ *  Returns ACCES when the account is not signed in and cannot be assembled from its children online. */
 fl_result_t fl_kq_obtain_author_key(const char *author_key_id, uint8_t out[32], kq_signing_mode_t *mode);
 
 int fl_kq_service_alive(void);
-/** 1 when the resident key table is locked in RAM (kept out of swap; on Linux also out of core dumps). The
- *  lock is taken at fl_kq_service_start and kept for the process; a refused lock is audited kq-keys-unlocked. */
+/** Returns 1 when the resident key table is locked in RAM (taken at fl_kq_service_start). */
 int fl_kq_service_keys_locked(void);
 /** Audited once per transition. */
 void fl_kq_service_report_stalled(void);
@@ -102,50 +97,37 @@ typedef struct {
 } fl_kq_autosign_t;
 fl_result_t fl_kq_service_autosign_add(const fl_kq_autosign_t *spec);
 
-/**
- * The production head_author callback for a tracked file (fl_kq_cp_head_author over the container beside
- * path). ctx points at an fl_kq_autosign_file_t, or a struct that starts with one. OK with the label;
- * FL_RESULT_BUSY when the history is forked (the sweep audits kq-autosign-forked and signs nothing); any
- * other failure is another non-OK result and names nobody.
- */
+/** Context of the tracked-file autosign callbacks; a larger context struct must start with one. */
 typedef struct {
     const char *path; /* the tracked file; its container is path + FL_KQ_CONTAINER_SUFFIX */
 } fl_kq_autosign_file_t;
+/** head_author callback for a tracked file. Returns OK with the label, BUSY when the history is forked. */
 fl_result_t fl_kq_autosign_head_author(void *ctx, char *out, size_t cap);
 
-/**
- * The other two production callbacks (ctx as above): the time of the newest signature in the file's history
- * (fl_kq_cp_last_signature; 0 when there is none or it cannot be read), and the signing call
- * (fl_kq_cp_sign_head_with). A fork answers BUSY.
- */
+/** last_signature_sec (0 when none or unreadable) and sign callbacks for a tracked file. */
 int64_t fl_kq_autosign_last_signature(void *ctx);
 fl_result_t fl_kq_autosign_sign(void *ctx, const char *author, const uint8_t key[32], kq_signing_mode_t mode);
 
 /**
- * Keeps the file at path signed every interval_sec by the head author, using the three callbacks above.
- * The path is copied; the object is owned by the service. Idempotent: tracking a path again re-activates it
- * (a removed object's periodic item cannot be cancelled, so it is reused, never queued twice). NOMEM when
- * all FL_KQ_AUTOSIGN_MAX slots are taken (a removed slot stays taken until shutdown).
+ * Keeps the file at path signed every interval_sec by its head author. The path is copied.
+ * Idempotent: tracking a path again re-activates it. Returns NOMEM when all FL_KQ_AUTOSIGN_MAX slots
+ * are taken (a removed slot stays taken until shutdown).
  */
 fl_result_t fl_kq_service_autosign_track_file(const char *path, int64_t interval_sec);
 
-/** Stops signing the object registered under label (a tracked file's path). Runs already in flight finish
- *  with what they copied; no new run starts. NOENT when nothing is registered under that label. */
+/** Stops signing the object registered under label; runs in flight finish. NOENT when not registered. */
 fl_result_t fl_kq_service_autosign_remove(const char *label);
 
-/** Default sweep period for a tracked file: a placeholder until the owner sets the policy. */
+/** Default sweep period for a tracked file. */
 #define FL_KQ_AUTOSIGN_DEFAULT_SEC 86400ll
 
-/** Now as KeyQuorum's UTC text ("2026-11-10T09:00:00.000Z"), from the wall clock. */
+/** Writes the wall-clock time as KeyQuorum's UTC text ("2026-11-10T09:00:00.000Z"). */
 void fl_kq_service_utc_now(char *out, size_t cap);
 
 /**
- * The one refusal report (KQER): signs it as the account that is online and writes it inside dir,
- * the landing directory the decode held (fl_kq_cp_report_write_in; the caller keeps the handle
- * open until this returns). Only a refusal of the letter itself (INVAL, NOENT, ACCES, NOMEM) is
- * reported. NULL dir (fl_kq_report_refusal in fl/kq.h) writes nothing and audits
- * kq-report-uncontained. Audits kq-report, kq-report-exists, kq-report-capped, kq-report-offline or
- * kq-report-failed, never the report or its ref. Reporting never changes the refusal.
+ * Signs a KQER refusal report as the online account and writes it inside the held directory dir.
+ * Only a refusal of the letter itself (INVAL, NOENT, ACCES, NOMEM) is reported; a NULL dir writes
+ * nothing. The outcome is audited without the report or its ref, and never changes the refusal.
  */
 void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir);
 

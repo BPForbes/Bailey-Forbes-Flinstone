@@ -19,22 +19,17 @@ int cmd_sudo_require_auth(void);
 
 /** Like cmd_sudo_require_auth; uses reason for elevation grant and audit. */
 int cmd_sudo_require_auth_reason(const char *reason);
-/** Sign a sudo command line inside the window and start its clock again. When Root's key is
- *  not available, or the window ended before this sudo could renew it, nothing is renewed: sudo asks for
- *  the full co-signature again and signs the line under the new window. 0 when signed, 1 when sudo cannot
- *  go on. */
+/** Signs a sudo command line and restarts the window; asks for the full co-signature again when the
+ *  window cannot be renewed. Returns 0 when signed, 1 when sudo cannot go on. */
 int cmd_sudo_sign_action(const char *line);
-/** Sign a command run inside the window (not a sudo: the clock is not reset). When Root's key is not
- *  available the elevation ends and the command runs as the account itself. */
+/** Signs a command run inside the window without restarting it. When Root's key is unavailable the
+ *  elevation ends and the command runs as the account itself. */
 void cmd_sudo_sign_elevated(const char *line);
 
 /**
- * su and sudo -i (sudo non-zero): asks KeyQuorum which factor the switch to target demands
- * (fl_kq_unlock_requirement), prompts for it (the target's password, or Root's for sudo -i; for a
- * bridge, once that password is verified, also a bridge member's password: the caller when a member,
- * else the account it names, refused when over-long) and hands it to fl_session_switch_user, which
- * asks again, checks and commits. Every refusal prints the same "<cmd>: authentication failed"; the
- * reason is only in the audit. Every password is wiped. Returns 0 when the session is now target.
+ * Runs su or sudo -i (sudo non-zero): prompts for the factor KeyQuorum demands and hands it to
+ * fl_session_switch_user. Every refusal prints the same message; every password is wiped.
+ * Returns 0 when the session is now target.
  */
 int cmd_switch_user(const char *cmd, const char *target, int sudo);
 
