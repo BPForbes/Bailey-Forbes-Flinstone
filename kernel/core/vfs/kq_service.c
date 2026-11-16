@@ -263,44 +263,6 @@ size_t fl_kq_service_online_count(void) {
     return n;
 }
 
-/* Where Root's credential is stored for unattended boot is an open decision (the image region needs a written
- * exception and a threat model), so the service asks the runtime's provider and has none of its own: with no
- * provider there is no fallback. */
-static fl_kq_root_cred_fn s_root_cred;
-
-void fl_kq_service_set_root_credential_provider(fl_kq_root_cred_fn provider) {
-    pthread_mutex_lock(&s_mu);
-    s_root_cred = provider;
-    pthread_mutex_unlock(&s_mu);
-}
-
-static fl_result_t stored_root_credential(char *out, size_t cap) {
-    fl_kq_root_cred_fn provider;
-
-    pthread_mutex_lock(&s_mu);
-    provider = s_root_cred;
-    pthread_mutex_unlock(&s_mu);
-    if (!provider || !out || cap == 0)
-        return FL_RESULT_NOENT;
-    out[0] = '\0';
-    return provider(out, cap);
-}
-
-fl_result_t fl_kq_service_root_fallback(void) {
-    char cred[128];
-    fl_result_t rc = stored_root_credential(cred, sizeof cred);
-
-    if (rc != FL_RESULT_OK) {
-        mem_domain_secure_zero(cred, sizeof cred); /* a provider that failed part-way still wrote into it */
-        return rc == FL_RESULT_NOENT ? FL_RESULT_NOENT : FL_RESULT_ACCES;
-    }
-    rc = fl_kq_service_online_from_login(FL_HERITAGE_ROOT_KEY, cred);
-    mem_domain_secure_zero(cred, sizeof cred);
-    fl_audit_identity_event(FL_HERITAGE_ROOT_KEY, rc == FL_RESULT_OK ? "kq-root-fallback" : "kq-root-fallback-refused",
-                            "service", NULL); /* refused once, no retry here: the caller decides when to ask again */
-    return rc;
-}
-
 /* A parent who is not signed in, put together from the children who are (KQ-16). The record is the KQAS
  * bytes the account store holds for the parent; each online child with a box secret (FL-15) and a device
  * id in the account registry (the pairing row of its KQST) contributes its label, box secret and device

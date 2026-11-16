@@ -127,7 +127,6 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     ASSERT(fl_session_logout() == FL_RESULT_OK); /* the account that signed out loses its key */
     ASSERT(fl_kq_service_online_count() == 0);
     ASSERT(fl_kq_obtain_author_key(flin->key_id, key, &mode) == FL_RESULT_ACCES);
-    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT); /* no stored credential: the service stays up */
     ASSERT(fl_kq_service_alive());
     memset(expect, 0, sizeof expect);
     return 0;
@@ -245,47 +244,6 @@ static int test_box_key_residency(void) {
     ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     mem_domain_secure_zero(box, sizeof box);
     mem_domain_secure_zero(got, sizeof got);
-    return 0;
-}
-
-/* FL-20: the safe Root fallback asks the runtime's provider. None, or one with nothing stored: the service stays
- * as it was. A credential that does not open Root is refused and audited, and nothing comes online. One that
- * does brings Root's key online, the credential buffer is the provider's to have filled and the service to wipe. */
-static int s_cred_mode;
-static char s_cred_seen[128];
-static fl_result_t cred_provider(char *out, size_t cap) {
-    if (s_cred_mode == 0)
-        return FL_RESULT_NOENT;
-    if (s_cred_mode == 2)
-        return FL_RESULT_ERR; /* a provider that failed */
-    snprintf(out, cap, "%s", s_cred_mode == 1 ? "root" : "not-root's-password");
-    snprintf(s_cred_seen, sizeof s_cred_seen, "%s", out);
-    return FL_RESULT_OK;
-}
-
-static int test_the_root_fallback_asks_the_runtime(void) {
-    const fl_user_record_t *root = account("Root");
-    uint8_t key[32];
-    kq_signing_mode_t mode = 0;
-
-    ASSERT(root && fl_kq_service_online_count() == 0);
-    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT); /* no provider */
-    fl_kq_service_set_root_credential_provider(cred_provider);
-    s_cred_mode = 0;
-    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT && fl_kq_service_online_count() == 0); /* nothing stored */
-    s_cred_mode = 2;
-    ASSERT(fl_kq_service_root_fallback() != FL_RESULT_OK && fl_kq_service_online_count() == 0);    /* provider failed */
-    s_cred_mode = 3;
-    ASSERT(fl_kq_service_root_fallback() != FL_RESULT_OK && fl_kq_service_online_count() == 0);    /* wrong credential */
-    ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES);
-    s_cred_mode = 1;
-    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_OK && fl_kq_service_online_count() == 1);
-    ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_OK && mode == KQ_SIGNING_OWN);
-    mem_domain_secure_zero(key, sizeof key);
-    fl_kq_service_offline("Root");
-    ASSERT(fl_kq_service_online_count() == 0);
-    fl_kq_service_set_root_credential_provider(NULL);
-    ASSERT(fl_kq_service_root_fallback() == FL_RESULT_NOENT);
     return 0;
 }
 
@@ -1250,7 +1208,6 @@ int main(void) {
     if (!rc) RUN(test_the_key_table_is_locked_in_memory);
     if (!rc) RUN(test_kqst_login_commits_only_after_token_open);
     if (!rc) RUN(test_box_key_residency);
-    if (!rc) RUN(test_the_root_fallback_asks_the_runtime);
     if (!rc) RUN(test_a_kqst_account_cannot_log_in_by_password_alone);
     if (!rc) RUN(test_kqst_open_refusal_matrix);
     if (!rc) RUN(test_a_logout_that_overlaps_the_key_derivation_wins);

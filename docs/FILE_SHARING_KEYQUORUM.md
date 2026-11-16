@@ -810,10 +810,9 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
 - **Box key (FL-15).** A KQST login opens the signing and the box secret; the box secret is now published to the service as well
   (`fl_session_set_login_box_hook`, `fl_kq_service_online_box`), for the same login generation, and `fl_kq_obtain_box_key` hands a copy to the
   account's own label only. A password login publishes none; logout and shutdown wipe it.
-- **Root fallback.** `fl_kq_service_root_fallback` asks a provider the runtime registers (`fl_kq_service_set_root_credential_provider`) and
-  verifies what it returns through the normal login path, wipes its copy at once and audits `kq-root-fallback` or `kq-root-fallback-refused`.
-  With no provider it answers NOENT and unattended work waits until someone signs in. **Not decided:** where a stored Root credential lives (a
-  written exception and a threat model are needed), its format, and the boot window. The freestanding image has no sessions, so it has no service.
+- **No stored Root credential (owner decision, FL-20 #399).** The service never brings Root online from a stored credential. Root's
+  key is online only while someone who knows it has opened it: a Root sign-in, or a sudo that opened Root's KQST. When no one is signed in,
+  unattended work waits. The freestanding image has no sessions, so it has no service.
 
 ## Login, `su` and `sudo` (FL-12; KeyQuorum KQ-17, KQ-19, KQ-11)
 

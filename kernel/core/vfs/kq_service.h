@@ -69,26 +69,6 @@ fl_result_t fl_kq_obtain_box_key(const char *author_key_id, uint8_t out[32]);
 void fl_kq_service_offline(const char *account);
 size_t fl_kq_service_online_count(void);
 
-/**
- * Last resort when no one signs in: bring the service up with Root's stored credential. FL_RESULT_NOENT when
- * none is stored, which is every build today (where it would live is an open decision), and then the service
- * stays up and unattended work waits.
- */
-fl_result_t fl_kq_service_root_fallback(void);
-
-/**
- * Where Root's credential comes from is each runtime's to say, the way the labs let the runtime supply entropy,
- * the clock, storage and secret input: a hosted build reads a bounded file it is told about, the freestanding
- * image a reserved region, the labs nothing. The provider writes the NUL-terminated credential into out[cap]
- * and returns OK, NOENT when none is stored (the service stays up and unattended work waits), or any other
- * result to refuse. The service verifies the credential opens Root's pinned identity (the same login path as
- * a typed password), wipes its copy at once, and never stores or logs it. NULL removes the provider; with none
- * set the fallback answers NOENT, as before. The credential format, path and boot window are policy this does
- * not decide.
- */
-typedef fl_result_t (*fl_kq_root_cred_fn)(char *out, size_t cap);
-void fl_kq_service_set_root_credential_provider(fl_kq_root_cred_fn provider);
-
 /** A copy of the signing secret to sign as author_key_id, for the caller to wipe. ACCES when that account is
  *  not signed in and, for a parent whose assembly record the account store holds, cannot be assembled from
  *  the children online now (KQ_SIGNING_ASSEMBLED when it can; audited kq-assembled / kq-assemble-refused).
