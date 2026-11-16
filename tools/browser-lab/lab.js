@@ -621,15 +621,16 @@
       renderRelayStatus(error.message || "Connection failed");
     }
   }
-  // Two owners, both FIFO: guestKeys orders the bytes that reach the guest; guestExchange gives one
-  // caller the guest from its command until its last reply (and any password) is done. Everything
-  // the person sends (buttons, the command form, keystrokes) takes a guestExchange turn, so nothing
-  // can be typed into another exchange's Password: prompt. Replies the guest itself asked for
-  // (dnsack, file accept lines) only take guestKeys.
-  const guestKeys = core.createExclusiveQueue();
+  // Two owners, both FIFO: guestKeys orders and counts the input that reaches the guest;
+  // guestExchange gives one caller the guest from its command until its last reply (and any
+  // password) is done. Everything the person sends (buttons, the command form, keystrokes) takes a
+  // guestExchange turn. Replies the guest itself asked for (dnsack, file accept lines) take only
+  // guestKeys, so they go out at once; a password is still sent only if none of them (nor anything
+  // else) reached the guest after its exchange's command (core.driveGuestSteps).
+  const guestKeys = core.createGuestInput();
   const guestExchange = core.createExclusiveQueue();
   function enqueueGuest(work) {
-    return guestKeys.run(work);
+    return guestKeys.send(work);
   }
   function guestReady() {
     return emulator && typeof emulator.sendText === "function";
@@ -640,8 +641,8 @@
     return true;
   }
   // script: a string of plain command lines, or [{ line, secret }] steps from lab-core. A secret
-  // step (a password) is sent only when the guest has just asked for one, so a password is never
-  // typed as a command; otherwise nothing more is sent. The whole script is one guestExchange turn.
+  // step (a password) is sent only as the answer to its own command's prompt (core.driveGuestSteps),
+  // so a password is never typed as a command. The whole script is one guestExchange turn.
   function sendGuestLines(script, patterns) {
     return guestExchange.run(() => driveGuestLines(script, patterns));
   }
@@ -657,22 +658,15 @@
       if (lines[lines.length - 1] === "") lines.pop();
       steps = lines.map(line => ({ line, secret: false }));
     }
-    let asked = false;
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      if (step.secret && !asked) {
-        text("account-status", "The guest did not ask for a password, so nothing more was sent.");
-        return false;
-      }
-      const from = serialTail.length;
-      if (!await sendGuest(`${step.line}\n`)) return false;
-      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
-      await waitSerial(pattern, 4000, from);
-      const said = serialTail.slice(from);
-      asked = /Password:/.test(said);
-      if (/unknown user|authentication failed/.test(said)) return false;
-    }
-    return true;
+    return core.driveGuestSteps(steps, patterns, {
+      input: guestKeys,
+      ready: guestReady,
+      write: value => emulator.sendText(value),
+      mark: () => serialTail.length,
+      wait: (re, from) => waitSerial(re, 4000, from),
+      said: from => serialTail.slice(from),
+      status: message => text("account-status", message),
+    });
   }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
