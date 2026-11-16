@@ -199,3 +199,79 @@ the migration also adds `Alternative`.
 - **The freestanding kernel and the browser lab** use the canonical `Flinstone` and `Root`
   spellings, matched regardless of case, but have no key ids, keys or bridges: they are a
   separate, self-contained identity.
+
+## Code contracts
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+These are the rules the identity code keeps. The behaviour above is the user-facing side.
+
+### Login, logout and the key hooks (`kernel/core/identity/session.[ch]`)
+
+- A login or logout starts a new login generation. Generations start at 1, and 0 is never a live generation.
+- `fl_session_publish_if_current` runs its publish callback under the session lock, and only while the login that
+  made the copy is still current. Otherwise it answers `BUSY` and publishes nothing. Generation 0 publishes
+  unconditionally. The callback must not call back into the session, because the lock is not recursive.
+- The online hook for a password login cannot refuse the login. A KQST login refuses when the token will not open
+  or when the opened-secret hook fails.
+- A KQST login opens its slot token with the session still hidden. When the token opens, the login's generation must
+  still be current. A logout, or another login in the meantime, supersedes the attempt and the open is refused.
+- A password account that has no key gets one at login, sealed under the password just verified. A failure does not
+  block the login. A new key the store cannot save is forgotten again (`fl_user_db_forget_created`), so no signature
+  is made with a key the store does not hold.
+- A password login does not publish a box key. A KQST login does.
+- The login name is stored as the account's own spelling, so `login root` signs in as `Root`.
+
+### Account store rules (`kernel/core/identity/user_db.[ch]`)
+
+- Names match case-insensitively, and the stored spelling is canonical. A child name must match `[A-Za-z0-9_-]`
+  with 1 to 31 characters, and `Root` cannot be a child name. A name already taken, in any case, is refused.
+- A store whose names differ only by case (`root` and `Root`) is refused and left unchanged. Saving it would
+  overwrite one record with the other.
+- `fl_user_db_ensure_key` reports what it created (`FL_USER_DB_CREATED_KEYS` or `FL_USER_DB_CREATED_BOX`).
+  `fl_user_db_forget_created` undoes exactly that, so an existing signing key and what it signed survive a failed save.
+- Heritage migration (see the Storage and migration section above) returns 1 when it changed something. A legacy
+  name that is not a valid segment keeps no key id, so the account can log in but holds no authority and no bridge.
+- A secret is opened only through `open_sealed_record`. Once the driver's `account_open` has run, every failure leaves
+  the secret zeroed. The caller wipes the secret it was given.
+- `fl_user_db_secret_matches` derives the public key from the candidate secret and compares it in constant time. It
+  wipes the derived bytes on every exit, and it does not wipe the candidate, which belongs to the caller.
+- The sealed secret must be the one the stored public key names.
+
+### Heritage results (`kernel/core/identity/heritage.c`)
+
+| Driver result | `fl_result_t` |
+|---------------|---------------|
+| `KQ_HERITAGE_OK` | `OK` |
+| `TOO_DEEP`, `NO_ROOM` | `NOMEM` |
+| anything else | `INVAL` |
+
+`fl_heritage_parent` of the master key returns `NOENT`, because the master has no parent.
+
+### Elevation and authorisation
+
+- The elevation pool has 16 slots (`FL_ELEV_MAX_SLOTS`, `kernel/core/identity/elevation.c`).
+- `FL_AUTHZ_OP_KQ_SERVICE_CONTROL` is refused for every principal before any installed hook runs, including a guest
+  with no elevation. The denial is audited through the sink the key service installs
+  (`kernel/include/fl/authz_subsystem.h`). Only an orderly shutdown ends the key service.
+
+### Account commands (`userland/command/`)
+
+- `userdel` is allowed only to an ancestor of the account. A user never removes themselves, a sibling or another branch.
+- Bridges are removed before the account. A bridge row left behind for a removed key would give the next account
+  created under that name the old access. If the bridges cannot be removed, the account stays. If the save then
+  fails, the account stays too, without its bridges, and the message says the bridges must be requested again.
+- `passwd` for yourself keeps the signing key, sealed again under the new password. An ancestor's reset cannot open
+  that key, so the account gets a new one and its bridges must be signed again.
+- `cmd_open_account_keys` prompts once for the logged-in account's password, creates any missing key and saves it,
+  opens the signing key and the box key into caller buffers, and wipes the password. A failed save undoes what was
+  created, so no key the store does not hold can sign.
+- `cmd_authutil` wipes with `asm_mem_secure_zero`, because a plain `memset` of a dying buffer may be optimised away.
+- `sudo -i` prompts for Root's password, never the caller's. A Root that is not in the KQST mode (password only)
+  refuses `sudo -i` for every account, and the reason is shown.
+
+### Tests that pin these
+
+`tests/test_heritage.c` (key ids, migration, bridge reach, account homes, the share gate),
+`tests/test_secret_compare.c` (constant-time compare and wipes, with `--wrap=asm_mem_secure_zero`), and
+`tests/test_kq_real_token.c` (a KQST open against a driver the test patches through `--wrap`). See [TEST_FIXTURES.md](TEST_FIXTURES.md).

@@ -130,3 +130,32 @@ checkpoint runs.
   measured against the image's RAM), keeps everything in `MEM_DOMAIN_FS` memory and loses it at reset, has no locking (checkpoints run under the
   shell's lock), and wipes freed bytes. `dir_commit` stages every new buffer before it swaps any, so a failure installs nothing.
 - The restore-failure path of `fl_fs_commit_files` has no test that forces a rename to fail.
+
+## Landing names and commits
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+The placement layer (`kernel/core/vfs/server_shared_fs.[ch]`) is described in
+[ARCH.md](ARCH.md#server-shared-file-placement). The checkpoints depend on these rules:
+
+| Name | Meaning |
+|------|---------|
+| `.part` | staging file a write goes through before its rename (`FL_FS_PART_SUFFIX`) |
+| `.kqbak` | backup of a file a commit replaces (`FL_FS_BACKUP_SUFFIX`) |
+| `.meta` | sidecar of a share payload (`FL_SERVER_SHARED_META_SUFFIX`) |
+| `.kqtf`, `.kqseen`, `.kqer` | the tracked container, the accepted-pairs record and an error report |
+
+`fl_server_shared_name_is_reserved` refuses every one of these names, in any ASCII case, as a delivery's
+landing name. The names are one list, shared by the share landing and the checkpoints.
+
+- `fl_fs_commit_files` takes 1 to 4 files (`FL_FS_COMMIT_FILES_MAX`). Each name is plain and at most
+  `FL_FS_COMMIT_NAME_MAX` bytes (255 minus 11, so `.kqbak.part` fits). No two names may be siblings of one
+  another, so one file's staging name cannot be another's payload.
+- The commit stages every `.part` first. A stale `.kqbak` is removed before each file is backed up, so a
+  leftover from an earlier run never blocks it. A file that is replaced is kept as `.kqbak`, by hard link or
+  by copy. The parts are then renamed into place. If a step fails, the files already replaced are put back and
+  the parts are removed.
+- An existence check that cannot tell (`fl_fs_exists_in` returns -1) stops the commit before anything is
+  replaced. A container that cannot be read is never treated as absent.
+- Where the contained calls exist, a landing directory without a file descriptor is refused: `EBADF` for an
+  absent descriptor, and the path is never a silent fallback.

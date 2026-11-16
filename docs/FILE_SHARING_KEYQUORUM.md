@@ -961,3 +961,15 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   `sudo`. The freestanding image has none of this (its access and bridge driver ops are NULL: the
   SECFEAT image had no room for them). A bridge's reach (`fl_heritage_bridge_connects`) also goes through the
   driver (`bridge_connects`); no driver or no op does not connect.
+
+## Code contracts
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+The rules a maintainer needs when changing the code behind this design are in three companion pages, so
+this document does not grow further:
+
+- [KQ_WIRE_CONTRACTS.md](KQ_WIRE_CONTRACTS.md): the session frames, opcodes, upload and history limits, and error reports.
+- [KQ_CODE_CONTRACTS.md](KQ_CODE_CONTRACTS.md): the host delivery store, the checkpoint decode order and result codes,
+  and the key service header rules.
+- [DRIVER_ARCHITECTURE.md](DRIVER_ARCHITECTURE.md#keyquorum-security-driver-abi): the driver's constants and ABI op table.

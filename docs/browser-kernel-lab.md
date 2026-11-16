@@ -312,3 +312,12 @@ COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-i
 The lab fetches `./artifacts/build-info.json`, then
 `./artifacts/<artifact>?v=<shortCommit>`. Failed commits leave the previously
 deployed image in their slot untouched.
+
+## KeyQuorum, boot and test notes
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+- The lab's KeyQuorum shell, its stand-ins for the native primitives, and its page behaviour are in
+  [LAB_KQ_SHELL.md](LAB_KQ_SHELL.md).
+- The freestanding boot, the KeyQuorum heap and the platform entropy order are in [FREESTANDING_BOOT.md](FREESTANDING_BOOT.md).
+- The shared test helpers and link-time seams are in [TEST_FIXTURES.md](TEST_FIXTURES.md).
