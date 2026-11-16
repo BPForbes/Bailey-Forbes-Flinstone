@@ -86,9 +86,39 @@ sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 # The payload is followed by bss (the stack, the queues, the KeyQuorum library's statics) in the same
 # conventional memory: its end must stay below 0x9f000 (the EBDA starts at 0x9fc00, VGA at 0xa0000).
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
-(( bss_end > 0 && bss_end < 0x9f000 )) || { echo "image plus bss ends at ${bss_end}: past the conventional-memory budget (0x9f000)" >&2; exit 1; }
-# FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
 payload_bytes=$(stat -c%s "${build}/kernel.bin")
+# FL-02 image layout: the entry is the first loaded byte at the link address the loader jumps to,
+# everything the loader reads (whole sectors) lies below the budget, nothing loaded overlaps the bss
+# that entry.asm clears, and the bss ends inside the budget. Python integers: no wraparound.
+nm "${build}/kernel.elf" | python3 -c '
+import sys
+payload, sectors = int(sys.argv[1]), int(sys.argv[2])
+base_expected, budget = 0x10000, 0x9f000
+sym = {}
+for line in sys.stdin:
+    f = line.split()
+    if len(f) == 3:
+        sym[f[2]] = int(f[0], 16)
+need = ("__kernel_start", "kernel_entry", "__bss_start", "__bss_end")
+missing = [n for n in need if n not in sym]
+if missing:
+    sys.exit("image layout: missing symbols: " + ", ".join(missing))
+start, entry, bss_start, bss_end = (sym[n] for n in need)
+problems = []
+if start != base_expected or entry != start:
+    problems.append("entry %#x / image start %#x is not the load address %#x" % (entry, start, base_expected))
+if start + payload > bss_start:
+    problems.append("loaded bytes end at %#x, past the bss start %#x" % (start + payload, bss_start))
+if bss_end < bss_start:
+    problems.append("bss end %#x is below its start %#x" % (bss_end, bss_start))
+if start + sectors * 512 > budget:
+    problems.append("the loader reads up to %#x, past the budget %#x" % (start + sectors * 512, budget))
+if not 0 < bss_end < budget:
+    problems.append("image plus bss ends at %#x: past the conventional-memory budget (%#x)" % (bss_end, budget))
+if problems:
+    sys.exit("image layout: " + "; ".join(problems))
+' "${payload_bytes}" "${sectors}"
+# FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
 python3 - "${build}/boot.bin" "$sectors" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())

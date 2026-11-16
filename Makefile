@@ -1105,6 +1105,13 @@ test_fs_identity:
 	  -o tests/test_fs_identity tests/test_fs_identity.c kernel/freestanding/x86_64/identity.c
 	./tests/test_fs_identity
 
+# FL-02: the freestanding image's E820 arena selection, run on the host.
+.PHONY: test_fs_bootmap
+test_fs_bootmap:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -Ikernel/freestanding/x86_64 \
+	  -o tests/test_fs_bootmap tests/test_fs_bootmap.c kernel/freestanding/x86_64/bootmap.c
+	./tests/test_fs_bootmap
+
 .PHONY: test_hex
 test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \
