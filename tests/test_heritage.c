@@ -2837,6 +2837,39 @@ static int test_sudo_renew_after_window_ended(void) {
     return 0;
 }
 
+/* coder-3712dc (CR 4587909942): su -c's restore point is one capture, the account and its login together.
+ * A login between the capture and the restore is refused (generation mismatch), and a capture taken after
+ * that login names the new login's account with its own generation, never the account of the login before. */
+static int test_restore_point_captured_together(void) {
+    fl_session_restore_point_t before, after;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_capture_restore_point(NULL) == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_capture_restore_point(&before) == FL_RESULT_OK);
+    ASSERT(!strcmp(before.user, "Flinstone"));
+    ASSERT(before.login_generation != 0 && before.login_generation == fl_session_login_generation());
+    ASSERT(fl_session_logout() == FL_RESULT_OK); /* a new login generation */
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    ASSERT(fl_session_capture_restore_point(&after) == FL_RESULT_OK);
+    ASSERT(!strcmp(after.user, "Bob"));
+    ASSERT(after.login_generation == fl_session_login_generation());
+    ASSERT(after.login_generation != before.login_generation);
+    /* The switch su makes does not start a generation; the stale capture is refused and changes nothing. */
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_login_generation() == after.login_generation);
+    s_audit[0] = '\0';
+    ASSERT(fl_session_restore_user(before.user, before.login_generation) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(!strcmp(s_audit, "su-restore-refused:superseded"));
+    /* The capture of the current login restores its own account. */
+    ASSERT(fl_session_restore_user(after.user, after.login_generation) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
     char db_dir[] = "/tmp/fl_heritage_storeXXXXXX";
@@ -2886,6 +2919,7 @@ int main(void) {
     RUN(test_token_write_refuses_unsafe_places);
     RUN(test_elevation_window_refresh);
     RUN(test_restore_user);
+    RUN(test_restore_point_captured_together); /* coder-3712dc */
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);
     RUN(test_account_command_reload_fails_closed);

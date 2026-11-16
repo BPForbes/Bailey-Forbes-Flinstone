@@ -468,6 +468,17 @@ fl_result_t fl_session_set_user(const char *name) {
     return set_user_if_current(name, 0);
 }
 
+fl_result_t fl_session_capture_restore_point(fl_session_restore_point_t *out) {
+    if (!out)
+        return FL_RESULT_INVAL;
+    fl_session_init();
+    pthread_mutex_lock(&s_session_mu);
+    snprintf(out->user, sizeof out->user, "%s", s_current);
+    out->login_generation = s_login_gen;
+    pthread_mutex_unlock(&s_session_mu);
+    return FL_RESULT_OK;
+}
+
 fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation) {
     if (login_generation == 0)
         return FL_RESULT_INVAL; /* 0 would mean unchecked: a restore always names its login */
