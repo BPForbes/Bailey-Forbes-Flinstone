@@ -191,6 +191,11 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     return 0;
 }
 
+static void report_elevation_end(int deelevated) {
+    fprintf(stderr, deelevated ? "sudo: Root's key is not available, so the elevation ended; sign in again\n"
+                               : "sudo: the elevation ended before the command was signed; run sudo again\n");
+}
+
 int cmd_sudo_sign_action(const char *line) {
     int deelevated = 0;
 
@@ -198,15 +203,18 @@ int cmd_sudo_sign_action(const char *line) {
         line = "sudo";
     (void)fl_session_elevated_action(line, 1, &deelevated);
     if (deelevated)
-        fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; sign in again\n");
+        report_elevation_end(1);
     else if (fl_session_has_elevation())
         return 0;
-    /* Otherwise the window ended before this sudo could renew it: nothing was renewed, so sudo asks
-     * for the full co-signature again before it reports success. */
+    /* The window ended before this sudo could renew it: nothing was renewed, so sudo asks for the
+     * full co-signature again, and succeeds only if the line was then signed under a live window. */
     if (cmd_sudo_require_auth_reason("sudo authentication") != 0)
         return 1;
     (void)fl_session_elevated_action(line, 1, &deelevated);
-    return deelevated ? 1 : 0;
+    if (!deelevated && fl_session_has_elevation())
+        return 0;
+    report_elevation_end(deelevated);
+    return 1;
 }
 
 void cmd_sudo_sign_elevated(const char *line) {

@@ -2778,6 +2778,14 @@ static int sudo_sign_with_answers(const char *line, const char *answers) {
     return rc;
 }
 
+/* Ends every window as soon as sudo has granted one: the window is gone before the line is signed. */
+static void audit_end_window_on_coauth(const char *actor, const char *event, const char *subject,
+                                       const char *detail) {
+    capture_audit(actor, event, subject, detail);
+    if (event && !strcmp(event, "sudo-coauth"))
+        fl_elevation_revoke_all();
+}
+
 static int test_sudo_renew_after_window_ended(void) {
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     static const char action_want[] = "sudo-action:sudo; nonce=";
@@ -2826,6 +2834,13 @@ static int test_sudo_renew_after_window_ended(void) {
     fl_elevation_revoke_all();
     ASSERT(sudo_sign_with_answers("sudo", "flinstone\nflinstone\n") != 0);
     ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(!fl_session_has_elevation());
+    /* The window ends between the re-authentication and the signing: sudo reports failure, not success. */
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    fl_elevation_revoke_all();
+    fl_session_set_audit_hook(audit_end_window_on_coauth);
+    ASSERT(sudo_sign_with_answers("sudo", "root\nflinstone\n") != 0);
+    fl_session_set_audit_hook(capture_audit);
     ASSERT(!fl_session_has_elevation());
 
     s_patch = NULL;
