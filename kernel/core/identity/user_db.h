@@ -83,6 +83,49 @@ fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
                                     unsigned char encryption_public[32]);
 
 /*
+ * One account_keys row, copied whole, so a caller that replaces it can put it back exactly as it
+ * was (present = 0: there was no row, and a restore deletes the one written since).
+ */
+#define FL_USER_KQST_PATH_MAX   512u
+#define FL_USER_KQST_TEXT_MAX   128u
+#define FL_USER_KQST_HASH_MAX   64u
+
+typedef struct fl_user_kqst_row {
+    int           present;
+    char          purpose[FL_USER_KQST_TEXT_MAX];
+    int64_t       holds_share;
+    char          minted_by[FL_USER_KQST_TEXT_MAX];
+    int64_t       minted_at;
+    int64_t       generation;
+    int           has_path;
+    char          kqst_path[FL_USER_KQST_PATH_MAX];
+    unsigned char device_id[16];
+    unsigned char signing_public[32];
+    unsigned char encryption_public[32];
+    int64_t       ledger_seq;
+    unsigned char event_hash[FL_USER_KQST_HASH_MAX];
+    size_t        event_hash_len;
+} fl_user_kqst_row_t;
+
+/**
+ * Pair key_id with the slot token at kqst_path (enrolment): writes its account_keys row, replacing
+ * any earlier one, with generation one past the earlier row's (1 for the first). purpose "own",
+ * minted_by key_id (the account enrolled its own token), minted_at as given, no ledger entry yet
+ * (ledger_seq 0, a 32-byte zero event hash). The path is stored as given. INVAL for a malformed
+ * argument (empty or over-long path); *generation_out (may be NULL) is the row's generation.
+ */
+fl_result_t fl_user_db_kqst_register(const fl_user_db_t *db, const char *key_id, const char *kqst_path,
+                                     const unsigned char device_id[16],
+                                     const unsigned char signing_public[32],
+                                     const unsigned char encryption_public[32], int64_t minted_at,
+                                     int64_t *generation_out);
+/** Copy key_id's account_keys row (present = 0 when there is none). */
+fl_result_t fl_user_db_kqst_row_get(const fl_user_db_t *db, const char *key_id, fl_user_kqst_row_t *out);
+/** Put back a row copied by fl_user_db_kqst_row_get: rewritten whole, or deleted when not present. */
+fl_result_t fl_user_db_kqst_row_restore(const fl_user_db_t *db, const char *key_id,
+                                        const fl_user_kqst_row_t *row);
+
+/*
  * Private bridges (KeyQuorum's, mirrored in the account store's account_bridges and
  * account_bridge_members tables; not the account-to-account bridges of bridge.c). The store is the
  * caller's own trusted record, read at call time like account_keys: a bridge is live when its row

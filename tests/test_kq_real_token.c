@@ -23,7 +23,7 @@
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL [%s:%d]: %s\n", __FILE__, __LINE__, #c); return 1; } } while (0)
 
-static char s_bob_pw[128], s_ann_pw[128];
+static char s_bob_pw[128], s_ann_pw[128], s_root_pw[128];
 static char s_audit_last[64];
 
 static const char *env(const char *name) {
@@ -799,6 +799,50 @@ static int test_parent_key_assembly(void) {
     return 0;
 }
 
+/*
+ * Root's own real KQST, paired through the store's enrolment path (owner decision on PR 416), then
+ * sudo co-authorised by two real tokens: Root's (Root's passphrase) and the invoker Bob's (Bob's).
+ */
+static int test_root_enrol_and_sudo(void) {
+    unsigned char dev[16], sig[32], enc[32], wrong[32];
+    int64_t gen = 0;
+
+    ASSERT(fl_hex_decode(env("FL_RT_ROOT_DEVICE"), dev, sizeof dev) == 0);
+    ASSERT(fl_hex_decode(env("FL_RT_ROOT_SIG"), sig, sizeof sig) == 0);
+    ASSERT(fl_hex_decode(env("FL_RT_ROOT_ENC"), enc, sizeof enc) == 0);
+    ASSERT(fl_hex_decode(env("FL_RT_ANN_SIG"), wrong, sizeof wrong) == 0);
+    /* The token's passphrase is the account's password. */
+    ASSERT(fl_session_set_password("Root", s_root_pw) == FL_RESULT_OK);
+    ASSERT(fl_session_save_users() == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    ASSERT(!fl_session_sudo_needs_root());
+    /* Wrong facts, wrong password, Bob's token: KeyQuorum refuses each; nothing is paired. */
+    ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_ROOT_KQST"), dev, wrong, enc, 1, &gen) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit_last, "kqst-enrol-refused:kqst"));
+    ASSERT(fl_session_enroll_kqst(s_bob_pw, env("FL_RT_ROOT_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit_last, "kqst-enrol-refused:password"));
+    ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_BOB_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit_last, "kqst-enrol-refused:kqst"));
+    ASSERT(!fl_session_sudo_needs_root());
+    /* The real facts: paired, and Root's token opens from the store. */
+    ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_ROOT_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_OK);
+    ASSERT(gen == 1);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_kq_open_account("Root", s_root_pw, NULL) == FL_KQ_ACCOUNT_OK);
+
+    /* Bob (a KQST account with its own real token) runs sudo: both tokens, or nothing. */
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_authenticate(s_bob_pw, s_bob_pw) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit_last, "sudo-refused:password"));
+    ASSERT(fl_session_sudo_authenticate(s_root_pw, s_ann_pw) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit_last, "sudo-refused:invoker-password"));
+    ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit_last, "sudo-coauth:sudo; invoker token"));
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+    return 0;
+}
+
 int main(void) {
     char users[512];
     int rc = 0;
@@ -808,7 +852,8 @@ int main(void) {
         return 1;
     }
     if (read_pass("bob.pass", s_bob_pw, sizeof s_bob_pw) != 0 ||
-        read_pass("ann.pass", s_ann_pw, sizeof s_ann_pw) != 0) {
+        read_pass("ann.pass", s_ann_pw, sizeof s_ann_pw) != 0 ||
+        read_pass("root.pass", s_root_pw, sizeof s_root_pw) != 0) {
         fprintf(stderr, "test_kq_real_token: fixture passphrases missing\n");
         return 1;
     }
@@ -829,7 +874,9 @@ int main(void) {
     RUN(test_bridge_su);
     RUN(test_bridge_fact_races);
     RUN(test_parent_key_assembly);
+    RUN(test_root_enrol_and_sudo);
     mem_domain_secure_zero(s_bob_pw, sizeof s_bob_pw);
+    mem_domain_secure_zero(s_root_pw, sizeof s_root_pw);
     mem_domain_secure_zero(s_ann_pw, sizeof s_ann_pw);
     if (rc == 0)
         printf("All real-token tests passed.\n");

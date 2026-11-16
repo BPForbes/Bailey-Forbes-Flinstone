@@ -7,6 +7,8 @@
 #     Root.Flinstone.Bob and Root.Alternative.Ann, each sealed under a passphrase drawn from
 #     /dev/urandom at run time (never a literal; kept only in owner-only files in the temp dir);
 #   - a third device whose id is a real device id that holds neither token (the wrong-device case);
+#   - a fourth device with a slot token for Root itself (the master identity), which the C test pairs
+#     through the account store's enrolment path and then uses for sudo;
 #   - a KeyQuorum private bridge between Bob and Ann (bridge private create, with Bob's sealed copy
 #     of the bridge secret kept in the KeyQuorum store), whose facts the C test copies into
 #     Flinstone's account store.
@@ -43,6 +45,7 @@ trap 'rm -rf -- "${tmp}"' EXIT
 # Run-time passphrases (base64 of 24 random bytes), one per account.
 head -c 24 /dev/urandom | base64 > "${tmp}/bob.pass"
 head -c 24 /dev/urandom | base64 > "${tmp}/ann.pass"
+head -c 24 /dev/urandom | base64 > "${tmp}/root.pass"
 
 device_id() { sed -n 's/^Initialized .* device \([0-9a-f]\{32\}\)$/\1/p'; }
 slot_key() { awk -v k="$1" '$1 == k { print $2 }'; }
@@ -50,15 +53,20 @@ slot_key() { awk -v k="$1" '$1 == k { print $2 }'; }
 bob_dev="$("${kqd}" init "${tmp}/usb-bob" | device_id)"
 ann_dev="$("${kqd}" init "${tmp}/usb-ann" | device_id)"
 other_dev="$("${kqd}" init "${tmp}/usb-other" | device_id)"
+root_dev="$("${kqd}" init "${tmp}/usb-root" | device_id)"
 python3 -I "${answer}" "${tmp}/bob.pass" "${kqd}" provision "${tmp}/usb-bob" --label Root.Flinstone.Bob \
     > "${tmp}/bob.slot"
 python3 -I "${answer}" "${tmp}/ann.pass" "${kqd}" provision "${tmp}/usb-ann" --label Root.Alternative.Ann \
     > "${tmp}/ann.slot"
+python3 -I "${answer}" "${tmp}/root.pass" "${kqd}" provision "${tmp}/usb-root" --label Root \
+    > "${tmp}/root.slot"
 bob_enc="$(slot_key encryption < "${tmp}/bob.slot")"
 bob_sig="$(slot_key signing < "${tmp}/bob.slot")"
 ann_enc="$(slot_key encryption < "${tmp}/ann.slot")"
 ann_sig="$(slot_key signing < "${tmp}/ann.slot")"
-for v in bob_dev ann_dev other_dev bob_enc bob_sig ann_enc ann_sig; do
+root_enc="$(slot_key encryption < "${tmp}/root.slot")"
+root_sig="$(slot_key signing < "${tmp}/root.slot")"
+for v in bob_dev ann_dev other_dev root_dev bob_enc bob_sig ann_enc ann_sig root_enc root_sig; do
     [ -n "${!v}" ] || { echo "test_kq_real_token: the CLI did not print ${v}" >&2; exit 1; }
 done
 
@@ -87,5 +95,7 @@ export FL_RT_BOB_DEVICE="${bob_dev}" FL_RT_ANN_DEVICE="${ann_dev}" FL_RT_OTHER_D
 export FL_RT_BOB_ENC="${bob_enc}" FL_RT_BOB_SIG="${bob_sig}" FL_RT_ANN_ENC="${ann_enc}" FL_RT_ANN_SIG="${ann_sig}"
 export FL_RT_BOB_KQST="${tmp}/usb-bob/vault/slot-Root.Flinstone.Bob/token.kqst"
 export FL_RT_ANN_KQST="${tmp}/usb-ann/vault/slot-Root.Alternative.Ann/token.kqst"
+export FL_RT_ROOT_DEVICE="${root_dev}" FL_RT_ROOT_ENC="${root_enc}" FL_RT_ROOT_SIG="${root_sig}"
+export FL_RT_ROOT_KQST="${tmp}/usb-root/vault/slot-Root/token.kqst"
 cd "${tmp}"
 "${test_bin}"

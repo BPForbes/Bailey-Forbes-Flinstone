@@ -1138,6 +1138,195 @@ fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
     return rc;
 }
 
+static fl_result_t bridge_db_open(const fl_user_db_t *db, int writable, sqlite3 **out);
+
+fl_result_t fl_user_db_kqst_register(const fl_user_db_t *db, const char *key_id, const char *kqst_path,
+                                     const unsigned char device_id[16],
+                                     const unsigned char signing_public[32],
+                                     const unsigned char encryption_public[32], int64_t minted_at,
+                                     int64_t *generation_out) {
+    static const unsigned char zero_hash[32];
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_ERR;
+    int64_t generation = 1;
+
+    if (!db || !key_id || !key_id[0] || !kqst_path || !kqst_path[0] ||
+        strlen(kqst_path) >= FL_USER_KQST_PATH_MAX || !device_id || !signing_public ||
+        !encryption_public)
+        return FL_RESULT_INVAL;
+    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (sqlite3_exec(sql, "BEGIN IMMEDIATE;", NULL, NULL, NULL) != SQLITE_OK)
+        goto out;
+    if (sqlite3_prepare_v2(sql, "SELECT generation FROM account_keys WHERE label = ?;", -1, &st, NULL) !=
+        SQLITE_OK)
+        goto rollback;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int64(st, 0) > 0)
+        generation = sqlite3_column_int64(st, 0) + 1;
+    sqlite3_finalize(st);
+    st = NULL;
+    if (sqlite3_prepare_v2(sql,
+                           "INSERT OR REPLACE INTO account_keys (label,purpose,holds_share,minted_by,"
+                           "minted_at,generation,kqst_path,device_id,signing_public,encryption_public,"
+                           "ledger_seq,event_hash) VALUES (?,'own',1,?,?,?,?,?,?,?,0,?);",
+                           -1, &st, NULL) != SQLITE_OK)
+        goto rollback;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, key_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, minted_at);
+    sqlite3_bind_int64(st, 4, generation);
+    sqlite3_bind_text(st, 5, kqst_path, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 6, device_id, 16, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 7, signing_public, 32, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 8, encryption_public, 32, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 9, zero_hash, sizeof zero_hash, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_DONE)
+        goto rollback;
+    sqlite3_finalize(st);
+    st = NULL;
+    if (sqlite3_exec(sql, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK)
+        goto rollback;
+    if (generation_out)
+        *generation_out = generation;
+    rc = FL_RESULT_OK;
+    goto out;
+rollback:
+    if (st)
+        sqlite3_finalize(st);
+    st = NULL;
+    (void)sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL);
+out:
+    sqlite3_close(sql);
+    return rc;
+}
+
+static void kqst_copy_text(sqlite3_stmt *st, int col, char *out, size_t cap) {
+    const char *v = (const char *)sqlite3_column_text(st, col);
+
+    snprintf(out, cap, "%s", v ? v : "");
+}
+
+static void kqst_copy_blob(sqlite3_stmt *st, int col, unsigned char *out, size_t cap, size_t *len) {
+    const void *v = sqlite3_column_blob(st, col);
+    size_t n = (size_t)sqlite3_column_bytes(st, col);
+
+    memset(out, 0, cap);
+    if (n > cap)
+        n = cap;
+    if (v && n)
+        memcpy(out, v, n);
+    if (len)
+        *len = v ? n : 0;
+}
+
+fl_result_t fl_user_db_kqst_row_get(const fl_user_db_t *db, const char *key_id, fl_user_kqst_row_t *out) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_ERR;
+
+    if (!db || !key_id || !out)
+        return FL_RESULT_INVAL;
+    memset(out, 0, sizeof *out);
+    if (sqlite3_open_v2(db->path[0] ? db->path : FL_USERS_DB_DEFAULT_PATH, &sql, SQLITE_OPEN_READONLY, NULL) !=
+        SQLITE_OK) {
+        if (sql)
+            sqlite3_close(sql);
+        return FL_RESULT_ERR;
+    }
+    if (sqlite3_prepare_v2(sql,
+                           "SELECT purpose,holds_share,minted_by,minted_at,generation,kqst_path,device_id,"
+                           "signing_public,encryption_public,ledger_seq,event_hash FROM account_keys "
+                           "WHERE label = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        goto out;
+    sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    switch (sqlite3_step(st)) {
+    case SQLITE_ROW:
+        /* A row this copy cannot hold whole is not copied: a restore would change it. */
+        if ((size_t)sqlite3_column_bytes(st, 5) >= sizeof out->kqst_path ||
+            (size_t)sqlite3_column_bytes(st, 0) >= sizeof out->purpose ||
+            (size_t)sqlite3_column_bytes(st, 2) >= sizeof out->minted_by ||
+            sqlite3_column_bytes(st, 6) != 16 || sqlite3_column_bytes(st, 7) != 32 ||
+            sqlite3_column_bytes(st, 8) != 32 ||
+            (size_t)sqlite3_column_bytes(st, 10) > sizeof out->event_hash)
+            break;
+        out->present = 1;
+        kqst_copy_text(st, 0, out->purpose, sizeof out->purpose);
+        out->holds_share = sqlite3_column_int64(st, 1);
+        kqst_copy_text(st, 2, out->minted_by, sizeof out->minted_by);
+        out->minted_at = sqlite3_column_int64(st, 3);
+        out->generation = sqlite3_column_int64(st, 4);
+        out->has_path = sqlite3_column_type(st, 5) != SQLITE_NULL;
+        kqst_copy_text(st, 5, out->kqst_path, sizeof out->kqst_path);
+        kqst_copy_blob(st, 6, out->device_id, sizeof out->device_id, NULL);
+        kqst_copy_blob(st, 7, out->signing_public, sizeof out->signing_public, NULL);
+        kqst_copy_blob(st, 8, out->encryption_public, sizeof out->encryption_public, NULL);
+        out->ledger_seq = sqlite3_column_int64(st, 9);
+        kqst_copy_blob(st, 10, out->event_hash, sizeof out->event_hash, &out->event_hash_len);
+        rc = FL_RESULT_OK;
+        break;
+    case SQLITE_DONE:
+        rc = FL_RESULT_OK; /* no row: present stays 0 */
+        break;
+    default:
+        break;
+    }
+out:
+    if (st)
+        sqlite3_finalize(st);
+    sqlite3_close(sql);
+    return rc;
+}
+
+fl_result_t fl_user_db_kqst_row_restore(const fl_user_db_t *db, const char *key_id,
+                                        const fl_user_kqst_row_t *row) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_result_t rc = FL_RESULT_ERR;
+
+    if (!db || !key_id || !row)
+        return FL_RESULT_INVAL;
+    if (bridge_db_open(db, 1, &sql) != FL_RESULT_OK)
+        return FL_RESULT_ERR;
+    if (!row->present) {
+        if (sqlite3_prepare_v2(sql, "DELETE FROM account_keys WHERE label = ?;", -1, &st, NULL) !=
+            SQLITE_OK)
+            goto out;
+        sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+    } else {
+        if (sqlite3_prepare_v2(sql,
+                               "INSERT OR REPLACE INTO account_keys (label,purpose,holds_share,minted_by,"
+                               "minted_at,generation,kqst_path,device_id,signing_public,encryption_public,"
+                               "ledger_seq,event_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?);",
+                               -1, &st, NULL) != SQLITE_OK)
+            goto out;
+        sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, row->purpose, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 3, row->holds_share);
+        sqlite3_bind_text(st, 4, row->minted_by, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 5, row->minted_at);
+        sqlite3_bind_int64(st, 6, row->generation);
+        if (row->has_path)
+            sqlite3_bind_text(st, 7, row->kqst_path, -1, SQLITE_TRANSIENT);
+        else
+            sqlite3_bind_null(st, 7);
+        sqlite3_bind_blob(st, 8, row->device_id, 16, SQLITE_TRANSIENT);
+        sqlite3_bind_blob(st, 9, row->signing_public, 32, SQLITE_TRANSIENT);
+        sqlite3_bind_blob(st, 10, row->encryption_public, 32, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 11, row->ledger_seq);
+        sqlite3_bind_blob(st, 12, row->event_hash, (int)row->event_hash_len, SQLITE_TRANSIENT);
+    }
+    if (sqlite3_step(st) == SQLITE_DONE)
+        rc = FL_RESULT_OK;
+out:
+    if (st)
+        sqlite3_finalize(st);
+    sqlite3_close(sql);
+    return rc;
+}
+
 /* ---- Private bridges (account_bridges, account_bridge_members) ---- */
 
 static fl_result_t bridge_db_open(const fl_user_db_t *db, int writable, sqlite3 **out) {

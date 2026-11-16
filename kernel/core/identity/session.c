@@ -397,6 +397,29 @@ int fl_session_verify_account_password(const char *name, const char *password) {
     return ok;
 }
 
+/*
+ * The invoker's half of sudo's co-authorisation (owner decision on PR 416): sudo needs Root's
+ * password and token and, beside them, the invoking account's own factor, so every elevated action
+ * is vouched for by both identities. A KQST-mode invoker gives its password and its token (opened
+ * with that password); a password-only invoker gives its password. Root invoking for itself needs
+ * no second factor. NULL when satisfied, else the reason word for the audit. Called without
+ * s_session_mu.
+ */
+static const char *invoker_factor(const char *name, int kqst, const char *password) {
+    if (!password || !fl_session_verify_account_password(name, password))
+        return "invoker-password";
+    if (kqst && fl_kq_open_account(name, password, NULL) != FL_KQ_ACCOUNT_OK)
+        return "invoker-kqst";
+    return NULL;
+}
+
+/* The detail of a granted sudo's audit event: which factor the invoker gave. */
+static const char *coauth_detail(int sudo_i, int invoker_kqst) {
+    if (sudo_i)
+        return invoker_kqst ? "sudo -i; invoker token" : "sudo -i; invoker password";
+    return invoker_kqst ? "sudo; invoker token" : "sudo; invoker password";
+}
+
 /* A refused switch: audited (the two key ids and a reason word, never a password, key or token
  * byte). The terminal gets one message whatever the reason (the command prints it), so a refusal
  * says nothing about the policy or a bridge before a password is verified. Called without
@@ -418,6 +441,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     fl_kq_requirement_t need;
     uint64_t attempt_gen;
     int holder_auth, holder_kqst, cur_elevated, check_password = 1, proved = 0;
+    int cur_auth, coauth = 0;
     const char *why = NULL;
     const char *pw;
     fl_result_t rc = FL_RESULT_OK;
@@ -450,6 +474,9 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     holder_auth = holder->auth_mode;
     holder_kqst = holder_auth == FL_USER_AUTH_PASSWORD_KQST;
     cur_elevated = cu->is_elevated;
+    cur_auth = cu->auth_mode;
+    /* sudo -i is co-authorised by the invoker too, unless the invoker is Root itself. */
+    coauth = req->sudo && strcmp(cur_key, holder_key) != 0;
     attempt_gen = s_login_gen;
     pthread_mutex_unlock(&s_session_mu);
 
@@ -494,6 +521,8 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
             session_audit(cur_key, "su-kqst-legacy", tgt_key, "password-only account");
         }
     }
+    if (!why && coauth)
+        why = invoker_factor(cur_name, cur_auth == FL_USER_AUTH_PASSWORD_KQST, req->invoker_password);
     if (!why && need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
         fl_user_record_t member;
 
@@ -551,7 +580,7 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         holder = req->sudo ? fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY) : u;
         if (!u || !cu || !holder || strcmp(u->key_id, tgt_key) != 0 ||
             strcmp(holder->key_id, holder_key) != 0 || holder->auth_mode != holder_auth ||
-            cu->is_elevated != cur_elevated) {
+            cu->is_elevated != cur_elevated || (coauth && cu->auth_mode != cur_auth)) {
             why = "changed";
             rc = FL_RESULT_ACCES;
             goto release;
@@ -559,6 +588,12 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         if (check_password &&
             (!asm_mem_ct_equal(holder->password_hash, holder_hash, sizeof holder->password_hash) ||
              !asm_mem_ct_equal(holder->salt_hex, holder_salt, sizeof holder->salt_hex))) {
+            why = "changed";
+            rc = FL_RESULT_ACCES;
+            goto release;
+        }
+        /* The invoker's password that co-authorised it is still the account's. */
+        if (coauth && !session_verify_password_locked(cur_name, req->invoker_password)) {
             why = "changed";
             rc = FL_RESULT_ACCES;
             goto release;
@@ -613,6 +648,9 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
     pthread_mutex_unlock(&s_session_mu);
     if (why)
         rc = switch_refused(rc, req->sudo, cur_key, tgt_key, why);
+    else if (coauth)
+        session_audit(cur_key, "sudo-coauth", holder_key,
+                      coauth_detail(1, cur_auth == FL_USER_AUTH_PASSWORD_KQST));
 wipe:
     mem_domain_secure_zero(holder_hash, sizeof holder_hash);
     mem_domain_secure_zero(holder_salt, sizeof holder_salt);
@@ -650,13 +688,13 @@ static fl_result_t grant_elevation_locked(const char *reason, fl_elevation_token
     return rc;
 }
 
-fl_result_t fl_session_sudo_authenticate(const char *password) {
+fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password) {
     const fl_user_record_t *root, *cu;
     char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], root_name[FL_USER_NAME_MAX];
     fl_kq_requirement_t need;
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     uint64_t attempt_gen;
-    int root_kqst;
+    int root_kqst, cur_auth, coauth;
     const char *why = NULL;
     fl_result_t rc;
 
@@ -676,6 +714,8 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
     snprintf(cur_key, sizeof cur_key, "%s", cu->key_id);
     snprintf(root_name, sizeof root_name, "%s", root->name);
     root_kqst = root->auth_mode == FL_USER_AUTH_PASSWORD_KQST;
+    cur_auth = cu->auth_mode;
+    coauth = strcmp(cur_key, root->key_id) != 0;
     attempt_gen = s_login_gen;
     pthread_mutex_unlock(&s_session_mu);
 
@@ -686,18 +726,20 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         why = "policy";
     else if (!root_kqst)
         why = "no-root-kqst"; /* owner decision (FL-12, #403): no password-only fallback for sudo */
-    else if (!fl_session_verify_account_password(root_name, password))
+    else if (!fl_session_verify_account_password(root_name, root_password))
         why = "password";
-    else if (fl_kq_open_account(root_name, password, NULL) != FL_KQ_ACCOUNT_OK)
+    else if (fl_kq_open_account(root_name, root_password, NULL) != FL_KQ_ACCOUNT_OK)
         why = "kqst";
+    else if (coauth)
+        why = invoker_factor(cur_name, cur_auth == FL_USER_AUTH_PASSWORD_KQST, invoker_password);
     if (why) {
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
         return FL_RESULT_ACCES;
     }
-    /* The password check ran without the session lock. A login or logout in that
-     * window changes the generation. set_auth_mode and set_password do not, so
-     * the mode and the password that were accepted are checked again here.
-     * The elevation token is taken for the account that was checked, or not at all. */
+    /* The checks ran without the session lock. A login or logout in that window changes the
+     * generation. set_auth_mode and set_password do not, so both accounts' modes and the passwords
+     * that were accepted are checked again here. The elevation token is taken for the account that
+     * was checked, or not at all. */
     if (s_switch_pre_lock)
         s_switch_pre_lock();
     pthread_mutex_lock(&s_session_mu);
@@ -709,18 +751,119 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
     root = fl_user_db_find_by_key(&s_db, FL_HERITAGE_ROOT_KEY);
     cu = fl_user_db_find(&s_db, cur_name);
     if (!s_db_ready || !s_db.loaded || !root || !cu ||
-        (root->auth_mode == FL_USER_AUTH_PASSWORD_KQST) != root_kqst) {
+        (root->auth_mode == FL_USER_AUTH_PASSWORD_KQST) != root_kqst || cu->auth_mode != cur_auth) {
         pthread_mutex_unlock(&s_session_mu);
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "mode");
         return FL_RESULT_ACCES;
     }
-    if (!session_verify_password_locked(root_name, password)) {
+    if (!session_verify_password_locked(root_name, root_password)) {
         pthread_mutex_unlock(&s_session_mu);
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "password");
         return FL_RESULT_ACCES;
     }
+    if (coauth && !session_verify_password_locked(cur_name, invoker_password)) {
+        pthread_mutex_unlock(&s_session_mu);
+        session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "invoker-password");
+        return FL_RESULT_ACCES;
+    }
     rc = grant_elevation_locked("sudo authentication", &tok);
     pthread_mutex_unlock(&s_session_mu);
+    if (rc == FL_RESULT_OK && coauth)
+        session_audit(cur_key, "sudo-coauth", FL_HERITAGE_ROOT_KEY,
+                      coauth_detail(0, cur_auth == FL_USER_AUTH_PASSWORD_KQST));
+    return rc;
+}
+
+/*
+ * Pair the logged-in account with its slot token (KQST). The token must open with the account's
+ * password and match the device id and public keys given (the ones keyquorum-device provision
+ * printed); an account that already has a token must also open the one it has, so a password alone
+ * never replaces a token. The row is written first and the mode saved after it; a failed save puts
+ * the row and the mode back. Audited as "kqst-enrol" or "kqst-enrol-refused" with a reason word.
+ */
+fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
+                                   const unsigned char device_id[16],
+                                   const unsigned char signing_public[32],
+                                   const unsigned char encryption_public[32], int64_t minted_at,
+                                   int64_t *generation_out) {
+    const fl_user_record_t *cu;
+    char cur_name[FL_USER_NAME_MAX], cur_key[FL_HERITAGE_KEY_ID_MAX], detail[48];
+    fl_user_kqst_row_t *old = NULL;
+    uint64_t attempt_gen;
+    int64_t generation = 0;
+    int cur_auth;
+    const char *why = NULL;
+    fl_result_t rc = FL_RESULT_ACCES;
+
+    fl_session_init();
+    if (!kqst_path || !kqst_path[0] || !device_id || !signing_public || !encryption_public)
+        return FL_RESULT_INVAL;
+    pthread_mutex_lock(&s_session_mu);
+    cu = (s_db_ready && s_db.loaded) ? fl_user_db_find(&s_db, s_current) : NULL;
+    if (!cu) {
+        pthread_mutex_unlock(&s_session_mu);
+        return FL_RESULT_NOENT;
+    }
+    snprintf(cur_name, sizeof cur_name, "%s", cu->name);
+    snprintf(cur_key, sizeof cur_key, "%s", cu->key_id);
+    cur_auth = cu->auth_mode;
+    attempt_gen = s_login_gen;
+    pthread_mutex_unlock(&s_session_mu);
+
+    if (!fl_session_verify_account_password(cur_name, password))
+        why = "password";
+    else if (cur_auth == FL_USER_AUTH_PASSWORD_KQST &&
+             fl_kq_open_account(cur_name, password, NULL) != FL_KQ_ACCOUNT_OK)
+        why = "old-kqst";
+    else if (fl_kq_check_token(cur_key, password, kqst_path, device_id, signing_public,
+                               encryption_public) != FL_KQ_ACCOUNT_OK)
+        why = "kqst";
+    if (why)
+        goto refused;
+    old = (fl_user_kqst_row_t *)calloc(1, sizeof *old);
+    if (!old || fl_user_db_kqst_row_get(&s_db, cur_key, old) != FL_RESULT_OK) {
+        why = "store";
+        rc = FL_RESULT_ERR;
+        goto refused;
+    }
+    if (s_switch_pre_lock)
+        s_switch_pre_lock();
+    pthread_mutex_lock(&s_session_mu);
+    cu = (s_db_ready && s_db.loaded) ? fl_user_db_find(&s_db, cur_name) : NULL;
+    if (s_login_gen != attempt_gen || strcmp(s_current, cur_name) != 0) {
+        why = "superseded";
+        rc = FL_RESULT_BUSY;
+    } else if (!cu || strcmp(cu->key_id, cur_key) != 0 || cu->auth_mode != cur_auth ||
+               !session_verify_password_locked(cur_name, password)) {
+        why = "changed";
+        rc = FL_RESULT_ACCES;
+    } else if (fl_user_db_kqst_register(&s_db, cur_key, kqst_path, device_id, signing_public,
+                                        encryption_public, minted_at, &generation) != FL_RESULT_OK) {
+        why = "store";
+        rc = FL_RESULT_ERR;
+    } else if (cur_auth != FL_USER_AUTH_PASSWORD_KQST &&
+               (fl_user_db_set_auth_mode(&s_db, cur_name, FL_USER_AUTH_PASSWORD_KQST) != FL_RESULT_OK ||
+                fl_user_db_save(&s_db) != FL_RESULT_OK)) {
+        /* Put both back: the account keeps logging in as it did. */
+        (void)fl_user_db_set_auth_mode(&s_db, cur_name, cur_auth);
+        (void)fl_user_db_kqst_row_restore(&s_db, cur_key, old);
+        why = "store";
+        rc = FL_RESULT_ERR;
+    } else {
+        rc = FL_RESULT_OK;
+    }
+    pthread_mutex_unlock(&s_session_mu);
+    if (why)
+        goto refused;
+    free(old);
+    if (generation_out)
+        *generation_out = generation;
+    snprintf(detail, sizeof detail, "generation=%lld", (long long)generation);
+    session_audit(cur_key, "kqst-enrol", cur_key, detail);
+    return FL_RESULT_OK;
+refused:
+    free(old);
+    session_audit(cur_key, "kqst-enrol-refused", cur_key, why);
     return rc;
 }
 

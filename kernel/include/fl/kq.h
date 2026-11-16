@@ -100,6 +100,15 @@ int fl_kq_open_account_secrets(const char *user, const char *password, const cha
  */
 int fl_kq_open_account_keys(const char *user, const char *password, const char *kqst_path_or_null,
                             uint8_t signing_secret_out[32], uint8_t encryption_secret_out[32]);
+/**
+ * Open the token file at kqst_path as key_id's slot token, with the device id and public keys
+ * given here instead of the store's pairing (enrolment checks a token before the store holds it).
+ * Status only: both secrets are wiped. KQ_ACCOUNT_OK when the token opens with password and matches
+ * every fact; any other KQ_ACCOUNT_* status otherwise.
+ */
+int fl_kq_check_token(const char *key_id, const char *password, const char *kqst_path,
+                      const unsigned char device_id[16], const unsigned char signing_public[32],
+                      const unsigned char encryption_public[32]);
 /** Open and wipe both secrets; status only (for refusal checks and tooling). */
 int fl_kq_open_account(const char *user, const char *password, const char *kqst_path_or_null);
 

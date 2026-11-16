@@ -834,7 +834,8 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   the session asks again and refuses (`bridge-changed`) unless the factor and the bridge are still the same. The
   command asks for the bridge member only once the target's password (Root's for `sudo -i`) is verified, and
   refuses an over-long member name. `sudo` without a switch (`fl_session_sudo_authenticate`) asks for Root's
-  password and token, and is refused when Root has no token. Every refusal is audited through the session's audit hook
+  password and token, and is refused when Root has no token. Both `sudo` forms are co-authorised by the
+  invoker too (below). Every refusal is audited through the session's audit hook
   (`su-refused` / `sudo-refused` and a reason word; never a password, key or token byte); the terminal shows the
   same `authentication failed` whatever the reason, except the `sudo` refusal for a Root with no token (below). `fl_session_set_user` stays an unchecked set for tests; the
   end of `su -c` uses `fl_session_restore_user`, which takes the old identity back only while the login it was
@@ -849,8 +850,41 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   factor names a token the target does not have, the behaviour before KeyQuorum's rule is kept (the target's
   password) and audited as `su-kqst-legacy`. Where the factor names a token, a KQST-mode account never switches
   on a password alone; where KeyQuorum names the password factor (the same branch, above or below), the target's
-  password is the whole factor for a KQST-mode account too, because that is KeyQuorum's rule. No shell command
-  enrols Root in KQST mode yet, so on the default image `sudo` and `sudo -i` are refused until one does.
+  password is the whole factor for a KQST-mode account too, because that is KeyQuorum's rule. On the default
+  image `sudo` and `sudo -i` are refused until Root is given its token with `kqst enroll` (below).
+- **Co-authorisation (owner decision on PR 416).** Each `sudo` and `sudo -i` is vouched for by two identities:
+  Root (the master identity), by its password and token as above, and the invoking account, by its own factor.
+  Logged in as Flinstone, `sudo` asks `[sudo] Root password:` and then `[sudo] Flinstone password:`; the second
+  password must be Flinstone's and, when Flinstone is a KQST account, also opens Flinstone's token. A
+  password-only invoker co-authorises with its password alone. Root invoking for itself gives Root's factor
+  once. Refusals are audited as `sudo-refused` with `invoker-password` or `invoker-kqst`; under the final lock
+  the invoker's mode and password are checked again (`mode`, `invoker-password` for `sudo`; `changed` for
+  `sudo -i`). A grant is audited as `sudo-coauth`, actor the invoker's key id, subject `Root`, detail
+  `sudo; invoker token` or `sudo; invoker password` (`sudo -i; ...` for the switch). The co-authorisation is
+  at authentication: the elevation token it grants lasts as it did before (its TTL, `sudo -k`), and every
+  command run under it is covered by that one event. It is not a cryptographic co-signature: no statement is
+  signed by both keys, because KeyQuorum exports no signing op for it (the account ops sign bridge requests
+  only, and using them for sudo would make a sudo signature a valid bridge request). A true co-signature needs a
+  KeyQuorum export with its own domain (for example a `kq_account_sudo_sign` / `_verify` pair over the action,
+  the two key ids and a fresh nonce) and an ABI and pin bump here.
+- **Giving an account its token (`kqst enroll`).** `keyquorum-device init <dir>` prints the device id;
+  `keyquorum-device provision <dir> --label <key id>` makes the slot token under `<dir>/vault/slot-<key id>/
+  token.kqst`, sealed under a passphrase it asks for, and prints the slot's `signing` and `encryption` public
+  keys. The passphrase must be the account's password. Logged in as that account, `kqst enroll <token.kqst>
+  <device-id> <signing-public> <encryption-public>` reads the password on the next line and calls
+  `fl_session_enroll_kqst` (`session.c`): the password must be the account's, the token must open with it and
+  match the three facts (`fl_kq_check_token`, KeyQuorum's `kq_slot_open`), and an account that already has a
+  token must open that one too, so a password alone never replaces a token. Then the `account_keys` row is
+  written (`fl_user_db_kqst_register`: purpose `own`, minted by the account itself, the next generation, the
+  token's full path so it stays on its device, no ledger entry yet) and the account switches to
+  `FL_USER_AUTH_PASSWORD_KQST` and is saved; a failed save puts the row and the mode back. It needs no
+  elevation, since the password and a token that opens with it are the proof, and it is only ever for the
+  logged-in account. Audited as `kqst-enrol` (`generation=<n>`) or `kqst-enrol-refused` with `password`,
+  `old-kqst`, `kqst`, `changed`, `superseded` or `store`. Logged in as Root, this gives the master identity its
+  token, which is what lets `sudo` work. From then on Root's login needs the token too. `passwd` does not
+  re-seal a token: changing a KQST account's password leaves its token sealed under the old one, so the
+  account cannot log in, and `kqst enroll` refuses a new token too (the token it has no longer opens with the
+  new password). Re-sealing a token on a password change, or a recovery path for a lost token, is not built. `kqst status [name]` shows whether an account logs in with a token.
 - **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
   facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
   signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any
@@ -863,9 +897,10 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   organization store has no schema version, so every column's type and size is checked and anything else fails closed; the pinned commit and
   `make test_kq_real_token` (which runs it against a store the real CLI made) are the contract when the pin moves. `fl_user_db_bridge_put` and
   `_put_sealed_key` remain the store's other writers.
-- **Real tokens.** `make test_kq_real_token` mints two KQSTs, a third device and a private bridge with the
+- **Real tokens.** `make test_kq_real_token` mints three KQSTs (Bob, Ann and Root), a fourth device and a private bridge with the
   `keyquorum` CLI built from the submodule (not part of the default `make`; skipped with a message without it),
-  opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), and crosses
-  the bridge at `su`. The freestanding image has none of this (its access and bridge driver ops are NULL: the
+  opens them with `kq_slot_open`, signs, logs in (including the logout-during-open generation check), crosses
+  the bridge at `su`, enrols Root's token through `fl_session_enroll_kqst` and runs `sudo` co-authorised by
+  Root's and Bob's real tokens. The freestanding image has none of this (its access and bridge driver ops are NULL: the
   SECFEAT image had no room for them). A bridge's reach (`fl_heritage_bridge_connects`) also goes through the
   driver (`bridge_connects`); no driver or no op does not connect.

@@ -70,17 +70,42 @@ typedef struct fl_session_switch_request {
     const char *password;
     const char *bridge_member;
     const char *bridge_member_password;
+    /** sudo -i only: the invoking account's own password (its half of the co-authorisation; it
+     *  also opens the invoker's token when the invoker is a KQST-mode account). Unused when the
+     *  invoker is Root. */
+    const char *invoker_password;
 } fl_session_switch_request_t;
 fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
 
 /**
- * sudo without a switch (an elevation token): KeyQuorum asks for Root's key, so password must be
- * Root's and open Root's token. A password-only Root has no token: sudo is refused ("no-root-kqst")
- * before any password is checked, and there is no fallback to the caller's own password (owner
- * decision, FL-12 #403). OK also binds the elevation token to that same login: a login or logout
- * during the check returns BUSY and grants nothing. Any other refusal is ACCES.
+ * sudo without a switch (an elevation token), co-authorised by two identities. KeyQuorum asks for
+ * Root's key, so root_password must be Root's and open Root's token. A password-only Root has no
+ * token: sudo is refused ("no-root-kqst") before any password is checked, and there is no fallback
+ * to the caller's own password (owner decision, FL-12 #403). Beside Root's factor, the invoking
+ * account gives its own (owner decision on PR 416): invoker_password must be its password and, for
+ * a KQST-mode invoker, open its token ("invoker-password" / "invoker-kqst" when not). Root invoking
+ * for itself gives Root's factor once. OK also binds the elevation token to that same login: a
+ * login or logout during the check returns BUSY and grants nothing; a change to either account's
+ * mode ("mode") or password in that window is refused. A grant is audited as "sudo-coauth" naming
+ * the invoker's factor. Any other refusal is ACCES.
  */
-fl_result_t fl_session_sudo_authenticate(const char *password);
+fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password);
+/**
+ * Pair the logged-in account with its KeyQuorum slot token (KQST) and switch it to KQST login.
+ * password is the account's password, which must also open the token; the token must match
+ * device_id, signing_public and encryption_public (what keyquorum-device provision printed for a
+ * slot labelled with the account's key id). An account that already has a token must open that one
+ * too: a password alone never replaces a token. kqst_path is stored as given, so the token stays on
+ * its device. OK (generation_out, may be NULL, is the pairing's generation), ACCES (refused:
+ * "password", "old-kqst", "kqst", "changed"), BUSY (a login or logout ran meanwhile), ERR (the store
+ * could not be written; nothing changed), NOENT (nobody is logged in) or INVAL. Audited as
+ * "kqst-enrol" or "kqst-enrol-refused".
+ */
+fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
+                                   const unsigned char device_id[16],
+                                   const unsigned char signing_public[32],
+                                   const unsigned char encryption_public[32], int64_t minted_at,
+                                   int64_t *generation_out);
 /** 1 when Root is a KQST-mode account, so sudo can ask for Root's password and token; 0 when Root
  *  is password-only, and sudo and sudo -i are refused. */
 int         fl_session_sudo_needs_root(void);

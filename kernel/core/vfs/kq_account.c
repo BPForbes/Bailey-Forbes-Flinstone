@@ -298,43 +298,22 @@ out:
     return st;
 }
 
-/**
- * Open the account's KQST. On OK, both secrets are written (caller wipes); otherwise both are zeroed.
- */
-int fl_kq_open_account_keys(const char *user, const char *password, const char *kqst_path_or_null,
-                            uint8_t signing_secret_out[32], uint8_t encryption_secret_out[32]) {
-    const fl_kq_driver_t *drv;
-    const fl_user_db_t *db;
-    fl_user_record_t snapshot;
-    char path[512];
-    unsigned char device_id[16], signing_pub[32], encryption_pub[32];
+/* Read the token file (at most 64 KiB) and open it with the given facts. On OK both secrets are
+ * written (caller wipes); otherwise both are zeroed. */
+static int open_token_file(const char *label, const char *password, const char *path,
+                           const unsigned char device_id[16], const unsigned char signing_pub[32],
+                           const unsigned char encryption_pub[32], uint8_t signing_secret_out[32],
+                           uint8_t encryption_secret_out[32]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     uint8_t *token = NULL;
     size_t tlen = 0;
     FILE *fp;
     long flen;
     int st;
 
-    if (!user || !user[0] || !password || !signing_secret_out || !encryption_secret_out)
-        return FL_KQ_ACCOUNT_INVALID;
     mem_domain_secure_zero(signing_secret_out, 32);
     mem_domain_secure_zero(encryption_secret_out, 32);
-    drv = fl_kq_driver_get_or_register();
-    if (!drv || !drv->slot_open)
-        return FL_KQ_ACCOUNT_INVALID;
-    if (fl_session_snapshot_account(user, &snapshot) != FL_RESULT_OK)
-        return FL_KQ_ACCOUNT_INVALID;
-    db = fl_session_user_db();
-    if (!db)
-        return FL_KQ_ACCOUNT_INVALID;
-    if (kqst_path_or_null && kqst_path_or_null[0]) {
-        if (strlen(kqst_path_or_null) >= sizeof path)
-            return FL_KQ_ACCOUNT_INVALID;
-        memcpy(path, kqst_path_or_null, strlen(kqst_path_or_null) + 1);
-    } else if (fl_user_db_kqst_path(db, snapshot.key_id, path, sizeof path) != FL_RESULT_OK) {
-        return FL_KQ_ACCOUNT_INVALID;
-    }
-    if (fl_user_db_kqst_pairing(db, snapshot.key_id, device_id, signing_pub, encryption_pub) !=
-        FL_RESULT_OK)
+    if (!drv || !drv->slot_open || !path || !path[0])
         return FL_KQ_ACCOUNT_INVALID;
     fp = fopen(path, "rb");
     if (!fp)
@@ -355,14 +334,63 @@ int fl_kq_open_account_keys(const char *user, const char *password, const char *
         return FL_KQ_ACCOUNT_INVALID;
     }
     fclose(fp);
-    st = drv->slot_open(token, tlen, snapshot.key_id, password, device_id, signing_pub,
-                        encryption_pub, signing_secret_out, encryption_secret_out);
+    st = drv->slot_open(token, tlen, label, password, device_id, signing_pub, encryption_pub,
+                        signing_secret_out, encryption_secret_out);
     mem_domain_secure_zero(token, tlen);
     free(token);
     if (st != FL_KQ_ACCOUNT_OK) {
         mem_domain_secure_zero(signing_secret_out, 32);
         mem_domain_secure_zero(encryption_secret_out, 32);
     }
+    return st;
+}
+
+/**
+ * Open the account's KQST. On OK, both secrets are written (caller wipes); otherwise both are zeroed.
+ */
+int fl_kq_open_account_keys(const char *user, const char *password, const char *kqst_path_or_null,
+                            uint8_t signing_secret_out[32], uint8_t encryption_secret_out[32]) {
+    const fl_user_db_t *db;
+    fl_user_record_t snapshot;
+    char path[512];
+    unsigned char device_id[16], signing_pub[32], encryption_pub[32];
+
+    if (!user || !user[0] || !password || !signing_secret_out || !encryption_secret_out)
+        return FL_KQ_ACCOUNT_INVALID;
+    mem_domain_secure_zero(signing_secret_out, 32);
+    mem_domain_secure_zero(encryption_secret_out, 32);
+    if (fl_session_snapshot_account(user, &snapshot) != FL_RESULT_OK)
+        return FL_KQ_ACCOUNT_INVALID;
+    db = fl_session_user_db();
+    if (!db)
+        return FL_KQ_ACCOUNT_INVALID;
+    if (kqst_path_or_null && kqst_path_or_null[0]) {
+        if (strlen(kqst_path_or_null) >= sizeof path)
+            return FL_KQ_ACCOUNT_INVALID;
+        memcpy(path, kqst_path_or_null, strlen(kqst_path_or_null) + 1);
+    } else if (fl_user_db_kqst_path(db, snapshot.key_id, path, sizeof path) != FL_RESULT_OK) {
+        return FL_KQ_ACCOUNT_INVALID;
+    }
+    if (fl_user_db_kqst_pairing(db, snapshot.key_id, device_id, signing_pub, encryption_pub) !=
+        FL_RESULT_OK)
+        return FL_KQ_ACCOUNT_INVALID;
+    return open_token_file(snapshot.key_id, password, path, device_id, signing_pub, encryption_pub,
+                           signing_secret_out, encryption_secret_out);
+}
+
+int fl_kq_check_token(const char *key_id, const char *password, const char *kqst_path,
+                      const unsigned char device_id[16], const unsigned char signing_public[32],
+                      const unsigned char encryption_public[32]) {
+    uint8_t signing[32], encryption[32];
+    int st;
+
+    if (!key_id || !key_id[0] || !password || !kqst_path || !device_id || !signing_public ||
+        !encryption_public)
+        return FL_KQ_ACCOUNT_INVALID;
+    st = open_token_file(key_id, password, kqst_path, device_id, signing_public, encryption_public,
+                         signing, encryption);
+    mem_domain_secure_zero(signing, sizeof signing);
+    mem_domain_secure_zero(encryption, sizeof encryption);
     return st;
 }
 
