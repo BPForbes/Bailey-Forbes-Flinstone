@@ -1192,6 +1192,7 @@ test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CO
 	  userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) \
 	  kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS) \
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack -Wl,--wrap=fl_kq_driver_get_or_register
+	python3 -I tests/test_kq_pty_answer.py
 	./scripts/kq_real_token_fixture.sh tests/test_kq_real_token
 
 .PHONY: test_kq_history_bundle
