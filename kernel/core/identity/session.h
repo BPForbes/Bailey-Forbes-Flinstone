@@ -3,7 +3,6 @@
 
 #include "contract_identity.h"
 #include "user_db.h"
-/* Login, identity switches, sudo elevation and the KeyQuorum login hooks. */
 
 #define FL_SESSION_USERS_PATH FL_USERS_DB_DEFAULT_PATH
 
@@ -16,7 +15,6 @@ int         fl_session_is_elevated_account(void);
 
 int         fl_session_has_elevation(void);
 
-/** VM jail escape: elevated account or sudo command scope (not token-only). */
 int         fl_session_jail_privileged(void);
 
 int         fl_session_in_sudo_scope(void);
@@ -30,7 +28,6 @@ typedef struct fl_session_restore_point {
     uint64_t login_generation;
 } fl_session_restore_point_t;
 fl_result_t fl_session_capture_restore_point(fl_session_restore_point_t *out);
-/* BUSY when a login or logout intervened (generation mismatch). */
 fl_result_t fl_session_restore_user(const char *name, uint64_t login_generation);
 int         fl_session_verify_account_password(const char *name, const char *password);
 
@@ -42,12 +39,10 @@ typedef struct fl_session_switch_request {
     const char *bridge_member_password;
     const char *invoker_password;
 } fl_session_switch_request_t;
-/* Refusals: ACCES, BUSY (superseded or writer busy), NOENT, INVAL. */
 fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
 
 /* A password-only Root is refused; no fallback to the caller's password. */
 fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password);
-/* Call without the session lock. */
 fl_result_t fl_session_elevated_action(const char *action, int renew, int *deelevated);
 /* ACCES refused; BUSY when a login or logout intervened; ERR changes nothing. */
 fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
@@ -55,7 +50,6 @@ fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
                                    const unsigned char signing_public[32],
                                    const unsigned char encryption_public[32], int64_t minted_at,
                                    int64_t *generation_out);
-/* NOSYS when no driver can seal a token. */
 fl_result_t fl_session_make_kqst(const char *name, const char *password, int64_t minted_at,
                                  int64_t *generation_out);
 int         fl_session_sudo_needs_root(void);
@@ -74,14 +68,7 @@ void        fl_session_drop_elevation(void);
 
 fl_result_t fl_session_logout(void);
 
-/**
- * Hooks a service below the session installs (the KeyQuorum key service, kernel/core/vfs/kq_service.c):
- * online runs after a successful fl_session_login with the password just verified (the session lock
- * is not held, so a slow key derivation does not stall the session); online_opened publishes an
- * already-opened signing secret for PASSWORD_KQST logins; offline runs after fl_session_logout with
- * the account that signed out. Password online cannot refuse a login; KQST login refuses when open
- * or online_opened fails.
- */
+/* Password online cannot refuse a login; KQST login refuses when open or online_opened fails. */
 typedef fl_result_t (*fl_session_online_fn)(const fl_user_record_t *account, const char *password,
                                            uint64_t login_generation);
 typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *account,
@@ -92,23 +79,14 @@ typedef fl_result_t (*fl_session_online_box_fn)(const fl_user_record_t *account,
 void fl_session_set_login_box_hook(fl_session_online_box_fn box);
 void fl_session_set_login_hooks(fl_session_online_fn online, fl_session_offline_fn offline,
                                 fl_session_online_opened_fn opened);
-/** Tests only: runs after the session lock is released and before the KQST open. */
 void fl_session_test_set_kqst_pre_open(void (*fn)(void));
 void fl_session_test_set_switch_pre_lock(void (*fn)(void));
 void fl_session_test_set_switch_pre_commit(void (*fn)(void));
 
-/**
- * The online hook gets a copy of the account's record taken under the session lock and the generation
- * of the login that made it. Every login and every logout starts a new generation (never 0), so a key
- * derived for one login can be published only while that login is still the current one:
- * **fl_session_publish_if_current** runs publish under the session lock, so a logout either happens
- * before it (BUSY, nothing is published) or after it (the offline hook then wipes what it published).
- * Generation 0 publishes unconditionally. Publish must not call back into the session.
- */
+/* The online hook gets the record copy and login generation; publish runs under the session lock and only while that login is current. */
 typedef fl_result_t (*fl_session_publish_fn)(void *ctx);
 fl_result_t fl_session_publish_if_current(uint64_t login_generation, fl_session_publish_fn publish, void *ctx);
 uint64_t fl_session_login_generation(void);
-/** A copy of an account's record taken under the session lock. NOENT for an unknown account. */
 fl_result_t fl_session_snapshot_account(const char *name, fl_user_record_t *out);
 
 fl_user_db_t *fl_session_user_db_mut(void);
@@ -117,7 +95,6 @@ fl_result_t fl_session_save_users(void);
 
 int         fl_session_users_loaded(void);
 uint32_t    fl_session_next_uid(void);
-/* Store mutators run under the session mutex. */
 fl_result_t fl_session_add_user(const char *name, const char *password, uint32_t uid, int is_elevated);
 fl_result_t fl_session_add_user_under(const char *creator_key, const char *name, const char *password,
                                       uint32_t uid, int is_elevated, int64_t created_at);

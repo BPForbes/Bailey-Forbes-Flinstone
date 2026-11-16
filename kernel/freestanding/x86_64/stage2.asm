@@ -1,6 +1,4 @@
-; Stage 2: loaded by stage 1 (boot.asm) at FL_STAGE2_ADDR with the BIOS drive number in dl. Runs the
-; four real-mode steps below, then enters long mode and jumps to the kernel with rdi pointing at the
-; boot info. Every failure prints a FLINTSTONE_BOOT_FAIL marker (bootfail.inc) and halts.
+; Stage 2 (loaded at FL_STAGE2_ADDR by boot.asm): E820, A20, kernel load, boot info, long mode; failures halt.
 %include "bootinfo.inc"
 BITS 16
 ORG FL_STAGE2_ADDR
@@ -20,16 +18,12 @@ stage2:
     sti
     mov [drive], dl
 
-    ; Boot info and E820 buffer start zeroed: [FL_BOOTINFO_ADDR, FL_PAGE_TABLES).
     mov di, FL_BOOTINFO_ADDR
     mov cx, (FL_PAGE_TABLES - FL_BOOTINFO_ADDR) / 2
     xor ax, ax
     rep stosw
 
-; ---- 1. E820 -------------------------------------------------------------------------------
-; Entries go to the buffer until it is full. Then the next call goes to a spare slot: a valid entry
-; there means the map did not fit (flagged; the kernel refuses it), while carry or an empty reply
-; means the list had ended, so a map of exactly FL_BOOTINFO_E820_CAP entries is whole.
+; A call past a full buffer lands in a spare slot: a valid entry there means the map did not fit (refused).
     mov si, msg_e820
     xor ebx, ebx
     mov word [e820_di], FL_BOOTINFO_E820_ADDR
@@ -71,9 +65,7 @@ stage2:
     cmp word [FL_BOOTINFO_ADDR + BI_E820_COUNT], 0
     je boot_fail
 
-; ---- 2. A20 --------------------------------------------------------------------------------
-; BIOS first, then the keyboard controller, then port 0x92 (the one with side effects on some
-; boards). Each is followed by a bounded wait for the verified result.
+; A20 order: BIOS, keyboard controller, then port 0x92 (side effects on some boards).
     call a20_off
     jnc .a20_on
     mov ax, 0x2401 ; BIOS
@@ -101,7 +93,6 @@ stage2:
     jmp boot_fail
 .a20_on:
 
-; ---- 3. Kernel image -----------------------------------------------------------------------
     mov si, msg_size
     mov eax, [patch_total_sectors]
     test eax, eax
@@ -114,8 +105,7 @@ stage2:
     jbe boot_fail
     cmp eax, FL_LOW_BUDGET
     ja boot_fail
-    ; Chunks of at most 127 sectors: each stays inside one 64 KiB real-mode segment, and the
-    ; destination segment moves on by 32 paragraphs per sector read.
+    ; Chunks of at most 127 sectors keep each read inside one 64 KiB real-mode segment.
 .load_next:
     mov ax, [remaining]
     test ax, ax
@@ -149,7 +139,6 @@ stage2:
     jmp .load_next
 .load_done:
 
-; ---- 4. Boot info --------------------------------------------------------------------------
     mov dword [FL_BOOTINFO_ADDR + BI_MAGIC], FL_BOOTINFO_MAGIC
     mov word [FL_BOOTINFO_ADDR + BI_VERSION], FL_BOOTINFO_VERSION
     mov word [FL_BOOTINFO_ADDR + BI_SIZE], FL_BOOTINFO_SIZE
@@ -172,9 +161,7 @@ stage2:
     mov cx, reserved_end - reserved
     rep movsb
 
-; ---- Long mode -----------------------------------------------------------------------------
     cli
-    ; PML4[0] -> PDPT, PDPT[0] -> PD, PD: 512 x 2 MiB pages = the first 1 GiB (FL_IDENTITY_MAP_END).
     xor eax, eax
     mov edi, FL_PAGE_TABLES
     mov ecx, (FL_PAGE_TABLES_END - FL_PAGE_TABLES) / 4
@@ -205,9 +192,7 @@ stage2:
     mov edi, FL_BOOTINFO_ADDR ; entry.asm keeps it across the bss clear
     jmp dword 0x08:FL_KERNEL_LOAD_ADDR
 
-; Carry set when A20 is off: a byte below 1 MiB and its alias 1 MiB higher are the same byte.
-; Two patterns, so a byte that already held the second value cannot fake an answer. With A20 on,
-; 0xa5 stays at FL_A20_PROBE + 1 MiB: no live object is there (see bootinfo.inc).
+; Carry set when A20 is off (a byte below 1 MiB aliases 1 MiB higher); 0xa5 at FL_A20_PROBE + 1 MiB stays when A20 is on.
 a20_off:
     push ds
     push es
@@ -234,7 +219,6 @@ a20_off:
     pop ds
     ret
 
-; Carry clear as soon as A20 reads on, carry set if it is still off after a bounded number of checks.
 a20_wait:
     mov cx, 0x100
 .again:
@@ -247,7 +231,6 @@ a20_wait:
 .done:
     ret
 
-; Wait (bounded) until the keyboard controller can take a byte.
 kbc_wait:
     mov cx, 0xffff
 .poll:
@@ -279,7 +262,6 @@ packet_count: dw 0
 packet_seg: dw 0
 packet_lba: dq 0
 
-; What the loader and the image occupy, copied into the boot info (base, exclusive end).
 align 8
 reserved:
     dq 0, FL_BOOTINFO_ADDR                              ; IVT and BIOS data area

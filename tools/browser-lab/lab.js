@@ -67,14 +67,11 @@
   const isBuiltInUser = name => /^(flinstone|root)$/i.test(name);
   let activeSession = 1;
   let relay = null;
-  // Files other users sent, waiting for `server file accept` (each with the principal it was sent to).
   const MAX_WAITING_FILES = 16;
   let waitingFiles = [];
   let connectRelay = async () => {};
   let serialLine = "";
-  // Lab network mode: when a netlab MitM+RS session is active the guest emits
-  // `LAB_NETMODE lab` and we drop the real network (the relay); `LAB_NETMODE
-  // live` restores it. While isolated we also suppress auto-reconnect.
+  // LAB_NETMODE lab/live from the guest drops or restores the real network; isolation also stops auto-reconnect.
   let labIsolated = false;
   const search = new URLSearchParams(location.search);
   const validation = search.get("validate") === "1";
@@ -85,8 +82,7 @@
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
   const screen = document.getElementById("screen");
-  // Classic VGA is 16 indexed slots; each slot is a 24-bit (sRGB) color so the
-  // JS terminal can use truecolor while the guest still writes 4-bit attributes.
+  // The terminal uses 24-bit sRGB for the 16 VGA slots; the guest still writes 4-bit attributes.
   const VGA_TRUECOLOR = [
     "#1c1c1e", "#0a84ff", "#30d158", "#64d2ff",
     "#ff453a", "#bf5af2", "#ff9f0a", "#d2d2d7",
@@ -106,17 +102,13 @@
     if (sess) sess.textContent = `${activeSession}/${count}`;
     if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
   }
-  // The MitM + RS panel drives netlab, which only the security build compiles
-  // in. Show it only when this build's manifest says so; a lab-free build would
-  // otherwise offer buttons that answer "unknown command".
+  // Show the MitM panel only when this build's manifest has netlab; a lab-free build would answer "unknown command".
   function applySecurityPanel(manifest) {
     const panel = document.querySelector(".netlab-panel");
     if (!panel) return;
     panel.hidden = !(manifest && manifest.capabilities && manifest.capabilities.securityLab === true);
   }
-  // A freshly booted or reset guest starts in live mode. Clear the isolation
-  // flag with the guest, so the relay is not suppressed for a guest that has
-  // no netlab binding.
+  // A booted or reset guest starts live: its isolation flag is cleared with the guest.
   function clearLabIsolation() {
     if (!labIsolated) return;
     labIsolated = false;
@@ -179,8 +171,6 @@
       : "Live — real network available";
     node.dataset.mode = isolated ? "lab" : "live";
   }
-  // React to the guest's LAB_NETMODE token: drop the relay (real network) for
-  // the duration of a netlab MitM+RS session, restore it when the demo ends.
   function applyNetmode(mode) {
     labIsolated = mode === "lab";
     renderNetmode(mode);
@@ -327,7 +317,6 @@
         if (body.ipv6) ipv6 = body.ipv6;
       }
     } catch (_) {
-      /* guest prints unknown host */
     }
     await sendGuest(ipv6 ? `dnsack ${host} ${ip} ${ipv6}\n` : `dnsack ${host} ${ip}\n`);
   }
@@ -349,7 +338,6 @@
       appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
-  /* ---- KeyQuorum co-signed delivery (the WebAssembly shell, lab_kq.c) ---------------- */
   function kqReady() {
     return Boolean(emulator && typeof emulator.kqFrame === "function");
   }
@@ -360,7 +348,6 @@
     node.scrollTop = node.scrollHeight;
   }
   async function sendKqToRelay(frame) {
-    // Lab isolation drops the real network; KeyQuorum frames stay home too.
     if (!relay || labIsolated) return;
     try {
       if (!relay.connected) await relay.connect(principal());
@@ -370,14 +357,12 @@
       appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
-  /* The shell learns who is on the server; this member publishes its public keys to the host. */
   let kqBuiltInNoted = false;
   function kqSyncRoster(members) {
     if (!kqReady() || !relay) return;
     emulator.kqRoster(relay.connected ? relay.memberId || 0 : 0, relay.connected ? members || [] : []);
     if (!relay.connected) return;
-    // Every visitor's lab seeds the built-in accounts, so their names can never be one
-    // person's: they publish no keys.
+    // Built-in names are seeded per visitor, so they can never be one person's: they publish no keys.
     if (isBuiltInUser(principal())) {
       if (!kqBuiltInNoted)
         appendKqLog("keys", "not published", `${principal()} is built in; register your own user to send and receive KeyQuorum files`);
@@ -425,7 +410,6 @@
       const path = document.getElementById("server-file-path")?.value.trim() || "";
       const user = document.getElementById("server-file-user")?.value.trim() || "";
       const cosigned = document.getElementById("server-file-kq")?.checked;
-      // One shell line, built only from a plain path and a user name.
       if (!/^[A-Za-z0-9._/-]{1,63}$/.test(path) || !core.guestUserNameOk(user)) {
         appendKqLog("send", "not sent", "a file in the lab shell and a user name are needed");
         return;
@@ -457,7 +441,6 @@
     }
     appendChat(`[file] ${event.from} sent ${event.name} (${event.bytes.length} bytes) — run \`server file accept\` to save it`);
   }
-  /* Answers `server file accept|decline` for the session's own user; others' files keep waiting. */
   async function answerWaitingFiles(accept) {
     const me = principal();
     const mine = waitingFiles.filter(f => f.to === me);
@@ -514,8 +497,7 @@
         appendChat("[relay] leave");
         return;
       }
-      // While lab-isolated the relay stays down: reconnecting here would bypass
-      // the isolation boundary the guest enforces.
+      // While lab-isolated the relay stays down: reconnecting here would bypass the isolation boundary.
       if (labIsolated && (event.op === "host" || event.op === "join" ||
                           event.op === "msg" || event.op === "announce")) {
         renderRelayStatus("Lab-isolated — real network dropped");
@@ -542,10 +524,7 @@
     }
   }
   function renderScreen(bytes) {
-    // Render the guest-owned 80x25 VGA text buffer at physical 0xb8000.
-    // This is a text-mode display, not a graphics-mode VGA implementation.
-    // Latch the diagnostic cell: SeaBIOS/empty dumps must not clear a later
-    // kernel frame, and they must not hide the placeholder on a fresh boot.
+    // Latch the diagnostic cell so an empty BIOS dump neither clears a kernel frame nor hides the placeholder.
     if (!core.validDiagnosticVga(bytes)) return;
     lastScreenBytes = bytes;
     document.documentElement.dataset.vgaCell = "F";
@@ -621,12 +600,7 @@
       renderRelayStatus(error.message || "Connection failed");
     }
   }
-  // Two owners, both FIFO: guestKeys orders and counts the input that reaches the guest;
-  // guestExchange gives one caller the guest from its command until its last reply (and any
-  // password) is done. Everything the person sends (buttons, the command form, keystrokes) takes a
-  // guestExchange turn. Replies the guest itself asked for (dnsack, file accept lines) take only
-  // guestKeys, so they go out at once; a password is still sent only if none of them (nor anything
-  // else) reached the guest after its exchange's command (core.driveGuestSteps).
+  // guestKeys orders guest input; guestExchange gives one caller the guest until its reply and password are done.
   const guestKeys = core.createGuestInput();
   const guestExchange = core.createExclusiveQueue();
   function enqueueGuest(work) {
@@ -640,9 +614,7 @@
     await enqueueGuest(() => emulator.sendText(value));
     return true;
   }
-  // script: a string of plain command lines, or [{ line, secret }] steps from lab-core. A secret
-  // step (a password) is sent only as the answer to its own command's prompt (core.driveGuestSteps),
-  // so a password is never typed as a command. The whole script is one guestExchange turn.
+  // A secret step is sent only as the answer to its own command's prompt, never typed as a command.
   function sendGuestLines(script, patterns) {
     return guestExchange.run(() => driveGuestLines(script, patterns));
   }
@@ -679,12 +651,7 @@
       sessions = { 1: "Flinstone" };
       extraUsers = [];
       renderSessions();
-      // The guest streams raw bytes one at a time, including multi-byte
-      // UTF-8 sequences (e.g. an em dash is 3 bytes). String.fromCharCode
-      // on each raw byte mangles those into mojibake; a streaming
-      // TextDecoder buffers an incomplete sequence across calls and only
-      // yields a character once it is complete, with no added delay for
-      // the ASCII bytes that make up most guest output.
+      // A streaming TextDecoder keeps a UTF-8 sequence split across reads from turning into mojibake.
       const serialDecoder = new TextDecoder("utf-8", { fatal: false });
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         const ch = serialDecoder.decode(new Uint8Array([byte]), { stream: true });
@@ -836,16 +803,11 @@
     screen.focus();
   });
 
-  // MitM + RS lab panel: each button sends a `netlab ...` line to the shell,
-  // so the network system is driven without the CLI. The lab/live network
-  // switch rides the LAB_NETMODE token the guest emits (see applyNetmode).
+  // The MitM + RS panel drives netlab through the shell; the lab/live switch follows the LAB_NETMODE token.
   function netlabPod() {
     const sel = document.getElementById("netlab-pod");
     return (sel && sel.value) || "redteam-lab";
   }
-  // Reads a text field, trims it, and keeps only its first whitespace-
-  // delimited token (names/pods/victims are single shell words), falling
-  // back to a sane default so a blank field never sends a bare command.
   function netlabToken(id, fallback) {
     const el = document.getElementById(id);
     const first = (el && el.value || "").trim().split(/\s+/)[0];
@@ -857,7 +819,6 @@
       screen.focus();
     });
   }
-  // Like wireNetlab, but the command doesn't depend on the segment selector.
   function wireNetlabPlain(id, build) {
     document.getElementById(id)?.addEventListener("click", () => {
       void sendGuestLines(`${build()}\n`);
@@ -865,7 +826,6 @@
     });
   }
 
-  // Network segment: recon + MitM on the fabricated hosts.
   wireNetlab("netlab-hosts", pod => `netlab hosts ${pod}`);
   wireNetlab("netlab-scan", pod => `netlab scan ${pod}`);
   wireNetlab("netlab-wpa", pod => `netlab wpa ${pod}`);
@@ -873,20 +833,17 @@
   wireNetlab("netlab-arpdemo", pod => `netlab arp-demo ${pod}`);
   wireNetlab("netlab-capture", pod => `netlab capture ${pod}`);
 
-  // Pod (private group): membership and host succession.
   wireNetlabPlain("netlab-pod-create", () =>
     `netlab pod create ${netlabToken("netlab-session-pod", "redcell")}`);
   wireNetlabPlain("netlab-pod-join", () => "netlab pod join");
   wireNetlabPlain("netlab-pod-members", () => "netlab pod members");
   wireNetlabPlain("netlab-pod-leave", () => "netlab pod leave");
 
-  // Reverse shell (simulated): open/close against a named mock victim.
   wireNetlabPlain("netlab-rs-listen", () => "netlab listen");
   wireNetlabPlain("netlab-rs-accept", () => "netlab accept");
   wireNetlabPlain("netlab-rs-end", () => "netlab end");
   wireNetlabPlain("netlab-status", () => "netlab status");
 
-  // Network isolation and reference text.
   wireNetlabPlain("netlab-start", () => "netlab start");
   wireNetlabPlain("netlab-stop", () => "netlab stop");
   wireNetlabPlain("netlab-consent", () => "netlab consent");
@@ -897,8 +854,7 @@
   if (form) {
     const accountName = () => document.getElementById("account-name").value.trim();
     const accountPassword = () => document.getElementById("account-secret")?.value || "";
-    // Each account action is one guestExchange turn, and its steps are built inside it, from the
-    // account the guest is on once any earlier exchange has finished.
+    // Each account action is one guestExchange turn; its steps are built inside it.
     form.addEventListener("submit", async event => {
       event.preventDefault();
       await guestExchange.run(async () => {

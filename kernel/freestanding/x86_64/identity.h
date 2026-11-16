@@ -12,7 +12,6 @@ typedef struct fl_fs_identity_kq_ops {
     void (*forget)(const char *name);
 } fl_fs_identity_kq_ops_t;
 
-/* Install before fl_fs_identity_init; NULL keeps the demo passwords. */
 void fl_fs_identity_set_kq(const fl_fs_identity_kq_ops_t *ops);
 
 void fl_fs_identity_init(void);

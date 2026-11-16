@@ -1,5 +1,4 @@
-/* Shared test fixtures. KQ_TEST_UTIL_SQLITE and KQ_TEST_UTIL_KQ, defined before the include, add the
- * sqlite and KeyQuorum helpers for tests that link them. */
+/* Shared test fixtures; KQ_TEST_UTIL_SQLITE and KQ_TEST_UTIL_KQ add the sqlite and KeyQuorum helpers. */
 #ifndef KQ_TEST_UTIL_H
 #define KQ_TEST_UTIL_H
 
@@ -55,7 +54,6 @@ static inline int kq_test_write_text(const char *path, const char *text) {
     return kq_test_write_file(path, text, strlen(text));
 }
 
-/* nbytes (at most 64) drawn bytes as lower-case hex; out holds 2 * nbytes + 1. */
 static inline int kq_test_random_hex(char *out, size_t nbytes) {
     uint8_t raw[64];
     volatile uint8_t *wipe = raw;
@@ -138,7 +136,6 @@ static inline int kq_test_put_container(const char *path, const fl_kq_buf_t *c) 
     return fl_fs_write_file_atomic(kqtf, c->data, c->len);
 }
 
-/* Two heads from one: "a\n" at t_left and "b\n" at t_right on the head of one, merged at t_merge. */
 static inline int kq_test_fork(const fl_kq_driver_t *drv, const fl_kq_buf_t *one, const char *author,
                                const uint8_t key[32], const char *t_left, const char *t_right,
                                const char *t_merge, fl_kq_buf_t *forked) {

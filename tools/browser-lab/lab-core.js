@@ -173,7 +173,6 @@
       lines += `filerecv data ${hex.slice(i, i + FILE_RECV_HEX_PER_LINE)}\n`;
     return lines + "filerecv end\n";
   }
-  /* The answer to `server file accept`: every waiting file in order, or a line saying there are none. */
   function fileAcceptLines(files) {
     const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
     return lines || "filerecv none\n";
@@ -200,9 +199,7 @@
   function guestUserNameOk(name) {
     return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,14}$/.test(name);
   }
-  // The session's own account is free; another account asks for its password (the su rule). Each
-  // helper returns steps: { line, secret }. A secret step answers the guest's Password: prompt, and
-  // the page sends it only once that prompt has appeared.
+  // Secret steps answer the guest's Password: prompt and are sent only once it has appeared.
   const sameUser = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
   function switchSteps(name, password, currentUser) {
     const steps = [{ line: `switchuser ${name}`, secret: false }];
@@ -219,10 +216,7 @@
     if (!guestUserNameOk(name)) return [];
     return switchSteps(name, password, currentUser);
   }
-  // One owner at a time: work passed to run() starts only after every earlier run() has settled,
-  // whether it resolved or threw. The lab holds one for guest keystrokes and one for whole guest
-  // exchanges (a command, the guest's reply and the password that answers its Password: prompt),
-  // so two exchanges can never cross and send a password to the other's prompt.
+  // One owner at a time: run() work starts only after earlier run() calls settle, so a password never reaches another prompt.
   function createExclusiveQueue() {
     let tail = Promise.resolve();
     return {
@@ -233,10 +227,7 @@
       },
     };
   }
-  // The guest's input, in order, with a count of every send made inside the turn that makes it.
-  // send() returns that send's number. sendIfLast(mark, work) sends only if nothing else has
-  // reached the guest since send number `mark`, checking and sending in one turn, so no other
-  // input (a keystroke, a dnsack, a file line) can land between the check and this send.
+  // sendIfLast(mark, work) sends only if nothing reached the guest since send number `mark`, checked and sent in one turn.
   function createGuestInput() {
     const keys = createExclusiveQueue();
     let sent = 0;
@@ -249,21 +240,13 @@
       sendIfLast(mark, work) { return keys.run(() => (sent === mark ? deliver(work) : 0)); },
     };
   }
-  // True when a Password: prompt follows the guest's echo of this command line. The shell echoes a
-  // command as typed and a password as *, so a prompt that was already open (a late or stale one)
-  // takes the line without echoing it, and does not count as this command's prompt.
   function promptAfterEcho(said, line) {
     const out = String(said || "").replace(/\r/g, "");
     const echo = out.indexOf(`${line}\n`);
     return echo >= 0 && out.indexOf("Password:", echo + line.length + 1) >= 0;
   }
   const GUEST_REPLY = /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
-  // Runs [{ line, secret }] steps against the guest. A secret step (a password) is sent only as the
-  // answer to the prompt the previous command opened: that prompt must follow the command's echo,
-  // and nothing else may have reached the guest since the command (else the other input may have
-  // answered the prompt, and the password would be typed as a command). Otherwise nothing more is
-  // sent. io: { input (createGuestInput), ready(), write(value), mark(), wait(re, from), said(from),
-  // status(message) }.
+  // Secret steps are sent only as the answer to the prompt the previous command opened, and only if nothing else reached the guest since.
   async function driveGuestSteps(steps, patterns, io) {
     let asked = false;
     let last = 0;
@@ -292,7 +275,6 @@
     return true;
   }
   function guestNewSessionLines(name, password) {
-    // A new session starts as Flinstone.
     const user = guestUserNameOk(name) ? name : "Flinstone";
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }

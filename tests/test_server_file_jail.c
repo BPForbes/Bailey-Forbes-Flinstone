@@ -1,13 +1,5 @@
-/*
- * test_server_file_jail.c - the `server file` verbs that read a local file (offer, send -t, log,
- * permit) refuse a jailed, unresolvable or quarantined path before they read anything.
- *
- * Each case runs the real cmd_server_file_run with a context that says the server is running, so
- * the verb gets as far as its path check. A denial prints one message and returns 1; a verb that
- * went on to read the file would instead print the message of the call after the check (the
- * checkpoint warning, "cannot read file", the history line), so each case also asserts that none
- * of those appear. The control case shows a path inside the jail is not refused.
- */
+/* The server file verbs that read a local file refuse a jailed, unresolvable or quarantined path first.
+/* A denial prints one message and returns 1; a verb that went on to read would print a later message. */
 #include "cmd_decl.h"
 #include "cmd_server_file.h"
 #include "cmd_util.h"
@@ -41,7 +33,6 @@
 
 extern char g_fs_jail_root[];
 
-/* snprintf that fails the setup instead of silently cutting a path. */
 #define SNP(dst, ...) \
     do { \
         int n_ = snprintf((dst), sizeof(dst), __VA_ARGS__); \
@@ -51,7 +42,6 @@ extern char g_fs_jail_root[];
         } \
     } while (0)
 
-/* g_cwd and g_vm_root are CWD_MAX (256) bytes: copy with an explicit end instead of snprintf. */
 static void set_str(char *dst, size_t cap, const char *src)
 {
     strncpy(dst, src, cap - 1u);
@@ -110,7 +100,6 @@ static void capture_end(struct capture *c, char *out, size_t cap)
     unlink(c->tmpl);
 }
 
-/* Run argv through cmd_server_file_run and return what it printed (stdout and stderr). */
 static int run_captured(char **argv, int argc, char *out, size_t cap)
 {
     struct capture c;
@@ -221,7 +210,6 @@ static void teardown(struct fixture *fx)
     rmrf(fx->outer);
 }
 
-/* Run one verb on one path; every verb is given the same chance to read the file. */
 enum verb { V_OFFER, V_SEND_T, V_LOG, V_PERMIT };
 
 static int run_verb(enum verb v, const char *path, char *out, size_t cap)
@@ -272,12 +260,10 @@ static int test_denials(void)
 
     if (setup(&fx))
         return 1;
-    /* A signed-in account that is not elevated (root and sudo are deliberately outside the jail),
-     * so permit and send -t reach their path check and the jail applies. */
+/* Not elevated, since root and sudo are deliberately outside the jail. */
     if (fl_session_set_user("Flinstone") != FL_RESULT_OK)
         goto done;
 
-    /* 70 directory segments then ".." components: the resolver cannot finish it. */
     deep[0] = '\0';
     for (int i = 0; i < 70; i++)
         strcat(deep, "d/");
@@ -292,7 +278,6 @@ static int test_denials(void)
                           "an expired-share quarantine path"))
             goto done;
     }
-    /* The outside file is untouched. */
     {
         struct stat st;
 
@@ -305,7 +290,6 @@ done:
     return rc;
 }
 
-/* Control: a path inside the jail is not refused by the check (the verb goes on past it). */
 static int test_inside_jail_is_not_refused(void)
 {
     struct fixture fx;
@@ -333,7 +317,6 @@ static int exists(const char *path)
     return stat(path, &st) == 0;
 }
 
-/* createdisk judges and creates the same, fully resolved file. */
 static int test_createdisk(void)
 {
     struct fixture fx;
@@ -354,7 +337,6 @@ static int test_createdisk(void)
     SNP(quarantined_disk, "%s/server_shared/expired/qdisk_disk.dat", fx.outer);
     SNP(inside_disk, "%s/%s/vol_disk.dat", fx.outer, FS_JAIL_HOST_SUBDIR);
 
-    /* Jail active: a volume outside the jail is refused and nothing is created. */
     {
         char name[PATH_MAX];
 
@@ -370,7 +352,6 @@ static int test_createdisk(void)
             goto done;
         }
     }
-    /* A path the resolver cannot finish is refused, with the jail on. */
     deep[0] = '\0';
     for (int i = 0; i < 70; i++)
         strcat(deep, "d/");
@@ -385,7 +366,6 @@ static int test_createdisk(void)
         rc = 1;
         goto done;
     }
-    /* Control: a volume inside the jail is created, with the file named from the checked path. */
     if (capture_begin(&c) != 0)
         goto done;
     rc = cmd_createdisk_run(4, inside_arg);
@@ -396,8 +376,7 @@ static int test_createdisk(void)
         goto done;
     }
 
-    /* The name is the jail root itself, which is allowed; the file with its suffix is a sibling of
-     * it, outside the jail. Judging the typed name instead of the file would let it through. */
+/* The jail root itself is allowed; judging the typed name instead of the file would let a sibling through. */
     {
         char name[PATH_MAX];
         char sibling[PATH_MAX];
@@ -417,7 +396,6 @@ static int test_createdisk(void)
         }
     }
 
-    /* Jail off: the quarantine still applies, and an unresolvable path is still refused. */
     g_vm_mode = 0;
     g_fs_jail_root[0] = '\0';
     {
@@ -450,8 +428,7 @@ done:
     return rc;
 }
 
-/* cmd_jail_blocked_path fails closed on its own: with a jail active it refuses an input the
- * resolver cannot finish, even though the cut-down path it is also given looks harmless. */
+/* cmd_jail_blocked_path fails closed: a path the resolver cannot finish is refused. */
 static int test_jail_check_fails_closed(void)
 {
     struct fixture fx;
@@ -477,7 +454,6 @@ static int test_jail_check_fails_closed(void)
                 out);
         goto done;
     }
-    /* And it still lets an ordinary path inside the jail through. */
     if (capture_begin(&c) != 0)
         goto done;
     blocked = cmd_jail_blocked_path("probe", "inside.txt", fx.inside);
@@ -492,7 +468,6 @@ done:
     return rc;
 }
 
-/* The storage table records every path the checkpoint code is asked to read. */
 static char g_seen[16][PATH_MAX];
 static int g_nseen;
 static fl_kq_storage_t g_rec;
@@ -518,8 +493,7 @@ static int rec_exists(void *ctx, const char *path)
     return fl_kq_storage_default()->exists(ctx, path);
 }
 
-/* Every path the checkpoint layer was handed is the resolved one (absolute, under `want`), never
- * the relative text that was typed. */
+/* The checkpoint layer is handed the resolved path, never the typed relative text. */
 static int seen_only_resolved(const char *want, const char *what)
 {
     if (g_nseen == 0) {
@@ -535,8 +509,7 @@ static int seen_only_resolved(const char *want, const char *what)
     return 0;
 }
 
-/* The shell's working directory (g_cwd) is not the process's: a relative name means different
- * files to each. The verbs must act on the one they checked. */
+/* g_cwd is not the process's cwd: a relative name must resolve to the file the verb checked. */
 static int test_verbs_use_the_checked_path(void)
 {
     struct fixture fx;
@@ -574,7 +547,6 @@ static int test_verbs_use_the_checked_path(void)
     if (seen_only_resolved(doc, "server file permit"))
         goto done;
 
-    /* The offer stats the file before anything else: it exists only at the checked path. */
     (void)run_captured(offer, 3, out, sizeof(out));
     if (strstr(out, "cannot read file")) {
         fprintf(stderr, "FAIL: server file looked for the typed name, not the checked path:\n%s\n", out);
@@ -588,9 +560,7 @@ done:
     return rc;
 }
 
-/* `server file permit` countersigns a revision beside the file it checked. The shell's working
- * directory differs from the process's, so a verb that wrote beside the typed name would not find
- * the container and would fail. The supervisor's password is read from stdin (not a terminal). */
+/* permit countersigns beside the file it checked; the supervisor password is read from stdin. */
 static int test_permit_writes_beside_the_checked_path(void)
 {
     struct fixture fx;
@@ -619,14 +589,12 @@ static int test_permit_writes_beside_the_checked_path(void)
     if (fl_session_set_user("Flinstone") != FL_RESULT_OK)
         goto done;
     db = fl_session_user_db_mut();
-    /* Two accounts under the supervisor, with passwords drawn at run time. */
     snprintf(pw_mya, sizeof(pw_mya), "m%08x", (unsigned)getpid() * 2654435761u);
     snprintf(pw_steve, sizeof(pw_steve), "s%08x", (unsigned)getpid() * 40503u + 7u);
     if (fl_session_add_user_under("Root.Flinstone", "Mya", pw_mya, 4000, 0, 0) != FL_RESULT_OK ||
         fl_session_add_user_under("Root.Flinstone", "Steve", pw_steve, 4001, 0, 0) != FL_RESULT_OK ||
         fl_user_db_open_key(db, "Mya", pw_mya, mya_sign) != FL_RESULT_OK)
         goto done;
-    /* A real container for doc.txt, made by Mya for Steve, with a head revision. */
     if (fl_kq_cp_encode(db, "Root.Flinstone.Mya", mya_sign, "Root.Flinstone.Steve",
                         fl_user_db_box_public(db, "Root.Flinstone.Steve"), doc,
                         "2026-10-30T00:00:00.000Z", &enc) != FL_KQ_CP_OK)
@@ -679,7 +647,6 @@ done:
     return rc;
 }
 
-/* `write` joins its words into a bounded buffer. */
 static int test_write_joins_and_bounds_its_words(void)
 {
     struct fixture fx;
@@ -712,7 +679,6 @@ static int test_write_joins_and_bounds_its_words(void)
         goto done;
     }
 
-    /* Far more words than fit: it stops before the buffer end and keeps only whole words. */
     args[argc++] = "write";
     args[argc++] = "w.txt";
     for (int i = 0; i < 600; i++)
@@ -740,7 +706,6 @@ int main(void)
     char db_path[] = "/tmp/sfj_users_XXXXXX";
     int db_fd = mkstemp(db_path);
 
-    /* A private user database with the lab defaults, so the session can sign in as root. */
     if (db_fd < 0)
         return 1;
     close(db_fd);

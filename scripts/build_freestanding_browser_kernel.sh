@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# SECFEAT=1 builds the security-features variant (the netlab teaching lab
-# compiled in) to a separate image; default is the lab-free image that the
-# Flinstone page embeds and that main ships.
+# SECFEAT=1: the separate security-features image (netlab compiled in); the default is the lab-free image main ships.
 secfeat="${SECFEAT:-0}"
 if [ "${secfeat}" = "1" ]; then
     build="${root}/build/freestanding-x86_64-secfeat"; imgname="flintstone-secfeat.img"; infoname="build-info-secfeat.json"
@@ -13,12 +11,9 @@ fi
 dist="${root}/dist"
 mkdir -p "${build}" "${dist}"
 for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }; done
-# Stage 1 (the MBR) loads the bounded stage 2, which collects E820, enables A20 and loads
-# the kernel. Both take their layout from bootinfo.inc.
 fsdir="${root}/kernel/freestanding/x86_64"
 nasm -f bin -I"${fsdir}/" "${fsdir}/boot.asm" -o "${build}/boot.bin"
 nasm -f bin -I"${fsdir}/" "${fsdir}/stage2.asm" -o "${build}/stage2.bin"
-# One source for the layout: the loader's bootinfo.inc.
 layout() { awk -v n="$1" '$1=="%define" && $2==n{print $3}' "${fsdir}/bootinfo.inc"; }
 stage2_sectors=$(layout FL_STAGE2_SECTORS)
 load_addr=$(layout FL_KERNEL_LOAD_ADDR)
@@ -26,15 +21,11 @@ low_budget=$(layout FL_LOW_BUDGET)
 (( stage2_sectors > 0 && $(stat -c%s "${build}/stage2.bin") == stage2_sectors * 512 )) || { echo "stage 2 is not ${stage2_sectors} sectors" >&2; exit 1; }
 nasm -f elf64 -I"${fsdir}/" "${fsdir}/entry.asm" -o "${build}/entry.o"
 cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -DFL_FREESTANDING -DNDEBUG -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
-# The shared workqueue (kernel/core/sched) is compiled in unchanged; -DFL_FREESTANDING selects its
-# unlocked, static-pool configuration. Same include roots as the hosted build for its contracts.
 for d in contracts/foundations contracts/runtime contracts/networking contracts/identity contracts/drivers contracts/storage contracts/observability contracts/operations contracts/virtualization contracts/hardening kernel/include kernel/core/sched kernel/core/time arch/x86_64/gas; do
     cflags+=(-I"${root}/${d}")
 done
 cflags+=(-I"${root}")
-# KeyQuorum (FL-02): the Rust library for x86_64-unknown-none, built from the submodule with the portable
-# crypto backends its .cargo/config.toml selects (cargo reads that file from the working directory's
-# parents, hence the cd). KQ_FREESTANDING=0 builds the image without it, as before.
+# KQ_FREESTANDING=0 skips the KeyQuorum library; cargo reads .cargo/config.toml from the working directory's parents (hence the cd).
 kq_on="${KQ_FREESTANDING:-1}"
 kq_objects=()
 if [ "${kq_on}" = "1" ]; then
@@ -49,7 +40,7 @@ fi
 objects=("${build}/entry.o")
 kq_srcs=()
 [ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c")
-# Sealed account keys. Not in the SECFEAT image: its bss has no room (measured, see docs).
+# Not in the SECFEAT image: its bss has no room.
 [ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c")
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
@@ -81,30 +72,17 @@ do
     gcc "${cflags[@]}" ${extra[@]+"${extra[@]}"} "${src}" -o "${obj}"
     objects+=("${obj}")
 done
-# asm_mem_zero / asm_mem_copy for the queue: the same GAS source the hosted build links (no libc, no SSE).
 gcc -c -m64 "${root}/arch/x86_64/gas/mem_asm.s" -o "${build}/mem_asm.o"
 objects+=("${build}/mem_asm.o")
 ld_extra=()
 [ "${kq_on}" = "1" ] && ld_extra=(--gc-sections "${kqlib}")
 ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${objects[@]}" ${ld_extra[@]+"${ld_extra[@]}"} -o "${build}/kernel.elf"
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
-# Chunked BIOS load (see stage2.asm): stage 2 reads the payload in <=127-sector
-# pieces, advancing the destination segment each time, so it is no longer a
-# single-transfer loader. The ceiling here is not that mechanism's limit; it
-# keeps the loaded payload's end address (0x10000 + sectors*512) safely below
-# 0xa0000, the start of VGA memory and the universal top of real-mode
-# conventional memory, with 128 sectors of margin to spare (1024 sectors =
-# 512 KiB payload ends at 0x90000; the boundary itself is at 1152 sectors).
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 (( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
-# The payload is followed by bss (the queues, the KeyQuorum library's statics; the stack is below the
-# image) in the same conventional memory: its end must stay below FL_LOW_BUDGET, 0x9f000
-# (the EBDA starts at 0x9fc00, VGA at 0xa0000).
+# Payload and bss stay below FL_LOW_BUDGET (0x9f000, under the EBDA at 0x9fc00) and VGA at 0xa0000.
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
 payload_bytes=$(stat -c%s "${build}/kernel.bin")
-# Image layout: the entry is the first loaded byte at the link address the loader jumps to,
-# everything the loader reads (whole sectors) lies below the budget, nothing loaded overlaps the bss
-# that entry.asm clears, and the bss ends inside the budget. Python integers: no wraparound.
 nm "${build}/kernel.elf" | python3 -c '
 import sys
 payload, sectors = int(sys.argv[1]), int(sys.argv[2])
@@ -124,7 +102,6 @@ if start != base_expected or entry != start:
     problems.append("entry %#x / image start %#x is not the load address %#x" % (entry, start, base_expected))
 if start + payload > bss_start:
     problems.append("loaded bytes end at %#x, past the bss start %#x" % (start + payload, bss_start))
-# fl_bootinfo_validate refuses a handoff whose whole-sector read ends before the bss starts.
 if start + sectors * 512 < bss_start:
     problems.append("the loader reads up to %#x, short of the bss start %#x" % (start + sectors * 512, bss_start))
 if bss_end < bss_start:
@@ -136,8 +113,6 @@ if not 0 < bss_end < budget:
 if problems:
     sys.exit("image layout: " + "; ".join(problems))
 ' "${payload_bytes}" "${sectors}" "${load_addr}" "${low_budget}"
-# Payload size and bss end (already gated above) are recorded for CI logs.
-# Stage 2 learns the payload's sector count and the bss end from its tagged patch block.
 python3 - "${build}/stage2.bin" "$sectors" "$bss_end" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())

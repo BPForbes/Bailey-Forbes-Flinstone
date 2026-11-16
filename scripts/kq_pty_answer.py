@@ -27,8 +27,6 @@ def main() -> int:
     pid, fd = pty.fork()
     if pid == 0:
         try:
-            # Echo off on the terminal (the pty's slave side) before the program starts: the parent
-            # answers as soon as a prompt arrives, which can be before the program disables echo.
             attrs = termios.tcgetattr(0)
             attrs[3] &= ~termios.ECHO
             termios.tcsetattr(0, termios.TCSANOW, attrs)

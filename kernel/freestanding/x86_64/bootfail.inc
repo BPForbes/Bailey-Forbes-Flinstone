@@ -1,7 +1,4 @@
-; boot_fail: the loader's one failure path, shared by stage 1 and stage 2. ds:si points at
-; a NUL-terminated marker such as "FLINTSTONE_BOOT_FAIL a20". It is written to COM1 (waiting a
-; bounded time for the transmitter, so a missing UART cannot hang it) and to the screen through
-; the BIOS, then the CPU halts for good.
+; boot_fail: shared by both stages; writes the marker to COM1 (bounded wait) and the screen, then halts.
 boot_fail:
     cld
 .next:

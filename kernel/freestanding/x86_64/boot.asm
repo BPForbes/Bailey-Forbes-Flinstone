@@ -1,6 +1,4 @@
-; Stage 1: the BIOS boot sector. Reads the bounded stage 2 (FL_STAGE2_SECTORS sectors from LBA 1) to
-; FL_STAGE2_ADDR, checks the read and stage 2's trailing magic, and jumps to it with the drive number
-; in dl. Stage 2 (stage2.asm) does the rest.
+; Stage 1 (MBR): loads stage 2 from LBA 1 to FL_STAGE2_ADDR, checks the read and magic, jumps with the drive in dl.
 BITS 16
 ORG 0x7c00
 %include "bootinfo.inc"

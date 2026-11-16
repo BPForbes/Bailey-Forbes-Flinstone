@@ -9,8 +9,7 @@ SECTION .text
 kernel_entry:
     cli
     cld
-    ; Stage 2 passes the boot-info address in edi (below 4 GiB; the upper half of rdi is undefined
-    ; after the switch to long mode). rdi is the bss clear's destination, so keep it in ebx.
+    ; edi holds the boot-info address (below 4 GiB); ebx keeps it across the bss clear.
     mov ebx, edi
     mov ax, 0x10
     mov ds, ax

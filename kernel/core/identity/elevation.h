@@ -13,7 +13,6 @@ fl_result_t fl_elevation_refresh(fl_elevation_token_t token, int64_t *expires_ns
 fl_result_t fl_elevation_expires(fl_elevation_token_t token, int64_t *expires_ns_out);
 void        fl_elevation_revoke_all(void);
 
-/** Non-expired elevation slots currently in use (lab pool size **16**). */
 size_t      fl_elevation_active_count(void);
 
 #endif /* FL_ELEVATION_H */

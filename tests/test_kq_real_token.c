@@ -1,11 +1,5 @@
-/*
- * test_kq_real_token.c - real slot tokens and a real private bridge.
- *
- * Run by scripts/kq_real_token_fixture.sh (make test_kq_real_token), which mints the material
- * with the keyquorum CLI: two KQSTs on two devices under passphrases drawn at run time, a third
- * device id that holds neither, and a KeyQuorum private bridge between the two slots.
- * No secret is a literal: the passphrases are read from the fixture's files.
- */
+/* Real slot tokens and a real private bridge, minted by the keyquorum CLI in scripts/kq_real_token_fixture.sh.
+/* Passphrases are read from the fixture's files; no secret is a literal. */
 #include "fl/kq.h"
 #include "fl/driver/keyquorum.h"
 #include "fl/hex.h"
@@ -54,8 +48,7 @@ static int read_pass(const char *file, char *out, size_t cap) {
 
 static int s_opened_ok;
 
-/* The key service's place at a KQST login: it gets the opened signing secret. Here it checks that the
- * secret is the paired key and signs with it, then accepts the login. */
+/* Key service's place at a KQST login: checks the opened secret is the paired key. */
 static fl_result_t opened_hook(const fl_user_record_t *account, const uint8_t secret[32], uint64_t gen) {
     const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
     unsigned char dev[16], sig_pub[32], enc_pub[32], pub[32], nonce[16], sig[64];
@@ -81,7 +74,6 @@ static void audit_capture(const char *actor, const char *event, const char *subj
     snprintf(s_audit_last, sizeof s_audit_last, "%s:%s", event ? event : "", detail ? detail : "");
 }
 
-/* The pairing the store holds for label: its token's path, device id and the two public keys. */
 static int register_pairing(const char *label, const char *kqst, const char *device_hex,
                             const char *sig_hex, const char *enc_hex) {
     unsigned char dev[16], sig[32], enc[32];
@@ -108,7 +100,6 @@ static int set_up_accounts(void) {
     return 0;
 }
 
-/* A real KQST opens with its passphrase, its key is the one the store paired, and it signs. */
 static int test_open_and_sign(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
     uint8_t secret[32], pub[32], expect[32], nonce[16], sig[64];
@@ -130,16 +121,13 @@ static int test_open_and_sign(void) {
     return 0;
 }
 
-/* The wrong passphrase and the wrong device are both refused, and so is the login. */
 static int test_refusals(void) {
     ASSERT(fl_kq_open_account("Bob", s_ann_pw, NULL) == FL_KQ_ACCOUNT_WRONG_PASSWORD);
     ASSERT(fl_session_login("Bob", s_ann_pw) == FL_RESULT_ACCES);
-    /* Bob's token, but the store pairs it with a real device that does not hold it. */
     ASSERT(register_pairing("Root.Flinstone.Bob", env("FL_RT_BOB_KQST"), env("FL_RT_OTHER_DEVICE"),
                             env("FL_RT_BOB_SIG"), env("FL_RT_BOB_ENC")) == 0);
     ASSERT(fl_kq_open_account("Bob", s_bob_pw, NULL) == FL_KQ_ACCOUNT_INVALID);
     ASSERT(fl_session_login("Bob", s_bob_pw) == FL_RESULT_ACCES);
-    /* Ann's token, with its own passphrase, presented as Bob's: the label and keys do not match. */
     ASSERT(fl_kq_open_account("Bob", s_ann_pw, env("FL_RT_ANN_KQST")) == FL_KQ_ACCOUNT_INVALID);
     ASSERT(register_pairing("Root.Flinstone.Bob", env("FL_RT_BOB_KQST"), env("FL_RT_BOB_DEVICE"),
                             env("FL_RT_BOB_SIG"), env("FL_RT_BOB_ENC")) == 0);
@@ -151,8 +139,7 @@ static void logout_during_open(void) {
     (void)fl_session_logout();
 }
 
-/* The key service's place for the box secret of a KQST login: here it checks the secret is the paired one (its
- * public key is the token's encryption key in the account store) and records that it arrived. */
+/* Key service's place for a KQST box secret: checks it is the paired one. */
 static int s_box_seen;
 static fl_result_t box_hook(const fl_user_record_t *account, const uint8_t box_secret[32], uint64_t gen) {
     const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
@@ -172,7 +159,6 @@ static int test_login_generation(void) {
     uint64_t before, after;
 
     ASSERT(fl_session_logout() == FL_RESULT_OK);
-    /* A logout while the token is opening supersedes the login: it must not commit. */
     fl_session_test_set_kqst_pre_open(logout_during_open);
     ASSERT(fl_session_login("Bob", s_bob_pw) == FL_RESULT_ACCES);
     fl_session_test_set_kqst_pre_open(NULL);
@@ -193,8 +179,7 @@ static int tamper_roster_signing(const char *uid);
 
 static int session_db(sqlite3 **out) { return kq_test_open_db(fl_session_user_db()->path, out); }
 
-/* Drops this store's copy of the bridge, so an import starts from the source's state: an import keeps a
- * bridge destroyed here and refuses a source older than the local row. */
+/* An import keeps a bridge destroyed here and refuses a source older than the local row. */
 static int forget_bridge(const char *uid) {
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
@@ -211,8 +196,6 @@ static int forget_bridge(const char *uid) {
     return ok ? 0 : -1;
 }
 
-/* Imports the KeyQuorum store's bridge (made by bridge private create) with the production importer, then
- * reads it back. tamper_roster: the roster key of Root.Flinstone.Bob then disagrees with the member's own. */
 static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
     const fl_user_db_t *db = fl_session_user_db();
 
@@ -227,11 +210,7 @@ static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
     return 0;
 }
 
-/*
- * Test-only seam: linked with -Wl,--wrap=fl_kq_driver_get_or_register (Makefile, test_kq_real_token).
- * With s_destroy_after_verify set, bridge_verify runs for real and then the bridge is marked destroyed
- * in the store: the roster changing between the proof and the commit.
- */
+/* Test seam: linked with -Wl,--wrap=fl_kq_driver_get_or_register; changes the roster between proof and commit. */
 const fl_kq_driver_t *__real_fl_kq_driver_get_or_register(void);
 const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void);
 static fl_user_bridge_t *s_destroy_after_verify;
@@ -240,8 +219,6 @@ static int (*s_real_verify)(const char *, uint32_t, const uint8_t *, const uint8
                             const uint8_t *, size_t, const char *, const uint8_t *, size_t, const uint8_t *,
                             size_t);
 
-/* Marks the bridge destroyed or live in the session's store in place (a re-put would drop the sealed
- * member keys with the roster). */
 static int set_destroyed(const char *uid, int destroyed) {
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
@@ -370,7 +347,6 @@ static int begin_exclusive(void) {
     return 0;
 }
 
-/* Same uid and the same member labels; one fact the proof already bound is committed after verify. */
 static int apply_mut(void) {
     switch (s_mut_kind) {
     case MUT_GENERATION:
@@ -397,7 +373,6 @@ static int verify_then_act(const char *uid, uint32_t generation, const uint8_t s
 
     if (s_destroy_after_verify && set_destroyed(s_destroy_after_verify->uid, 1) != 0)
         return FL_KQ_BRIDGE_INVALID;
-    /* After verify has returned: the proof stands, and the store then changes under it. */
     if (s_mut_kind != MUT_NONE && st == FL_KQ_BRIDGE_OK && apply_mut() != 0)
         return FL_KQ_BRIDGE_INVALID;
     return st;
@@ -414,8 +389,7 @@ const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void) {
     return &s_patched;
 }
 
-/* Another connection, while the switch holds the writer reservation. It must be busy, and the row
- * it tried to change must still be the one the proof bound. */
+/* Another connection during the switch's writer reservation must be busy; the proof's row is unchanged. */
 static void held_other_writer(void) {
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
@@ -564,7 +538,6 @@ out:
     return rc;
 }
 
-/* The production importer against a store the real CLI made. */
 static int test_bridge_import(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     const fl_user_db_t *db = fl_session_user_db();
@@ -574,22 +547,18 @@ static int test_bridge_import(void) {
     int rc = 1;
 
     ASSERT(b);
-    /* An unknown uid, and an account that is not on the roster: refused, and nothing is written. */
     if (fl_user_db_bridge_import_from_kq(db, org, "00000000", "Root.Flinstone.Bob") != FL_RESULT_NOENT)
         goto out;
     if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Nobody.Else") != FL_RESULT_NOENT)
         goto out;
     if (fl_user_db_bridge_get(db, uid, b) == FL_RESULT_OK && b->nmembers != 0) /* earlier tests may have imported it */
         goto out;
-    /* Ann is on the roster but KeyQuorum holds no sealed key of hers: refused whole, no roster left behind. */
     if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Alternative.Ann") != FL_RESULT_NOENT)
         goto out;
     if (fl_user_db_bridge_get(db, uid, b) == FL_RESULT_OK && b->nmembers != 0)
         goto out;
-    /* A missing store is an error, not an empty bridge. */
     if (fl_user_db_bridge_import_from_kq(db, "/nonexistent/kq.sqlite", uid, "Root.Flinstone.Bob") == FL_RESULT_OK)
         goto out;
-    /* Bob's import brings the roster and his sealed key together. */
     if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Flinstone.Bob") != FL_RESULT_OK)
         goto out;
     memset(b, 0, sizeof *b);
@@ -598,24 +567,19 @@ static int test_bridge_import(void) {
     if (fl_user_db_bridge_sealed_key(db, uid, "Root.Flinstone.Bob", sealed, sizeof sealed, &n, wrap) != FL_RESULT_OK ||
         n == 0)
         goto out;
-    /* The store holds none of Ann's: the importer copied only the local member's. */
     if (fl_user_db_bridge_sealed_key(db, uid, "Root.Alternative.Ann", sealed, sizeof sealed, &n, wrap) == FL_RESULT_OK)
         goto out;
-    /* Importing again is idempotent. */
     if (fl_user_db_bridge_import_from_kq(db, org, uid, "Root.Flinstone.Bob") != FL_RESULT_OK)
         goto out;
-    /* A roster-only import (no local member) is accepted and carries no sealed key. */
     if (fl_user_db_bridge_import_from_kq(db, org, uid, NULL) != FL_RESULT_OK)
         goto out;
     if (fl_user_db_bridge_sealed_key(db, uid, "Root.Flinstone.Bob", sealed, sizeof sealed, &n, wrap) == FL_RESULT_OK)
         goto out; /* re-put replaced the roster and, by the writer's contract, its sealed keys */
-    /* A bridge destroyed here stays destroyed when the live source is imported again at its generation. */
     if (set_destroyed(uid, 1) != 0 || fl_user_db_bridge_import_from_kq(db, org, uid, NULL) != FL_RESULT_OK)
         goto out;
     memset(b, 0, sizeof *b);
     if (fl_user_db_bridge_get(db, uid, b) != FL_RESULT_OK || !b->destroyed)
         goto out;
-    /* A source older than the local row is refused and changes nothing. */
     {
         int before = 0, after = 0;
 
@@ -632,8 +596,6 @@ out:
     return rc;
 }
 
-/* su across branches over a live private bridge: the target's password, plus a member opening their
- * token and proving membership against the store's current facts. */
 static int test_bridge_su(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     fl_kq_requirement_t need;
@@ -641,7 +603,6 @@ static int test_bridge_su(void) {
     int rc = 1;
 
     ASSERT(b);
-    /* A roster key that disagrees with the member's own: the proof does not verify. */
     if (import_fixture_bridge(b, 1) != 0)
         goto out;
     if (fl_kq_prove_bridge_member(b->uid, "Bob", s_bob_pw, NULL) != FL_KQ_BRIDGE_REFUSED)
@@ -668,7 +629,6 @@ static int test_bridge_su(void) {
         goto fail;
     req.bridge_member = "Bob";
     req.bridge_member_password = s_bob_pw;
-    /* The proof verifies, but the bridge is gone by the time the session asks again: refused. */
     s_destroy_after_verify = b;
     rc = fl_session_switch_user(&req) != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:bridge-changed") != 0 ||
          strcmp(fl_session_current_user(), "Bob") != 0;
@@ -678,7 +638,6 @@ static int test_bridge_su(void) {
     rc = 1;
     if (fl_session_switch_user(&req) != FL_RESULT_OK || strcmp(fl_session_current_user(), "Ann") != 0)
         goto fail;
-    /* Destroyed: no longer live, so Ann -> Bob across branches asks for Bob's own token. */
     b->destroyed = 1;
     if (fl_user_db_bridge_put(fl_session_user_db(), b) != FL_RESULT_OK)
         goto fail;
@@ -693,7 +652,6 @@ static int test_bridge_su(void) {
     if (fl_session_switch_user(&req) != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:password") != 0)
         goto fail;
     req.password = s_bob_pw;
-    /* The right password, but the token is not on the paired device: a password alone never does. */
     if (register_pairing("Root.Flinstone.Bob", env("FL_RT_BOB_KQST"), env("FL_RT_OTHER_DEVICE"),
                          env("FL_RT_BOB_SIG"), env("FL_RT_BOB_ENC")) != 0 ||
         fl_session_switch_user(&req) != FL_RESULT_ACCES || strcmp(s_audit_last, "su-refused:kqst") != 0 ||
@@ -711,10 +669,7 @@ out:
     return rc;
 }
 
-/* A parent's signing seed is dealt to the box keys of two real slot tokens (Bob and Ann, on two real
- * devices), assembled back through the driver from the secrets those tokens open, and the assembled key
- * signs as the parent's own key would. One device twice is no quorum, and a record checked against
- * another parent's public key is refused. */
+/* A parent's seed dealt to two real tokens' box keys, assembled back and signing as the parent. */
 static int test_parent_key_assembly(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
     const char *labels[2] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
@@ -743,11 +698,9 @@ static int test_parent_key_assembly(void) {
     ASSERT(kq->assembly_split(seed, 7, labels, (const uint8_t(*)[32])box_pub, 2, record, sizeof record, &rlen) ==
            KQ_ASSEMBLY_OK && rlen > 0);
     ASSERT(kq->assembly_generation(record, rlen, &gen) == KQ_ASSEMBLY_OK && gen == 7);
-    /* Both real tokens' secrets, two devices: the seed comes back. */
     ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
                                  (const uint8_t(*)[16])dev, 2, 2, assembled) == KQ_ASSEMBLY_OK);
     ASSERT(memcmp(assembled, seed, 32) == 0);
-    /* One share is not enough; one device twice does not meet two devices; another parent's key is a mismatch. */
     memset(assembled, 0xAA, sizeof assembled);
     ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
                                  (const uint8_t(*)[16])dev, 1, 2, assembled) == KQ_ASSEMBLY_QUORUM);
@@ -759,14 +712,12 @@ static int test_parent_key_assembly(void) {
     ASSERT(kq->assembly_assemble(record, rlen, parent_pub, labels, (const uint8_t(*)[32])box_sec,
                                  (const uint8_t(*)[16])dev, 2, 2, assembled) == KQ_ASSEMBLY_OK);
 
-    /* The assembled key signs the same revision the parent's own key does, and the history verifies. */
     ASSERT(kq->file_new(id, "asm.txt", "Root", &base) == KQ_FILE_OK);
     ASSERT(kq->check_in(&base, "Root", "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, seed, &own, rev) == KQ_FILE_OK);
     ASSERT(kq->check_in(&base, "Root", "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, assembled, &viaasm, rev2) ==
            KQ_FILE_OK);
     {
-        /* Trusted under the parent's registered public key alone: the signature is the parent's, whichever way the
-         * key was obtained. (The two containers need not be byte-identical: a container carries its own nonces.) */
+        /* Trusted under the parent's public key alone: the signature is the parent's however the key was obtained. */
         kq_file_key_t pk = {.label = "Root"};
         kq_file_trust_t trust = {.keys = &pk, .nkeys = 1};
         uint8_t got_own[32], got_asm[32];
@@ -775,7 +726,6 @@ static int test_parent_key_assembly(void) {
         ok = kq->verify(&viaasm, NULL) == KQ_FILE_OK && kq->select_read(&own, &trust, (const uint8_t(*)[32])rev, 1, got_own) == KQ_FILE_OK &&
              kq->select_read(&viaasm, &trust, (const uint8_t(*)[32])rev2, 1, got_asm) == KQ_FILE_OK && memcmp(got_asm, rev2, 32) == 0 &&
              memcmp(got_own, rev, 32) == 0;
-        /* and not under another parent's key */
         memcpy(pk.signing_public, other_pub, 32);
         ok = ok && kq->select_read(&viaasm, &trust, (const uint8_t(*)[32])rev2, 1, got_asm) != KQ_FILE_OK;
     }
@@ -794,10 +744,7 @@ static int test_parent_key_assembly(void) {
     return 0;
 }
 
-/*
- * Root's own real KQST, paired through the store's enrolment path, then
- * sudo co-signed by two real tokens: Root's (Root's passphrase) and the invoker Bob's (Bob's).
- */
+/* Root's KQST paired through enrolment, then sudo co-signed by Root's and Bob's real tokens. */
 static int test_root_enrol_and_sudo(void) {
     unsigned char dev[16], sig[32], enc[32], wrong[32];
     int64_t gen = 0;
@@ -806,12 +753,10 @@ static int test_root_enrol_and_sudo(void) {
     ASSERT(fl_hex_decode(env("FL_RT_ROOT_SIG"), sig, sizeof sig) == 0);
     ASSERT(fl_hex_decode(env("FL_RT_ROOT_ENC"), enc, sizeof enc) == 0);
     ASSERT(fl_hex_decode(env("FL_RT_ANN_SIG"), wrong, sizeof wrong) == 0);
-    /* The token's passphrase is the account's password. */
     ASSERT(fl_session_set_password("Root", s_root_pw) == FL_RESULT_OK);
     ASSERT(fl_session_save_users() == FL_RESULT_OK);
     ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
     ASSERT(!fl_session_sudo_needs_root());
-    /* Wrong facts, wrong password, Bob's token: KeyQuorum refuses each; nothing is paired. */
     ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_ROOT_KQST"), dev, wrong, enc, 1, &gen) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit_last, "kqst-enrol-refused:kqst"));
     ASSERT(fl_session_enroll_kqst(s_bob_pw, env("FL_RT_ROOT_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_ACCES);
@@ -819,21 +764,17 @@ static int test_root_enrol_and_sudo(void) {
     ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_BOB_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit_last, "kqst-enrol-refused:kqst"));
     ASSERT(!fl_session_sudo_needs_root());
-    /* The real facts: paired, and Root's token opens from the store. */
     ASSERT(fl_session_enroll_kqst(s_root_pw, env("FL_RT_ROOT_KQST"), dev, sig, enc, 1, &gen) == FL_RESULT_OK);
     ASSERT(gen == 1);
     ASSERT(fl_session_sudo_needs_root());
     ASSERT(fl_kq_open_account("Root", s_root_pw, NULL) == FL_KQ_ACCOUNT_OK);
 
-    /* Bob (a KQST account with its own real token) runs sudo: both tokens, or nothing. */
     ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
     ASSERT(fl_session_sudo_authenticate(s_bob_pw, s_bob_pw) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit_last, "sudo-refused:password"));
     ASSERT(fl_session_sudo_authenticate(s_root_pw, s_ann_pw) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit_last, "sudo-refused:invoker-password"));
     ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
-    /* Co-signed: Bob's token and Root's each signed "sudo" with one nonce, and KeyQuorum verified
-     * both halves under the public keys the store pairs with them. */
     {
         static const char want[] = "sudo-coauth:sudo; cosign=token; nonce=";
         const char *nonce = s_audit_last + sizeof want - 1;
@@ -843,9 +784,7 @@ static int test_root_enrol_and_sudo(void) {
     }
     ASSERT(fl_session_has_elevation());
     {
-        /* The sudo window: Bob's and Root's real keys are kept for it and
-         * sign every elevated action together; a sudo in it starts the clock again; when Root's key is
-         * not available the elevation is taken away and Bob goes on with his own key alone. */
+/* The sudo window keeps both real keys and signs every elevated action; losing Root's key ends the elevation. */
         static const char act_want[] = "sudo-action:elevated; nonce=", sudo_want[] = "sudo-action:sudo; nonce=";
         uint8_t nonce[16], s_inv[64], s_auth[64];
         int64_t now = 0;
@@ -858,20 +797,16 @@ static int test_root_enrol_and_sudo(void) {
         ASSERT(fl_session_elevated_action("sudo ls /", 1, &deelev) == FL_RESULT_OK && deelev == 0);
         ASSERT(!strncmp(s_audit_last, sudo_want, sizeof sudo_want - 1));
         ASSERT(fl_session_has_elevation());
-        /* Another account, or a time past the window, gets nothing from the kept keys. */
         ASSERT(fl_kq_sudo_hold_cosign("Ann", "ls", now, nonce, s_inv, s_auth) == FL_KQ_COSIGN_AUTHORITY);
         ASSERT(fl_kq_sudo_hold_cosign("Bob", "ls", now, nonce, s_inv, s_auth) == FL_KQ_COSIGN_OK);
         ASSERT(fl_kq_sudo_hold_expire(now) == 0); /* not over yet */
-        /* Root's key gone (here: wiped) inside the window: elevation ends, Bob is himself again. */
         fl_kq_sudo_hold_release();
         ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 1);
         ASSERT(!strcmp(s_audit_last, "sudo-deelevated:root-key"));
         ASSERT(!fl_session_has_elevation());
-        /* Outside a window there is nothing to co-sign: the account's own key, no audit. */
         ASSERT(fl_session_elevated_action("ls /", 0, &deelev) == FL_RESULT_OK && deelev == 0);
         ASSERT(!strcmp(s_audit_last, "sudo-deelevated:root-key"));
 
-        /* A new sudo opens a new window; when it ends the keys are wiped. */
         ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
         ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK && fl_kq_sudo_hold_active(now));
         ASSERT(fl_kq_sudo_hold_cosign("Bob", "ls", INT64_MAX, nonce, s_inv, s_auth) == FL_KQ_COSIGN_AUTHORITY);
@@ -880,7 +815,6 @@ static int test_root_enrol_and_sudo(void) {
         ASSERT(!fl_session_has_elevation());
         ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
         ASSERT(fl_kq_sudo_hold_expire(INT64_MAX) == 1 && fl_kq_sudo_hold_expire(INT64_MAX) == 0);
-        /* sudo -k and logout end the window and its keys. */
         ASSERT(fl_session_sudo_authenticate(s_root_pw, s_bob_pw) == FL_RESULT_OK);
         fl_session_drop_elevation();
         ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK && !fl_kq_sudo_hold_active(now));
@@ -890,7 +824,6 @@ static int test_root_enrol_and_sudo(void) {
     }
     fl_session_drop_elevation();
     {
-        /* The real ops directly: a half signed by the wrong key, or for another action, fails. */
         const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
         uint8_t bob_sec[32], root_sec[32], bob_box[32], root_box[32], nonce[16], s_inv[64], s_auth[64];
         unsigned char d[16], bob_pub[32], root_pub[32], e[32];
@@ -911,7 +844,6 @@ static int test_root_enrol_and_sudo(void) {
         ASSERT(kq->sudo_verify(bob->key_id, "Root", other, sizeof other - 1, nonce, bob_pub, s_inv,
                                root_pub, s_auth) == 0);
         ASSERT(kq->sudo_verify(bob->key_id, "Root", act, 4, nonce, bob_pub, s_auth, root_pub, s_inv) == 0);
-        /* Root's key alone, signing both halves, is not a co-signature. */
         ASSERT(kq->sudo_sign(FL_KQ_SUDO_INVOKER, bob->key_id, "Root", act, 4, nonce, root_sec, s_inv) ==
                FL_KQ_ACCOUNT_OK);
         ASSERT(kq->sudo_verify(bob->key_id, "Root", act, 4, nonce, bob_pub, s_inv, root_pub, s_auth) == 0);

@@ -1,14 +1,5 @@
 #define _GNU_SOURCE 1 /* memmem */
-/**
- * test_kq_net.c - KeyQuorum co-signed delivery over the session wire, in process
- * (kernel/core/net/net_kq_delivery.c; contracts/drivers/contract_p4_keyquorum.h).
- *
- * A recording transport stands in for sockets: frames a client sends go to the host
- * handler as that member, and frames the host sends to Steve go to the client handler.
- * Mya sends plan.txt; the host announces; Steve co-signs; the host fires once and
- * releases; Steve decodes and acknowledges. Refusals: wrong co-signer, bad signature,
- * expired request, an offer from someone else's account.
- */
+/* Co-signed delivery over the session wire, in process: announce, co-sign, fire once, release, decode, ack. */
 #include "net_kq_delivery.h"
 #include "kq_checkpoint.h"
 #include "kq_delivery.h"
@@ -36,7 +27,6 @@
 #define MYA "Root.Flinstone.Mya"
 #define STEVE "Root.Flinstone.Steve"
 
-/* ---- recording transport --------------------------------------------------------- */
 
 static int s_to_steve[0x80];
 static int s_to_mya[0x80];
@@ -73,7 +63,6 @@ static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *
     fl_net_kq_host_handle(s_srv, s_actor, opcode, payload, plen);
 }
 
-/* ---- fixtures -------------------------------------------------------------------- */
 
 static char s_dir[256];
 
@@ -91,7 +80,6 @@ static int encode_from_mya(const char *name, const char *text, fl_kq_encoded_t *
     return rc;
 }
 
-/* ---- tests ----------------------------------------------------------------------- */
 
 static int test_keys_come_from_the_host_registry(void) {
     fl_net_kq_keys_t k;
@@ -103,7 +91,6 @@ static int test_keys_come_from_the_host_registry(void) {
     ASSERT(memcmp(k.signing_public, fl_user_db_signing_public(&s_db, STEVE), 32) == 0);
     ASSERT(fl_net_kq_lookup(s_srv, NULL, 0, "Nobody", 0, &k) == FL_RESULT_NOENT);
 
-    /* A caller that cannot wait reads the answer later without asking again. */
     memset(&k, 0, sizeof k);
     ASSERT(fl_net_kq_keys_cached("Steve", &k) == FL_RESULT_OK);
     ASSERT(k.found && strcmp(k.key_id, STEVE) == 0);
@@ -146,13 +133,11 @@ static int test_co_signed_delivery_over_the_wire(void) {
 
     ASSERT(encode_from_mya("plan.txt", "quarterly plan v1\n", &enc) == 0);
 
-    /* Steve cannot send Mya's offer as his own. */
     s_actor = &s_members[2];
     ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "not from this member's account"));
     ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
 
-    /* Mya sends; the host holds it and announces it to Steve only. */
     s_actor = &s_members[1];
     ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == 1);
@@ -160,9 +145,7 @@ static int test_co_signed_delivery_over_the_wire(void) {
     ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
     ASSERT(strcmp(inbox[0].sender, MYA) == 0 && strcmp(inbox[0].file_name, "plan.txt") == 0);
     ASSERT(!inbox[0].letter_ready);
-    /* Nothing is released before Steve co-signs. */
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == 0);
-    /* The host's sent listing shows it for Mya, and nothing for Steve. */
     ASSERT(host_sent_state(MYA, "plan.txt", "waiting for co-signature") == 0);
     ASSERT(fl_net_kq_host_sent(STEVE, sent, 4) == 0);
 
@@ -170,7 +153,6 @@ static int test_co_signed_delivery_over_the_wire(void) {
     ASSERT(fl_user_db_open_box(&s_db, "Steve", "pw-steve", steve_box) == FL_RESULT_OK);
     ASSERT(fl_kq_cp_cosign(&inbox[0].offer, STEVE, steve_sign, sig) == FL_KQ_CP_OK);
 
-    /* Mya's member cannot co-sign for Steve; a changed signature is refused. */
     s_actor = &s_members[1];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "not addressed to this account"));
@@ -181,7 +163,6 @@ static int test_co_signed_delivery_over_the_wire(void) {
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == 0);
     sig[3] ^= 1u;
 
-    /* The real co-signature reaches threshold: the host fires and releases. */
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == 1);
     ASSERT(host_sent_state(MYA, "plan.txt", "released") == 0);
@@ -189,18 +170,15 @@ static int test_co_signed_delivery_over_the_wire(void) {
     ASSERT(fl_net_kq_take_letter(inbox[0].id, 0, &letter) == FL_RESULT_OK);
     ASSERT(letter.len == enc.letter.len && memcmp(letter.data, enc.letter.data, letter.len) == 0);
 
-    /* Decode with the released letter. */
     snprintf(dest, sizeof dest, "%s/steve-plan.txt", s_dir);
     ASSERT(fl_kq_cp_decode(&s_db, MYA, fl_user_db_signing_public(&s_db, MYA), STEVE, steve_box,
                            &letter, &inbox[0].offer, sig, dest) == FL_KQ_CP_OK);
     fl_kq_buf_free(&letter);
 
-    /* A repeated co-signature re-sends the letter but never fires again. */
     releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before + 1);
 
-    /* Acknowledged: the host deletes the letter and stops re-sending it. */
     ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 1) == FL_RESULT_OK);
     releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
@@ -237,12 +215,10 @@ static int test_a_refused_ack_is_recorded_as_refused_over_the_wire(void) {
     ASSERT(host_sent_state(MYA, "refused.txt", "released") == 0);
     ASSERT(letter_on_disk(inbox[0].id) == 1);
 
-    /* Steve refuses: the host records a refusal, not a delivery, and deletes the letter. */
     ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 0) == FL_RESULT_OK);
     ASSERT(host_sent_state(MYA, "refused.txt", "refused") == 0);
     ASSERT(letter_on_disk(inbox[0].id) == 0);
 
-    /* A repeated co-signature neither re-sends nor fires again. */
     releases_before = s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
@@ -284,19 +260,15 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     ASSERT(kqer.len > 0 && kqer.len <= FL_KQ_REPORT_FRAME_MAX);
 
     forwarded = s_to_mya[op & 0x7F];
-    /* Before any refusal the delivery is only released: a report about it is dropped. */
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded);
     ASSERT(fl_net_kq_send_ack(s_srv, NULL, 0, inbox[0].id, 0) == FL_RESULT_OK);
     ASSERT(host_sent_state(MYA, "report.txt", "refused") == 0);
 
-    /* Someone who is not the recipient cannot report on it. */
     s_actor = &s_members[1];
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded);
-    /* A frame whose length lies is dropped by the host's own exact-length check. It is sent BEFORE any valid
-     * report for this delivery, so duplicate suppression cannot be what rejects it; the valid report that
-     * follows still forwards. */
+/* A frame whose length lies is dropped by the exact-length check, sent before any valid report. */
     s_actor = &s_members[2];
     memset(frame, 0, sizeof frame);
     memcpy(frame, inbox[0].id, FL_KQ_DELIVERY_ID_LEN);
@@ -304,12 +276,10 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     frame[17] = 10; /* says ten bytes, carries four */
     fl_net_kq_host_handle(s_srv, &s_members[2], (uint8_t)op, frame, 16 + 2 + 4);
     ASSERT(s_to_mya[op & 0x7F] == forwarded);
-    /* The recipient's report is forwarded to the sender, once. */
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, kqer.len) == FL_RESULT_OK);
     ASSERT(s_to_mya[op & 0x7F] == forwarded + 1);
-    /* An unknown delivery, an empty report and an oversized one are dropped (the lying frame was tried above). */
     {
         uint8_t other[FL_KQ_DELIVERY_ID_LEN] = {9, 9, 9};
 
@@ -319,7 +289,6 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, kqer.data, 0) == FL_RESULT_INVAL);
     ASSERT(fl_net_kq_send_report(s_srv, NULL, 0, inbox[0].id, big, FL_KQ_REPORT_FRAME_MAX + 1) == FL_RESULT_INVAL);
 
-    /* The sender's shell: the forwarded frame is held, handed out once, and applies to its container. */
     ASSERT(s_mya_report_len == 18 + kqer.len);
     memcpy(frame, s_mya_report, s_mya_report_len);
     fl_net_kq_client_handle(NULL, (uint8_t)op, frame, s_mya_report_len);
@@ -332,7 +301,6 @@ static int test_a_refusal_report_reaches_the_sender(void) {
     fl_net_kq_client_handle(NULL, (uint8_t)op, frame, (uint16_t)(18 + kqer.len));
     ASSERT(fl_net_kq_reports_pending() == 0);
 
-    /* Applying it: only the recipient's signature over this artifact is recorded. */
     got[kqer.len / 2] ^= 0x40; /* a tampered copy of the report */
     ASSERT(fl_kq_cp_inject_report_bytes(fl_user_db_signing_public(&s_db, STEVE), got, kqer.len, ref, src) ==
            FL_KQ_CP_BAD_SIGNATURE);
@@ -373,13 +341,11 @@ static int test_an_unanswered_request_leaks_away(void) {
     ASSERT(fl_user_db_open_key(&s_db, "Steve", "pw-steve", steve_sign) == FL_RESULT_OK);
     ASSERT(fl_kq_cp_cosign(&inbox[0].offer, STEVE, steve_sign, sig) == FL_KQ_CP_OK);
 
-    /* The host's clock passes the expiry before Steve answers. */
     s_clock += FL_KQ_DELIVERY_TTL_SEC + 1;
     s_actor = &s_members[2];
     ASSERT(fl_net_kq_send_cosign(s_srv, NULL, 0, inbox[0].id, STEVE, sig) == FL_RESULT_OK);
     ASSERT(strstr(s_last_err, "no such delivery") || strstr(s_last_err, "expired"));
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_RELEASE] == releases_before);
-    /* Ended, not forgotten: the sent listing still shows it, as expired. */
     ASSERT(host_sent_state(MYA, "late.txt", "expired") == 0);
     fl_net_kq_inbox_drop(inbox[0].id);
     asm_mem_secure_zero(steve_sign, sizeof steve_sign);
@@ -394,8 +360,7 @@ static int test_unfinished_uploads_never_hold_the_host(void) {
     char name[32];
     int announced = s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE];
 
-    /* Ten offers whose parts never arrive: each replaces the member's last, so the host is
-     * never full (there are eight slots). */
+/* Ten offers whose parts never arrive: each replaces the member's last, so the host is never full. */
     s_actor = &s_members[1];
     s_drop_parts = 1;
     for (int i = 0; i < 10; i++) {
@@ -407,7 +372,6 @@ static int test_unfinished_uploads_never_hold_the_host(void) {
     }
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
 
-    /* An upload left idle past the timeout is dropped: its late parts store nothing. */
     ASSERT(encode_from_mya("slow.txt", "too slow\n", &enc) == 0);
     ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
     s_clock += 61;
@@ -423,7 +387,6 @@ static int test_unfinished_uploads_never_hold_the_host(void) {
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
     ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
 
-    /* A complete delivery still goes through. */
     ASSERT(fl_net_kq_send_delivery(s_srv, NULL, 0, MYA, STEVE, &enc) == FL_RESULT_OK);
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced + 1);
     ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
@@ -434,7 +397,6 @@ static int test_unfinished_uploads_never_hold_the_host(void) {
     return 0;
 }
 
-/* Builds an ANNOUNCE as the host would, with any sender and file name. */
 static uint16_t build_announce(uint8_t *buf, const uint8_t id[16], const char *sender,
                                const char *file, const kq_file_offer_t *o) {
     size_t n = 0;
@@ -463,7 +425,6 @@ static int test_unsafe_names_never_reach_a_path(void) {
 
     ASSERT(encode_from_mya("named.txt", "x\n", &enc) == 0);
 
-    /* The host refuses an offer whose file name is not plain. */
     snprintf(enc.file_name, sizeof enc.file_name, "%s", "../../.bashrc");
     s_actor = &s_members[1];
     s_last_err[0] = '\0';
@@ -471,8 +432,7 @@ static int test_unsafe_names_never_reach_a_path(void) {
     ASSERT(strstr(s_last_err, "malformed offer"));
     ASSERT(s_to_steve[FL_NET_SESSION_OP_KQ_ANNOUNCE] == announced);
 
-    /* A client drops an announcement (from a host that did not check) with an unsafe name or
-     * sender, so it is never listed, printed or decoded. */
+/* A client drops an announcement with an unsafe name or sender, so it is never listed or decoded. */
     memset(id, 0xA7, sizeof id);
     fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
                             build_announce(buf, id, MYA, "../evil", &enc.offer));
@@ -481,7 +441,6 @@ static int test_unsafe_names_never_reach_a_path(void) {
     fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
                             build_announce(buf, id, "Root/../x", "ok.txt", &enc.offer));
     ASSERT(fl_net_kq_inbox(inbox, 4) == 0);
-    /* The same frame with plain names is accepted, so the drops above were the names. */
     fl_net_kq_client_handle(NULL, FL_NET_SESSION_OP_KQ_ANNOUNCE, buf,
                             build_announce(buf, id, MYA, "ok.txt", &enc.offer));
     ASSERT(fl_net_kq_inbox(inbox, 4) == 1);
@@ -507,7 +466,6 @@ static int test_wire_string_with_embedded_nul_is_dropped(void) {
     return 0;
 }
 
-/* ---- history download (FL-04): REQ and DATA over the wire ------------------------- */
 
 static char s_hist_container[PATH_MAX];
 static fl_kq_encoded_t s_hist_enc;
@@ -532,14 +490,12 @@ static int read_file(const char *path, fl_kq_buf_t *out) {
     return 0;
 }
 
-/* Only Steve may have this history. */
 static int hist_gate(const char *requester, const uint8_t id[16]) {
     (void)id;
     s_gate_calls++;
     return strcmp(requester, STEVE) == 0;
 }
 
-/* The host's source: Mya's file as the sealed kind-15 letter plus a kind-17 snapshot, both to the requester. */
 static fl_result_t hist_source(const char *requester, const uint8_t id[16], uint8_t *out, size_t cap,
                                size_t *out_len) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
@@ -587,7 +543,6 @@ static int history_refusals(const fl_kq_driver_t *drv) {
     uint8_t req[16];
     fl_kq_buf_t l15 = {0}, l17 = {0};
 
-    /* With no gate the host refuses and answers nothing: fail closed. */
     s_actor = &s_members[2];
     fl_net_kq_set_history(NULL, hist_source);
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
@@ -595,7 +550,6 @@ static int history_refusals(const fl_kq_driver_t *drv) {
     ASSERT(s_source_calls == 0);
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_TIMEDOUT);
     fl_net_kq_history_drop(req);
-    /* The gate says no to Mya: refused with KeyQuorum's own word for it, and the source never runs. */
     fl_net_kq_set_history(hist_gate, hist_source);
     s_actor = &s_members[1];
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
@@ -603,7 +557,6 @@ static int history_refusals(const fl_kq_driver_t *drv) {
     ASSERT(s_gate_calls == 1 && s_source_calls == 0);
     ASSERT(s_to_mya[FL_NET_SESSION_OP_KQH_DATA & 0x7F] == 0);
     fl_net_kq_history_drop(req);
-    /* A gate with no source: refused, not silent. */
     fl_net_kq_set_history(hist_gate, NULL);
     s_actor = &s_members[2];
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req) == FL_RESULT_OK);
@@ -631,7 +584,6 @@ static int history_download_opens(const fl_kq_driver_t *drv, const unsigned char
                               &count) == KQ_FILE_OK);
     ASSERT(count >= 1);                                           /* the snapshot holds the file's events */
     ASSERT(drv->snapshot_covers(&c, &snap) == KQ_FILE_OK);        /* the delivered extract is a prefix of it */
-    /* a letter for someone else does not open for Steve */
     ASSERT(drv->open_snapshot(&l17, steve_box, MYA, "Root.Flinstone.Mya", fl_user_db_signing_public(&s_db, MYA),
                               &snap, root2, &count) != KQ_FILE_OK);
     fl_kq_buf_free(&l15); fl_kq_buf_free(&l17); fl_kq_buf_free(&c); fl_kq_buf_free(&snap);
@@ -647,7 +599,6 @@ static int history_bad_data(uint8_t req3[16]) {
     memset(req2, 9, sizeof req2);
     send_data_to_steve(req2, 0, 100, 50);
     ASSERT(fl_net_kq_history_take(req2, 0, &l15, &l17) == FL_RESULT_NOENT);
-    /* a pending request the host refuses (no source): nothing arrives, and bad DATA must not build one */
     fl_net_kq_set_history(hist_gate, NULL);
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, req3) == FL_RESULT_OK); /* refused: nothing arrives */
     send_data_to_steve(req3, 0, FL_HISTORY_BUNDLE_MAX_BYTES + 1u, 50);  /* declared total over the bound */
@@ -659,7 +610,6 @@ static int history_bad_data(uint8_t req3[16]) {
     return 0;
 }
 
-/* A member cannot send the host a DATA frame, and a malformed REQ is refused. */
 static int history_member_frames_refused(void) {
     uint8_t junk[10] = {0};
 
@@ -671,13 +621,11 @@ static int history_member_frames_refused(void) {
     return 0;
 }
 
-/* Only KQ_HIST_MAX requests can be waiting. */
 static int history_pending_limit(const uint8_t req3[16]) {
     uint8_t a[16], b[16], d[16];
 
     fl_net_kq_set_history(hist_gate, hist_source);
     fl_net_kq_history_drop(req3);
-    /* keep two pending: ask through a source that fails so no answer completes them */
     fl_net_kq_set_history(hist_gate, NULL);
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, a) == FL_RESULT_OK);
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, k_hist_delivery, b) == FL_RESULT_OK);
@@ -744,12 +692,10 @@ static int test_the_production_history_letters_open_for_the_requester(void) {
     memset(&l15, 0, sizeof l15);
     memset(&l17, 0, sizeof l17);
 
-    /* Any account that holds the container can seal it (the file's author need not be the sealer: KeyQuorum
-     * checks the revision's own author signature, not the sealer), so who may ask is the gate's job. */
+/* Any account holding the container can seal it: the sealer need not be the author, so the gate decides who may ask. */
     ASSERT(fl_kq_cp_history_letters_with(&dir.base, STEVE, steve_sign, MYA, path, &l15, &l17) == FL_KQ_CP_OK);
     fl_kq_buf_free(&l15);
     fl_kq_buf_free(&l17);
-    /* An unknown requester and a missing file give no letters, and the out buffers stay empty. */
     ASSERT(fl_kq_cp_history_letters_with(&dir.base, MYA, mya_sign, "Root.Flinstone.Nobody", path, &l15, &l17) ==
            FL_KQ_CP_NO_KEY);
     ASSERT(l15.data == NULL && l17.data == NULL);

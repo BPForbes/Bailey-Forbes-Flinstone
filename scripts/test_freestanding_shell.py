@@ -13,9 +13,7 @@ import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-# The netlab suite below needs the security-features (SECFEAT) image; the
-# Makefile builds dist/flintstone-secfeat.img and points us at it. Default to
-# the plain image for a manual run.
+# netlab needs the SECFEAT image (dist/flintstone-secfeat.img); the default is the plain image for manual runs.
 image = Path(os.environ.get("FL_BROWSER_KERNEL_IMAGE", str(root / "dist" / "flintstone.img")))
 
 
@@ -28,12 +26,9 @@ def version_line():
 if not image.is_file():
     sys.exit(f"test-freestanding-shell: missing {image}")
 
-# Fresh entropy for every boot, through the launcher: QEMU's default CPU has no RDRAND, and the image
-# takes its random bytes from this fw_cfg file instead (kernel/freestanding/x86_64/kq_platform.c).
-# It must never be a fixed file: a reused file would repeat keys.
+# Fresh entropy per boot via fw_cfg (QEMU has no RDRAND); never a fixed file, since a reused one repeats keys.
 entropy_dir = tempfile.mkdtemp(prefix="fl-entropy-")
 entropy_file = os.path.join(entropy_dir, "entropy.bin")
-# QMP, only to read the VGA text buffer: each account keeps its own screen (perspective).
 qmp_path = os.path.join(entropy_dir, "qmp.sock")
 with open(entropy_file, "wb") as f:
     f.write(os.urandom(4096))
@@ -149,10 +144,7 @@ def cmd(line, expect=None, timeout=6):
     )
 
 
-# ---- account-session parity: the lab image and the hosted shell run the same scripted session -------------
-# Each step is (command line, secret answered if the command prompts for one). Both shells are driven the
-# same way and each step is reduced to the same observation (an outcome, or a name and whether it is
-# elevated); the two lists must be equal. The accepted differences are named here and nowhere else.
+# Each step is run in both shells and must give the same observation; accepted differences are listed below.
 PARITY_SESSION = [
     ("su Flinstone", "flinstone"), ("whoami", None),
     ("su Root", "root"), ("whoami", None),
@@ -165,9 +157,7 @@ PARITY_SESSION = [
     ("su Root", "root"), ("whoami", None),
     ("su Flinstone", "flinstone"), ("whoami", None),
 ]
-# The only differences accepted between the lab image and the hosted shell. FL-25's queued-work journal is
-# memory only on the lab image (no block-write driver); no step above queues work, so nothing here is
-# compared for it yet. Listed so a future step that does must name it.
+# Accepted lab/hosted differences: no step queues work yet (the FL-25 journal is memory-only on the lab); list any that does.
 KQ_PARITY_EXCEPTIONS = {"queued-work journal durability (FL-25): memory only on the lab image"}
 
 _FAIL_WORDS = re.compile(r"fail|denied|not exist|incorrect|could not|cannot|invalid|unknown|refus", re.I)
@@ -211,9 +201,7 @@ def lab_session_step(line, secret):
 def hosted_session(steps):
     binary = root / "BPForbes_Flinstone_Shell"
     if not binary.is_file():
-        # The hosted shell is the reference this step compares the lab image with. Build it here, not in the
-        # workflow: a second command after browser-lab-build.yml's untrusted checkout is one more CodeQL
-        # cache-poisoning finding, and the register (CQ-017) allows a fixed number.
+        # Built here, not in browser-lab-build.yml: a second command after its untrusted checkout is a cache-poisoning risk.
         build = subprocess.run(["make"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         if build.returncode != 0 or not binary.is_file():
             tail = build.stdout.decode("latin1", "replace")[-2000:]
@@ -228,7 +216,6 @@ def hosted_session(steps):
             os.execve(str(binary), [str(binary)], env)
 
         def read_until_prompt(secret, timeout=None):
-            # a password is hashed after it is sent, which is slow under CPU load
             timeout = timeout if timeout is not None else (60 if secret is not None else 10)
             text, answered, deadline = "", False, time.time() + timeout
             while time.time() < deadline:
@@ -254,7 +241,6 @@ def hosted_session(steps):
             for line, secret in steps:
                 os.write(fd, (line + "\n").encode())
                 text = read_until_prompt(secret)
-                # the hosted prompt redraws the line as it is typed: keep what follows the last echo
                 text = text[text.rfind(line) + len(line):] if line in text else text
                 out.append(observe(line, text))
             os.write(fd, b"exit\n")
@@ -305,15 +291,11 @@ try:
     start = len(buf)
     send("whoami persp-mark-flinstone\n")
     wait_from("WHOAMI Flinstone", start)
-    # switchuser to another account asks for its password, as su does. These are the
-    # public image's seeded demo accounts.
     start = len(buf)
     send("switchuser root\n")
     wait_from("Password:", start)
     send("root\n")
     wait_from("SWITCHUSER user=Root", start)
-    # Root has no screen of its own yet: it starts clear, and Flinstone's screen was kept for
-    # Flinstone, not stored as Root's.
     if "persp-mark-flinstone" in vga_text():
         raise SystemExit("test-freestanding-shell: Root's screen shows Flinstone's\n" + vga_text())
     send("whoami\n")
@@ -335,7 +317,6 @@ try:
     read_until("WHOAMI Flinstone", 4)
     send("history\n")
     read_until("1: whoami", 4)
-    # Lab "New session" sends both lines in one burst, matching the iframe UI.
     start = len(buf)
     send("session new\nswitchuser root\n")
     read_until("SESSION 2 user=Flinstone", 4)
@@ -390,7 +371,6 @@ try:
     cmd("contracts json", expect="labdisk")
     cmd("type hello.txt", expect="lab-fs")
 
-    # netlab teaching lab (simulation) + lab/live network switch.
     cmd("netlab pods", expect="redteam-lab")
     cmd("netlab hosts redteam-lab", expect="192.168.56.1")
     cmd("netlab scan redteam-lab", expect="02:00:00:00:56:01")
@@ -399,86 +379,52 @@ try:
     cmd("netlab arp-demo redteam-lab", expect="SPOOF")
     cmd("netlab capture redteam-lab", expect="ALERT")
     cmd("netlab traceroute redteam-lab bob", expect="bob")
-    # Starting the demo drops the real network: the server relay refuses while
-    # isolated, then resumes once the demo stops.
     cmd("netlab start", expect="LAB_NETMODE lab")
     cmd("netlab status", expect="lab-isolated")
     cmd("server host", expect="lab isolated")
     cmd("netlab stop", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
 
-    # Pods: real-account membership, host-collision resolution, and a
-    # listener/accept reverse shell bound to a real second session (not a
-    # free-typed name). Session 1 (flinstone) just ran `server host` above,
-    # so it is netlab's locally-tracked real server host: creating a pod
-    # from here must NOT hand that same identity the pod host role too.
     cmd("netlab pod create redcell", expect="host pending")
     cmd("netlab pod members", expect="real server host")
-    # Session 2 already exists (created earlier, logged in as root) and is
-    # not the real server host, so joining it must resolve the pending host.
     send("session 2\n")
     read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod join", expect="identity preserved")
     cmd("netlab pod members", expect="(host)")
-    # root calls `listen` -> root is the attacker. flinstone will `accept` ->
-    # flinstone is the victim side (listener = attacker, acceptor = victim).
     cmd("netlab listen", expect="is listening")
     send("session 1\n")
     read_until("SESSION 1 user=Flinstone", 4)
     cmd("netlab accept", expect="LAB_NETMODE lab")
-    # flinstone (the victim) keeps using its own real session normally while
-    # bound -- the binding never touches it.
     cmd("whoami", expect="WHOAMI Flinstone")
     cmd("server host", expect="lab isolated")
-    # root is the bound attacker: only root's non-management `netlab <cmd>`
-    # calls are redirected into the sandbox, and they execute for real
-    # against isolated state, not canned text.
     send("session 2\n")
     read_until("SESSION 2 user=Root", 4)
     cmd("netlab whoami", expect="Flinstone")
     cmd("netlab hostname", expect="Flinstone-sandbox")
     cmd("netlab write test.txt hello-from-sandbox", expect="wrote test.txt")
     cmd("netlab cat test.txt", expect="hello-from-sandbox")
-    # The accepting victim (session 1) can end the binding unilaterally.
     send("session 1\n")
     read_until("SESSION 1 user=Flinstone", 4)
     cmd("netlab end", expect="LAB_NETMODE live")
     cmd("server host", expect="SERVER_RELAY host")
-    # Now that the binding is cleanly closed, root leaving the pod (its only
-    # other member) must re-open "host pending": the sole remaining member
-    # (flinstone) is still netlab's locally-tracked real server host.
     send("session 2\n")
     read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod leave", expect="host pending")
 
-    # Server lifecycle coupling. Session 1 (flinstone) is still the real server
-    # host and the sole member of pod redcell (host pending).
     send("session 1\n")
     read_until("SESSION 1 user=Flinstone", 4)
-    # `server kill` by the server host tears the server down, so the pod that
-    # lived under it is killed too.
     cmd("server kill", expect="pod dissolved")
     cmd("netlab pod members", expect="no pod")
-    # Rebuild a two-member pod to show `server leave` re-electing the pod host:
-    # flinstone hosts the server again (so it is blocked from the pod host),
-    # root joins and takes the pod host.
     cmd("server host", expect="SERVER_RELAY host")
     cmd("netlab pod create redcell2", expect="host pending")
     send("session 2\n")
     read_until("SESSION 2 user=Root", 4)
     cmd("netlab pod join", expect="identity preserved")
     cmd("netlab pod host", expect="Root")
-    # flinstone (server host AND pod join-order #0) leaves the server: the relay
-    # picks a new server host by its own order, and netlab independently
-    # re-elects the pod host by pod join order, so flinstone reclaims it.
     send("session 1\n")
     read_until("SESSION 1 user=Flinstone", 4)
     cmd("server leave", expect="new pod host")
     cmd("netlab pod host", expect="Flinstone")
-    # Gap closure: becoming the server host also re-elects the pod host on the
-    # spot. flinstone (session 1) is the pod host; running `server host` makes
-    # session 1 the server host (a separate relay point), so the pod host moves
-    # to session 2 (root) immediately -- not only at accept time.
     cmd("server host", expect="new pod host: Root")
     cmd("netlab pod host", expect="Root")
 

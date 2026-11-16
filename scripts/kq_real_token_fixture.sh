@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
-# Real-token fixture: makes real KeyQuorum material (devices, KQST slot tokens for Bob, Ann and Root,
-# a wrong-device id, a private bridge between Bob and Ann) with the keyquorum CLI built from the
-# submodule, in a temporary directory, then runs the C test that consumes it. Passphrases are drawn
-# from /dev/urandom at run time (never a literal; kept only in owner-only files in the temp dir).
-#
-# Usage: kq_real_token_fixture.sh TEST_BINARY
-# KQ_CLI_DIR names the directory holding keyquorum and keyquorum-device (default: the submodule's
-# target/release). Building them is `cargo build --release --locked` in third_party/keyquorum and
-# is not part of the default make. Without them, or without python3, the fixture is skipped (exit
-# 0) and says so, unless KQ_RT_REQUIRE=1 (CI), which makes that a failure.
+# Makes real KeyQuorum slot tokens and a bridge for the C test; passphrases are random, kept in owner-only files.
+# Skipped (exit 0) without python3 or the CLI, unless KQ_RT_REQUIRE=1 (CI), which fails. KQ_CLI_DIR sets the binaries dir.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_bin="${1:?usage: kq_real_token_fixture.sh TEST_BINARY}"
@@ -40,7 +32,6 @@ umask 077
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/fl_kq_real_token.XXXXXX")"
 trap 'rm -rf -- "${tmp}"' EXIT
 
-# Run-time passphrases (base64 of 24 random bytes), one per account.
 head -c 24 /dev/urandom | base64 > "${tmp}/bob.pass"
 head -c 24 /dev/urandom | base64 > "${tmp}/ann.pass"
 head -c 24 /dev/urandom | base64 > "${tmp}/root.pass"
@@ -68,8 +59,6 @@ for v in bob_dev ann_dev other_dev root_dev bob_enc bob_sig ann_enc ann_sig root
     [ -n "${!v}" ] || { echo "test_kq_real_token: the CLI did not print ${v}" >&2; exit 1; }
 done
 
-# A private bridge between the two slots, made by KeyQuorum's own tooling. The split tree only
-# gives the bridge a key id; its leaves are the members' parents (the implied supervisors).
 org="${tmp}/org.sqlite"
 for s in "usb-bob Root.Flinstone.Bob" "usb-ann Root.Alternative.Ann"; do
     set -- ${s}
@@ -78,7 +67,6 @@ for s in "usb-bob Root.Flinstone.Bob" "usb-ann Root.Alternative.Ann"; do
 done
 printf '%s\n' "${bob_enc}" > "${tmp}/bob.enc"
 printf '%s\n' "${ann_enc}" > "${tmp}/ann.enc"
-# split prints the tree's fresh secret on stdout: it is discarded, the fixture needs only the key id.
 "${kq}" --db "${org}" split --label Root --leaf "Root.Flinstone=${tmp}/bob.enc" \
     --leaf "Root.Alternative=${tmp}/ann.enc" > /dev/null
 bridge_uid="$("${kq}" --db "${org}" bridge private create 1 \

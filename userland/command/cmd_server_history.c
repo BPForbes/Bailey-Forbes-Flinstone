@@ -1,15 +1,13 @@
-/* Member side of `server file history <delivery-id>`: see cmd_server_history.h. */
 #include "cmd_server_history.h"
 
 #include <stdio.h>
 #include <string.h>
 
-/* Newest FL_SERVER_HISTORY_GOT_MAX records; readers copy under the lock, never keep a pointer. */
 static fl_server_history_got_t s_got[FL_SERVER_HISTORY_GOT_MAX];
 static unsigned s_got_next;
 static pthread_mutex_t s_got_mu = PTHREAD_MUTEX_INITIALIZER;
 
-/* Caller holds s_got_mu: the slot holding id, or FL_SERVER_HISTORY_GOT_MAX. */
+/* Caller holds s_got_mu; readers copy records out, never keep a pointer. Returns the slot, or GOT_MAX. */
 static unsigned got_slot_locked(const uint8_t id[FL_KQ_DELIVERY_ID_LEN])
 {
     unsigned i;

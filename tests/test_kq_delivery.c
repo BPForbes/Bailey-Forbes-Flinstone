@@ -1,8 +1,4 @@
-/**
- * test_kq_delivery.c - the host's co-signed delivery store (kernel/core/vfs/kq_delivery.c):
- * integrate-and-fire at FL_KQ_HOST_THRESHOLD, fire once, leak on the server clock, and the
- * store on the host catalog's rows with its held letters (contracts/drivers/contract_p4_keyquorum.h).
- */
+/* The host's co-signed delivery store: integrate-and-fire at the threshold, fire once, leak on the server clock. */
 #include "kq_delivery.h"
 #include "server_shared_db.h"
 #include "server_shared_fs.h"
@@ -42,12 +38,10 @@ static int test_neuron_fires_once_at_threshold(void) {
     fl_kq_delivery_init(&d, id, "Root.Flinstone.Mya", "Root.Flinstone.Steve", "plan.txt", NULL,
                         1000, 60);
     ASSERT(d.potential == 1u && d.threshold == FL_KQ_HOST_THRESHOLD);
-    /* Announcing is not a signature. */
     ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_ANNOUNCE, NULL, 1001) == FL_KQ_NEURON_REST);
     ASSERT(d.potential == 1u);
     ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, 1002) == FL_KQ_NEURON_FIRE);
     ASSERT(d.fired && d.has_cosig && d.potential == 2u);
-    /* Refractory: a second co-signature never releases again. */
     ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, 1003) == FL_KQ_NEURON_REFRACTORY);
     ASSERT(d.potential == 2u);
     return 0;
@@ -80,7 +74,6 @@ static int test_ids_round_trip(void) {
     return 0;
 }
 
-/* The events recorded for a delivery, in order, joined with ',' into out. */
 static int events_of(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], char *out,
                      size_t cap) {
     fl_server_catalog_event_t ev[16];
@@ -110,7 +103,6 @@ static int test_store_round_trip_and_leak(void) {
     struct stat sb;
 
     ASSERT(fl_kq_store_open(s_dir, &s) == FL_RESULT_OK);
-    /* The deliveries are rows of the share root's catalog file, which is owner-only. */
     snprintf(db_path, sizeof db_path, "%s/" FL_SERVER_CATALOG_DB_NAME, s_dir);
     ASSERT(stat(db_path, &sb) == 0 && (sb.st_mode & 0777) == 0600);
     make_id(id, 10);
@@ -131,22 +123,18 @@ static int test_store_round_trip_and_leak(void) {
     ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Steve", 2001, pending, 4) == 1);
     ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Eve", 2001, pending, 4) == 0);
 
-    /* Fire: the co-signature and the release are recorded together. */
     ASSERT(fl_kq_delivery_integrate(&got, FL_KQ_SPIKE_COSIGN, sig, 2010) == FL_KQ_NEURON_FIRE);
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_COSIGN, 2010) == FL_RESULT_OK);
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.fired && got.has_cosig);
     ASSERT(got.potential == 2u && memcmp(got.cosig, sig, sizeof sig) == 0);
     ASSERT(events_of(s, id, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released") == 0);
-    /* Released once: a second co-signature changes nothing. */
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_COSIGN, 2011) == FL_RESULT_NOENT);
     ASSERT(events_of(s, id, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released") == 0);
 
-    /* A second delivery that nobody co-signs expires with its letter. */
     fl_kq_delivery_init(&d, id2, "Root.Flinstone.Mya", "Root.Flinstone.Steve", "old.txt", NULL,
                         2000, 10);
     ASSERT(fl_kq_store_put(s, &d, letter, sizeof letter) == FL_RESULT_OK);
     ASSERT(fl_kq_store_leak(s, 2005) == 0);
-    /* While the catalog is locked elsewhere the leak changes nothing, the letter included. */
     {
         sqlite3 *other = NULL;
 
@@ -162,7 +150,6 @@ static int test_store_round_trip_and_leak(void) {
     }
     ASSERT(fl_kq_store_leak(s, 2010) == 1);
     ASSERT(fl_kq_store_letter(s, id2, &held, &held_len) == FL_RESULT_NOENT);
-    /* The row and its history stay, ended, so the id is never held again. */
     ASSERT(fl_kq_store_get(s, id2, &got) == FL_RESULT_OK && got.expired && !got.fired);
     ASSERT(events_of(s, id2, log, sizeof log) == 0 && strcmp(log, "offered,expired") == 0);
     ASSERT(fl_kq_store_put(s, &d, letter, sizeof letter) == FL_RESULT_BUSY);
@@ -171,7 +158,6 @@ static int test_store_round_trip_and_leak(void) {
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_COSIGN, 2011) == FL_RESULT_NOENT);
     ASSERT(fl_kq_store_leak(s, 2011) == 0);
 
-    /* Acknowledged: off the pending list, letter deleted, history kept. */
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK);
     got.acknowledged = 1;
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_ACK, 2020) == FL_RESULT_OK);
@@ -180,7 +166,6 @@ static int test_store_round_trip_and_leak(void) {
     ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Steve", 2021, pending, 4) == 0);
     ASSERT(events_of(s, id, log, sizeof log) == 0 &&
            strcmp(log, "offered,cosigned,released,acknowledged") == 0);
-    /* The sender's listing holds both, newest first, with the host's state for each. */
     {
         fl_kq_delivery_t sent[4];
 
@@ -191,12 +176,10 @@ static int test_store_round_trip_and_leak(void) {
                strcmp(fl_kq_delivery_state(&sent[1]), "expired") == 0);
         ASSERT(fl_kq_store_sent_by(s, "Root.Flinstone.Steve", sent, 4) == 0);
     }
-    /* Delivered never leaks and never acknowledges twice. */
     ASSERT(fl_kq_store_leak(s, 999999) == 0);
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_ACK, 2022) == FL_RESULT_NOENT);
     fl_kq_store_close(s);
 
-    /* It reopens at the same schema version. */
     ASSERT(fl_kq_store_open(s_dir, &s) == FL_RESULT_OK);
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.acknowledged);
     fl_kq_store_close(s);
@@ -223,7 +206,6 @@ static int test_released_letter_expires(void) {
     ASSERT(fl_kq_store_put(s, &d, letter, sizeof letter) == FL_RESULT_OK);
     ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, at + 1) == FL_KQ_NEURON_FIRE);
     ASSERT(fl_kq_store_update(s, &d, FL_KQ_SPIKE_COSIGN, at + 1) == FL_RESULT_OK);
-    /* Past the offer's own expiry it is still pending: the release clock runs from release. */
     ASSERT(fl_kq_store_leak(s, at + 120) == 0);
     ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Steve", at + 120, pending, 2) == 1);
     ASSERT(fl_kq_store_leak(s, at + 1 + FL_KQ_RELEASE_TTL_SEC - 1) == 0);
@@ -234,7 +216,6 @@ static int test_released_letter_expires(void) {
                                    pending, 2) == 0);
     ASSERT(events_of(s, id, log, sizeof log) == 0 &&
            strcmp(log, "offered,cosigned,released,expired") == 0);
-    /* A late receipt does not revive it. */
     got.acknowledged = 1;
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_ACK, at + 2 + FL_KQ_RELEASE_TTL_SEC) ==
            FL_RESULT_NOENT);
@@ -242,8 +223,7 @@ static int test_released_letter_expires(void) {
     return 0;
 }
 
-/* A refused letter is recorded as refused, never as delivered: the letter goes, the history stays, and neither a
- * late receipt nor a repeated refusal changes the outcome. */
+/* A refused letter is recorded as refused, never delivered; a late receipt does not change it. */
 static int test_refused_letter_is_not_delivered(void) {
     fl_kq_store_t *s = NULL;
     fl_kq_delivery_t d, got, pending[2];
@@ -263,7 +243,6 @@ static int test_refused_letter_is_not_delivered(void) {
     ASSERT(fl_kq_delivery_integrate(&d, FL_KQ_SPIKE_COSIGN, sig, at + 1) == FL_KQ_NEURON_FIRE);
     ASSERT(fl_kq_store_update(s, &d, FL_KQ_SPIKE_COSIGN, at + 1) == FL_RESULT_OK);
 
-    /* The recipient refuses: the row says refused, not delivered, and the letter is deleted. */
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.fired && !got.acknowledged);
     got.refused = 1;
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_REFUSE, at + 2) == FL_RESULT_OK);
@@ -272,14 +251,12 @@ static int test_refused_letter_is_not_delivered(void) {
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.refused && !got.acknowledged && !got.expired);
     ASSERT(strcmp(fl_kq_delivery_state(&got), "refused") == 0);
     ASSERT(events_of(s, id, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released,refused") == 0);
-    /* Off the pending list, never leaked, and no receipt turns it into a delivery. */
     ASSERT(fl_kq_store_pending_for(s, "Root.Flinstone.Steve", at + 2, pending, 2) == 0);
     ASSERT(fl_kq_store_leak(s, at + 1 + FL_KQ_RELEASE_TTL_SEC) == 0);
     got.acknowledged = 1;
     ASSERT(fl_kq_store_update(s, &got, FL_KQ_SPIKE_ACK, at + 3) == FL_RESULT_NOENT);
     fl_kq_store_close(s);
 
-    /* It reopens refused. */
     ASSERT(fl_kq_store_open(s_dir, &s) == FL_RESULT_OK);
     ASSERT(fl_kq_store_get(s, id, &got) == FL_RESULT_OK && got.refused && !got.acknowledged);
     fl_kq_store_close(s);
@@ -310,7 +287,6 @@ static int test_share_path_cannot_reach_kq_rows(void) {
     ASSERT(fl_catalog_file_list_events(share, 0, transfer, ev, 4, &n) == FL_RESULT_OK && n == 0);
     ASSERT(fl_catalog_file_append_event(share, 0, transfer, "revoked", 1, 7001, "") ==
            FL_RESULT_ACCES);
-    /* And the store writes no history for an id that is not its row. */
     ASSERT(fl_catalog_file_append_event(share, 1, "not-a-kq-row", "released", 0, 7001, "kq") ==
            FL_RESULT_ACCES);
     sqlite3_close(share);
@@ -318,8 +294,7 @@ static int test_share_path_cannot_reach_kq_rows(void) {
     return 0;
 }
 
-/* The schema older builds wrote to <root>/kq/kq_delivery.db, written here by hand so the test
- * does not depend on any code that still writes it. */
+/* The schema older builds wrote to <root>/kq/kq_delivery.db, written by hand here. */
 static const char *kLegacySchema =
     "CREATE TABLE kq_delivery (delivery_id BLOB PRIMARY KEY NOT NULL, sender TEXT NOT NULL,"
     " recipient TEXT NOT NULL, file_name TEXT NOT NULL, offer BLOB NOT NULL,"
@@ -428,14 +403,11 @@ static int test_older_store_is_carried_over(void) {
     ASSERT(fl_kq_store_get(s, rel, &got) == FL_RESULT_OK && got.fired && got.has_cosig &&
            !got.acknowledged);
     ASSERT(events_of(s, rel, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released") == 0);
-    /* The release clock runs from the logged release. */
     ASSERT(fl_kq_store_leak(s, 1050 + FL_KQ_RELEASE_TTL_SEC - 1) == 1); /* held: past its expiry */
     ASSERT(fl_kq_store_get(s, rel, &got) == FL_RESULT_OK && !got.expired);
     ASSERT(fl_kq_store_get(s, done, &got) == FL_RESULT_OK && got.acknowledged);
-    /* A live delivery whose letter is missing cannot be released: it comes in ended. */
     ASSERT(fl_kq_store_get(s, lost, &got) == FL_RESULT_OK && got.expired);
     fl_kq_store_close(s);
-    /* Read once: the old file is renamed and a reopen changes nothing. */
     ASSERT(access(db_path, F_OK) != 0);
     snprintf(path, sizeof path, "%s.migrated", db_path);
     ASSERT(access(path, F_OK) == 0);
@@ -443,7 +415,6 @@ static int test_older_store_is_carried_over(void) {
     ASSERT(events_of(s, rel, log, sizeof log) == 0 && strcmp(log, "offered,cosigned,released") == 0);
     fl_kq_store_close(s);
 
-    /* A file from an unknown schema is left exactly as it was. */
     snprintf(root, sizeof root, "%s/carry2", s_dir);
     snprintf(dir, sizeof dir, "%s/kq", root);
     ASSERT(fl_fs_mkdir_p(dir, 0700) == 0);
@@ -460,9 +431,7 @@ static int test_older_store_is_carried_over(void) {
     return 0;
 }
 
-/* The old build's files are read through held directories without following a link: a letter
- * that is a link, or a letters directory that is a link, is never read, so no other file can be
- * pulled into a sealed letter. The row is ended instead, as for any unreadable letter. */
+/* Letters are read through held directories without following a link, so no other file is pulled in. */
 static int test_older_store_does_not_follow_links(void) {
     char root[sizeof s_dir + 32], dir[sizeof root + 8], letters[sizeof dir + 16];
     char db_path[sizeof dir + 32], path[sizeof letters + 64], outside[sizeof s_dir + 32];
@@ -474,7 +443,6 @@ static int test_older_store_does_not_follow_links(void) {
     uint8_t *letter = NULL;
     size_t letter_len = 0;
 
-    /* case 1: the letter itself is a link to a file elsewhere */
     snprintf(root, sizeof root, "%s/carry-link", s_dir);
     snprintf(dir, sizeof dir, "%s/kq", root);
     snprintf(letters, sizeof letters, "%s/kq_letters", dir);
@@ -499,7 +467,6 @@ static int test_older_store_does_not_follow_links(void) {
     snprintf(path, sizeof path, "%s.migrated", db_path);
     ASSERT(access(path, F_OK) == 0); /* the file itself was still carried over and renamed */
 
-    /* case 2: the letters directory is a link to a directory holding a real-looking letter */
     snprintf(root, sizeof root, "%s/carry-dirlink", s_dir);
     snprintf(dir, sizeof dir, "%s/kq", root);
     snprintf(letters, sizeof letters, "%s/kq_letters", dir);
@@ -525,7 +492,6 @@ static int test_older_store_does_not_follow_links(void) {
     return 0;
 }
 
-/* The share root may not exist yet when the host first holds a letter. */
 static int test_store_creates_missing_parents(void) {
     fl_kq_store_t *s = NULL;
     char nested[sizeof s_dir + 32];
@@ -537,7 +503,6 @@ static int test_store_creates_missing_parents(void) {
     snprintf(letters, sizeof letters, "%s/kq_letters", nested);
     ASSERT(access(letters, F_OK) == 0);
 
-    /* A directory that cannot be created is an error, not a store opened half-way. */
     {
         char blocker[sizeof s_dir + 16];
         char under[sizeof blocker + 16];
@@ -554,8 +519,7 @@ static int test_store_creates_missing_parents(void) {
     return 0;
 }
 
-/* The store's root is trusted only as the user's own directory: a link in its place opens no
- * store and nothing is created through it; a loose mode on the user's own root is tightened. */
+/* The store root is trusted only as the user's own directory; a link in its place opens no store. */
 static int test_store_root_must_be_own_directory(void) {
     fl_kq_store_t *s = NULL;
     char target[sizeof s_dir + 32];

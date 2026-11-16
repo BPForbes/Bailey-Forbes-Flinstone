@@ -1,8 +1,4 @@
-/*
- * `server` shell built-in: host / join / msg / announce / nick / set-nick /
- * connected / leave / kill verbs. See docs/SERVER.md for the user surface
- * and the colour palette (KRED / KGRN / KYEL / KBLU / KCYN).
- */
+/* Verbs of the `server` built-in; colour palette in docs/SERVER.md. */
 
 #include "cmd_decl.h"
 #include "cmd_batch.h"
@@ -50,9 +46,6 @@
 #define FL_SERVER_UDP_HOSTED 1
 #endif
 
-/* ------------------------------------------------------------------------- */
-/* Process-wide session state                                                */
-/* ------------------------------------------------------------------------- */
 
 static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -60,25 +53,16 @@ static fl_net_server_t g_server;
 static fl_server_bg_t *g_server_bg;
 static int g_server_running;
 
-/* Accessor for other commands (netlab's pod/host-collision check) that need
- * to know, without owning any server state themselves, whether this process
- * is currently hosting the real `server` session. */
 int cmd_server_is_running(void) { return g_server_running; }
 
-/* The account that started the running server, captured when hosting begins and
- * cleared when it stops. netlab's pod-host election reads this (not the live
- * process identity) so the real server host is excluded from the pod host even
- * after a `switchuser`/login changes the current account. */
+/* Captured when hosting starts: netlab's pod-host election reads this, not the live identity. */
 static char g_server_host_user[64];
 const char *cmd_server_host_user(void) { return g_server_host_user; }
 
 static fl_net_client_t g_client;
 static fl_server_bg_t *g_client_bg;
 
-/* Accessor for netlab: is this process joined to a real server as a client?
- * A netlab binding must not open while real relay threads (host or client) are
- * live, since isolation only gates new `server` commands, not the background
- * relay already running. */
+/* A netlab binding must not open while real relay threads are live. */
 int cmd_server_is_connected(void) {
     return fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_CONNECTED;
 }
@@ -103,8 +87,7 @@ static const char *current_principal(void) {
     return "Flinstone";
 }
 
-/* Set g_server_running and keep the captured host principal in step. Call this
- * at every running-state flip so netlab always sees the right server host. */
+/* Call at every running-state flip so netlab sees the right server host. */
 static void set_server_running(int on) {
     g_server_running = on;
     if (on) {
@@ -116,13 +99,8 @@ static void set_server_running(int on) {
     }
 }
 
-/* Public accessor so cmd_exit (and any other shell teardown path) can
- * cleanly drop the session before the process dies. */
 void cmd_server_atexit(void);
 
-/* ------------------------------------------------------------------------- */
-/* Helpers                                                                   */
-/* ------------------------------------------------------------------------- */
 
 static int parse_endpoint_full(const char *s, fl_net_endpoint_t *out) {
     return fl_net_endpoint_parse(s, out) ? 0 : -1;
@@ -570,11 +548,6 @@ static void join_argv_into(char *dst, size_t cap, int argc, char **argv, int fro
     }
 }
 
-/* ------------------------------------------------------------------------- */
-/* Client-side event sink (called from the background pthread)               */
-/* ------------------------------------------------------------------------- */
-
-/* Forward declarations referenced by the client event sink. */
 static fl_result_t start_client_bg(void);
 static void spawn_promote_thread(int am_new_host, const fl_net_endpoint_t *new_host);
 static void maybe_handle_nick_prompt_sync(void);
@@ -591,15 +564,13 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         fl_color_announce("%s", text);
         break;
     case FL_NET_SERVER_EVENT_NICK_PROMPT:
-        /* verb_join handles the sync prompt; only surfaces here after a
-         * post-reconnect collision where BG can't read stdin. */
+        /* Reached only after a post-reconnect collision: the BG thread cannot read stdin. */
         fl_color_server_dm(
             "Your principal '%s' collides with another connected user. "
             "Run 'server set-nick <nick>' to choose a nickname.",
             current_principal());
         break;
     case FL_NET_SERVER_EVENT_MSG: {
-        /* Public chat is prefixed "Sender: text" by the host; split back. */
         const char *colon = strchr(text, ':');
         if (colon && colon > text && colon[1] == ' ') {
             char sender[FL_NET_SERVER_DISPLAY_NAME_MAX];
@@ -638,7 +609,6 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
         }
         break;
     case FL_NET_SERVER_EVENT_MEMBER_LIST:
-        /* Silent: we already cached the roster in net_client. */
         break;
     case FL_NET_SERVER_EVENT_ERR:
         fl_color_error("%s", text);
@@ -665,10 +635,7 @@ static void client_event_print(fl_net_server_event_kind_t kind, const char *text
     }
 }
 
-/* When the host closes the session, the BG client loop exits on its own
- * but g_client_bg still points at the thread handle. pthread_join on a
- * returned thread is well-defined, so call it here before the next join
- * looks at the pointer and skips starting a new loop. */
+/* Join now, or the next join sees the stale pointer and skips starting a loop. */
 static void reap_client_bg_if_dead(void) {
     if (g_client_bg &&
         fl_net_client_state(&g_client) == FL_NET_CLIENT_STATE_DISCONNECTED) {
@@ -685,10 +652,7 @@ static fl_result_t start_client_bg(void) {
                                      &g_client_bg);
 }
 
-/* ------------------------------------------------------------------------- */
-/* Host transfer transition (spawned as a short-lived detached thread when   */
-/* OP_CTRL_HOST_PROMOTE arrives on the client bg loop)                       */
-/* ------------------------------------------------------------------------- */
+/* Detached thread started on OP_CTRL_HOST_PROMOTE from the client bg loop. */
 
 typedef struct {
     int am_new_host;
@@ -799,11 +763,7 @@ static void spawn_promote_thread(int am_new_host, const fl_net_endpoint_t *new_h
     pthread_detach(tid);
 }
 
-/* ------------------------------------------------------------------------- */
-/* Interactive Y/N nick prompt on join (synchronous; runs while raw_mode
- * is OFF in interpreter.c). Returns FL_RESULT_OK after the optional nick
- * has been sent, or when no prompt arrived. */
-/* ------------------------------------------------------------------------- */
+/* Synchronous Y/N nick prompt on join; runs while raw_mode is OFF. */
 
 static int read_yn_default_n(void) {
     char buf[16];
@@ -815,7 +775,6 @@ static int read_yn_default_n(void) {
 static int read_nick_line(char *out, size_t cap) {
     if (!fgets(out, (int)cap, stdin))
         return -1;
-    /* strip trailing newline + spaces */
     size_t n = strlen(out);
     while (n > 0u && (out[n - 1] == '\n' || out[n - 1] == '\r' ||
                        out[n - 1] == ' ' || out[n - 1] == '\t')) {
@@ -825,9 +784,7 @@ static int read_nick_line(char *out, size_t cap) {
 }
 
 static void maybe_handle_nick_prompt_sync(void) {
-    /* Drain non-blocking until NICK_PROMPT or quiet. Non-prompt frames go
-     * through fl_net_client_dispatch_frame so the host's initial
-     * MEMBER_LIST_SNAPSHOT / JOIN_ANNOUNCE survive into the BG loop. */
+     /* Non-prompt frames go through dispatch so the host's roster survives the drain. */
     for (int i = 0; i < 50; i++) {
         uint8_t opcode = 0;
         uint8_t payload[FL_NET_SESSION_MAX_MSG];
@@ -845,8 +802,7 @@ static void maybe_handle_nick_prompt_sync(void) {
             return;
         if (opcode == (uint8_t)FL_NET_SESSION_OP_NICK_PROMPT) {
             char nick[FL_NET_SERVER_NICK_MAX];
-            /* Lock stdout for the whole Y/N + nick read so no async
-             * announce can interleave between prompt and answer. */
+            /* Holds stdout so no announce interleaves between the prompt and the answer. */
             fl_shell_io_lock();
             fl_color_prompt_yellow(
                 "Your username %s is already in use by another connected user, "
@@ -870,21 +826,15 @@ static void maybe_handle_nick_prompt_sync(void) {
                 fl_color_error("nick request '%s' rejected", nick);
             return;
         }
-        /* Feed non-prompt frames through normal dispatch so cached roster
-         * + announcements survive even though this drain consumed them. */
         (void)fl_net_client_dispatch_frame(&g_client, opcode, payload, plen,
                                             client_event_print, NULL);
     }
 }
 
-/* ------------------------------------------------------------------------- */
-/* UDP beacon + reverse-dial listener (server-side LAN discovery / NAT bypass) */
-/* ------------------------------------------------------------------------- */
 
 #if defined(FL_SERVER_UDP_HOSTED)
 
-/* Broadcasts a Flinstone discovery beacon to LAN every 2 s so joining
- * clients can find this server without knowing its IP in advance.        */
+/* Beacon every 2 s so clients find this server without its IP. */
 static void *server_beacon_thread_func(void *arg)
 {
     uint16_t port = (uint16_t)(uintptr_t)arg;
@@ -920,9 +870,7 @@ static void *server_beacon_thread_func(void *arg)
     return NULL;
 }
 
-/* Listens for UDP join-requests from clients that cannot connect via TCP
- * (e.g. the server is behind NAT). On receipt, dials TCP back to the
- * client's callback address and hands the socket to the server session. */
+/* Reverse-dial listener for clients that cannot be dialled (server behind NAT). */
 static void *server_udp_listener_thread_func(void *arg)
 {
     uint8_t buf[16];
@@ -947,7 +895,7 @@ static void *server_udp_listener_thread_func(void *arg)
         if (buf[4] != (uint8_t)FL_NET_DISCOVERY_OP_JOIN_REQ)
             continue;
 
-        /* Trust sender IP from recvfrom; port comes from the join-request payload. */
+        /* Trusts recvfrom's sender IP; the port comes from the payload. */
         uint32_t cb_ip_be = (uint32_t)from.sin_addr.s_addr;
         uint16_t cb_port_be;
         memcpy(&cb_port_be, buf + 9, 2);
@@ -983,7 +931,6 @@ static void server_udp_start(uint16_t port)
 
     atomic_store(&g_server_udp_stop, 0);
 
-    /* UDP listener on the discovery port for incoming join-requests. */
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock >= 0) {
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -1001,7 +948,6 @@ static void server_udp_start(uint16_t port)
         }
     }
 
-    /* Beacon thread — broadcasts server presence. */
     if (pthread_create(&g_beacon_thread, NULL, server_beacon_thread_func,
                        (void *)(uintptr_t)port) == 0)
         g_beacon_thread_started = 1;
@@ -1025,10 +971,7 @@ static void server_udp_stop(void)
     }
 }
 
-/* Client-side: when direct TCP connect failed, open a local TCP listener,
- * send a UDP join-request to the server's discovery port, then wait for the
- * server to dial back. Works through server-side NAT (server dials outbound
- * to a client with a reachable IP). */
+/* Client side of reverse-dial: the server dials back over TCP. */
 static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
                                             const fl_net_endpoint_t *server_ep,
                                             const char *principal,
@@ -1048,7 +991,6 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
     if (server_ep->family != FL_NET_ADDR_FAMILY_V4)
         return FL_RESULT_NOSYS;
 
-    /* Open TCP listener on an ephemeral port. */
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0)
         return FL_RESULT_ERR;
@@ -1066,14 +1008,13 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
     getsockname(listen_fd, (struct sockaddr *)&sin, &slen);
     listen_port = ntohs(sin.sin_port);
 
-    /* Get own LAN IP so the server knows where to dial back. */
     if (!fl_net_iface_suggest_ipv4(NULL, own_ip_str, sizeof(own_ip_str)) ||
         !fl_net_ipv4_parse_literal(own_ip_str, &own_ip_be)) {
         close(listen_fd);
         return FL_RESULT_NOSYS;
     }
 
-    /* Send UDP join-request: magic(4) + op(1) + own_ip_be(4) + port_be(2) */
+    /* Wire: magic(4) op(1) own_ip_be(4) port_be(2). */
     ufd = socket(AF_INET, SOCK_DGRAM, 0);
     if (ufd >= 0) {
         uint8_t req[11];
@@ -1094,7 +1035,6 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
         close(ufd);
     }
 
-    /* Wait for the server's TCP callback. */
     tv.tv_sec  = (long)(timeout_ms / 1000u);
     tv.tv_usec = (long)((timeout_ms % 1000u) * 1000L);
     FD_ZERO(&rfds);
@@ -1122,7 +1062,6 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
         }
     }
 
-    /* Adopt the fd and run the HELLO handshake. */
     rc = fl_net_sock_from_fd(peer_fd, &h);
     if (rc != FL_RESULT_OK) {
         close(peer_fd);
@@ -1136,13 +1075,8 @@ static fl_result_t server_join_reverse_dial(fl_net_client_t *client,
 
 #endif /* FL_SERVER_UDP_HOSTED */
 
-/* ------------------------------------------------------------------------- */
-/* Verb handlers                                                             */
-/* ------------------------------------------------------------------------- */
 
-/* `server host <ip:port>` — bind the listener, insert host as member 1,
- * spawn the bg accept/poll loop. Fails if a join is already in flight or
- * if hosted sockets are unavailable on this build (FL_RESULT_NOSYS). */
+/* Returns FL_RESULT_NOSYS when hosted sockets are unavailable on this build. */
 static int verb_host(int argc, char **argv) {
     fl_net_endpoint_t ep;
     fl_net_endpoint_t bind_ep;
@@ -1178,7 +1112,6 @@ static int verb_host(int argc, char **argv) {
         host_prefer_single_wifi_ep(&ep);
     bind_ep = ep;
 
-    /* Prefer fl0 macvlan IP when user did not specify a particular IP. */
     {
         uint32_t fl0_ip = 0u;
         if (bind_ep.family == FL_NET_ADDR_FAMILY_V4 && bind_ep.addr.v4_be == 0u &&
@@ -1186,8 +1119,7 @@ static int verb_host(int argc, char **argv) {
             bind_ep.addr.v4_be = fl0_ip;
     }
 
-    /* Windows / LAN IPv4 (e.g. 192.168.1.239) is not bindable in WSL — bind
-     * 0.0.0.0 locally and expose the requested IP via portproxy. */
+    /* WSL cannot bind a LAN IP: bind 0.0.0.0 and expose the IP via portproxy. */
     {
         const char *rewrite = wsl_rewrite_lan_bind_ep(&ep, &bind_ep, lan_display,
                                                     sizeof(lan_display));
@@ -1255,8 +1187,7 @@ static int verb_host(int argc, char **argv) {
         }
         set_server_running(1);
         pthread_mutex_unlock(&session_mutex);
-        /* Became the server host: the pod host is a separate relay point, so
-         * re-elect it off this identity (or leave it pending). */
+        /* Pod host is a separate relay point: re-elect it off this identity. */
 #ifdef FL_SECFEAT
         cmd_netlab_on_server_host();
 #endif
@@ -1377,11 +1308,7 @@ static int verb_host(int argc, char **argv) {
     return 0;
 }
 
-/* `server join <ip:port> [-bind <local_ip>]` — connect, synchronously
- * run the optional Y/N nick prompt (so the prompt and the user's typed
- * answer never race with a background announce), then hand off to the
- * bg receive loop. `-bind` selects the local source IP for multi-IP /
- * netns lab setups. */
+/* Connects, runs the Y/N nick prompt synchronously, then hands off to the BG loop. */
 static int verb_join(int argc, char **argv) {
     fl_net_endpoint_t peer;
     fl_net_endpoint_t local;
@@ -1393,8 +1320,7 @@ static int verb_join(int argc, char **argv) {
     }
     memset(&local, 0, sizeof(local));
     pthread_mutex_lock(&session_mutex);
-    /* Reap any dead BG handle from a host-closed prior session BEFORE
-     * the "already joined" check so a stale pointer cannot block re-join. */
+    /* Reap a dead BG handle first so a stale pointer cannot block re-join. */
     reap_client_bg_if_dead();
     if (g_server_running) {
         pthread_mutex_unlock(&session_mutex);
@@ -1410,7 +1336,6 @@ static int verb_join(int argc, char **argv) {
         fl_color_error("invalid ip:port '%s'", argv[2]);
         return 1;
     }
-    /* Optional -bind <local_ip> for multi-IP demos / tests (IPv4 or [IPv6]). */
     for (int i = 3; i + 1 < argc; i++) {
         if (!strcmp(argv[i], "-bind")) {
             if (!fl_net_endpoint_parse_bind(argv[i + 1], &local)) {
@@ -1431,8 +1356,6 @@ static int verb_join(int argc, char **argv) {
     }
 #if defined(FL_SERVER_UDP_HOSTED)
     if (rc != FL_RESULT_OK && peer.family == FL_NET_ADDR_FAMILY_V4) {
-        /* Direct TCP connect failed — try reverse-dial NAT bypass.
-         * We open a local TCP listener and ask the server to dial back. */
         fl_result_t rdr = server_join_reverse_dial(&g_client, &peer,
                                                    current_principal(), 5000u);
         if (rdr == FL_RESULT_OK)
@@ -1453,14 +1376,10 @@ static int verb_join(int argc, char **argv) {
             fl_color_success("joined as '%s' (member_id %u)", g_client.display_name,
                              (unsigned)g_client.assigned_member_id);
     }
-    /* Synchronously handle the NICK_PROMPT (if any) BEFORE we start the
-     * background loop so the Y/N dialogue is clean. */
     maybe_handle_nick_prompt_sync();
     rc = start_client_bg();
     if (rc != FL_RESULT_OK) {
-        /* Surfacing this prevents a "connected but deaf" session where
-         * the user sees the join success line but never receives any
-         * messages. Tear the half-open client back down. */
+        /* Tear down the half-open client, or the user sees a join with no messages. */
         fl_net_client_disconnect(&g_client);
         pthread_mutex_unlock(&session_mutex);
         fl_color_error("server join: background receive start failed (rc=%d)",
@@ -1471,13 +1390,10 @@ static int verb_join(int argc, char **argv) {
     return 0;
 }
 
-/* `server leave` is dual-role: from a host shell it triggers transfer-
- * and-stop (the lowest non-host id is promoted and a blue announce
- * tells everyone); from a joined shell it simply disconnects. */
+/* Host leave transfers and stops; a joined shell just disconnects. */
 static int verb_leave(void) {
     pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
-        /* Host leaving: transfer + stop. */
         fl_net_server_member_id_t new_host = FL_NET_SERVER_MEMBER_ID_NONE;
         if (g_server_bg) {
             fl_server_bg_stop_server(g_server_bg);
@@ -1486,8 +1402,7 @@ static int verb_leave(void) {
         (void)fl_net_server_transfer_and_stop(&g_server, &new_host);
         set_server_running(0);
         pthread_mutex_unlock(&session_mutex);
-        /* Host stepped down: re-elect any netlab pod host independently of the
-         * server's own succession (the two may differ). */
+        /* Re-elect any netlab pod host independently of the server's succession. */
 #ifdef FL_SECFEAT
         cmd_netlab_on_server_leave();
 #endif
@@ -1495,9 +1410,7 @@ static int verb_leave(void) {
         if (new_host == FL_NET_SERVER_MEMBER_ID_NONE) {
             fl_color_success("session terminated (no remaining members)");
         }
-        /* When transfer DID happen, fl_net_server_transfer_and_stop already
-         * broadcast and locally echoed "[Server Announcement]: <display> is
-         * now the host" — no extra local line needed. */
+        /* transfer_and_stop already announced the new host; no local line. */
         return 0;
     }
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
@@ -1529,7 +1442,6 @@ static int verb_kill(void) {
     fl_net_server_host_stop(&g_server);
     set_server_running(0);
     pthread_mutex_unlock(&session_mutex);
-    /* Server torn down by its host: the netlab pods under it are killed too. */
 #ifdef FL_SECFEAT
     cmd_netlab_on_server_kill();
 #endif
@@ -1541,15 +1453,8 @@ static int verb_kill(void) {
     return 0;
 }
 
-/* `server msg [-all | -user <name> [-id <N>] | -id <N>] <text...>`
- * Routes through one of the public (MSG_BROADCAST) or private
- * (MSG_DIRECT) wire paths. Sender renders nothing on success; the
- * server skips the sender on fan-out so there is no echo to suppress. */
+/* Sender stays silent on success; the server skips it on fan-out. */
 static int verb_msg(int argc, char **argv) {
-    /* server msg [-all] <text...>
-     * server msg -user <name> [-id <N>] <text...>
-     * server msg -id <N> <text...>
-     */
     int i;
     const char *target_name = NULL;
     unsigned target_disambig = 0;
@@ -1562,7 +1467,6 @@ static int verb_msg(int argc, char **argv) {
         fl_color_error("usage: server msg [-all | -user <name> [-id <N>] | -id <N>] <text...>");
         return 1;
     }
-    /* Parse leading -flags. */
     i = 2;
     while (i < argc && argv[i][0] == '-') {
         if (!strcmp(argv[i], "-all")) {
@@ -1604,8 +1508,7 @@ static int verb_msg(int argc, char **argv) {
     }
 
     if (!is_private) {
-        /* No local echo: server skips the sender on broadcast and the
-         * user already typed the text. Silence = success; errors print. */
+        /* No local echo: the server skips the sender on broadcast. */
         if (g_server_running) {
             if (fl_net_server_send_public(&g_server, joined) != FL_RESULT_OK) {
                 pthread_mutex_unlock(&session_mutex);
@@ -1624,7 +1527,6 @@ static int verb_msg(int argc, char **argv) {
         return 0;
     }
 
-    /* Private message — resolve recipient_id, render local confirmation. */
     {
         fl_net_server_member_id_t recipient = FL_NET_SERVER_MEMBER_ID_NONE;
         char recipient_display[FL_NET_SERVER_DISPLAY_NAME_MAX] = {0};
@@ -1633,7 +1535,6 @@ static int verb_msg(int argc, char **argv) {
             recipient = fl_net_client_member_lookup(&g_client, target_name,
                                                     target_disambig);
         } else if (target_name && g_server_running) {
-            /* Host side: walk own member registry. */
             for (size_t k = 0; k < fl_net_server_member_count(&g_server); k++) {
                 const fl_net_server_member_t *m = fl_net_server_member_at(&g_server, k);
                 if (!m || m->is_host) continue;
@@ -1648,7 +1549,6 @@ static int verb_msg(int argc, char **argv) {
                 }
             }
         } else if (!target_name) {
-            /* -id only path: numeric member id. */
             recipient = (fl_net_server_member_id_t)target_disambig;
         }
         if (recipient == FL_NET_SERVER_MEMBER_ID_NONE) {
@@ -1677,7 +1577,6 @@ static int verb_msg(int argc, char **argv) {
                 return 1;
             }
         }
-        /* Recipient renders "From X -> You"; sender stays silent on success. */
         (void)recipient_display;
     }
     pthread_mutex_unlock(&session_mutex);
@@ -1706,10 +1605,7 @@ static int verb_announce(int argc, char **argv) {
     return 0;
 }
 
-/* `server set-nick <name>` -- joined user requests a host-global nick. The
- * host validates it the same way it validates a host-driven nick (no
- * collision with any other principal or nick) and broadcasts the
- * announcement on success. */
+/* Host-global nick: validated like a host-driven nick, announced on success. */
 static int verb_set_nick(int argc, char **argv) {
     if (fl_net_client_state(&g_client) != FL_NET_CLIENT_STATE_CONNECTED) {
         fl_color_error("server set-nick: not currently joined");
@@ -1782,8 +1678,7 @@ static int verb_nick(int argc, char **argv) {
     return 0;
 }
 
-/* `server connected` — roster. Host reads the live registry; client
- * reads the cached OP_MEMBER_LIST_SNAPSHOT. Anyone can run it. */
+/* Roster: host reads the live registry, client the cached snapshot. */
 static int verb_connected(void) {
     pthread_mutex_lock(&session_mutex);
     if (g_server_running) {
@@ -1813,7 +1708,6 @@ static int verb_connected(void) {
         fl_color_error("server connected: not currently in a session");
         return 1;
     }
-    /* Client view from the cached member-list snapshot. */
     {
         size_t count = fl_net_client_member_count(&g_client);
         char disp[FL_NET_SERVER_DISPLAY_NAME_MAX];
@@ -1841,9 +1735,6 @@ static int verb_connected(void) {
     return 0;
 }
 
-/* ------------------------------------------------------------------------- */
-/* Public exit hook (called by cmd_exit before the shell tears down)         */
-/* ------------------------------------------------------------------------- */
 
 void cmd_server_atexit(void) {
     static int done;
@@ -1876,9 +1767,6 @@ void cmd_server_atexit(void) {
 #endif
 }
 
-/* ------------------------------------------------------------------------- */
-/* Command surface                                                           */
-/* ------------------------------------------------------------------------- */
 
 static int verb_netinit(void) {
     char parent[FL_NET_MACVLAN_IFNAMSIZ];
@@ -1940,13 +1828,11 @@ int cmd_server_run(int argc, char **argv) {
         fl_color_error("usage: server <host|join|interfaces|netinit|msg|file|send|announce|nick|set-nick|connected|leave|kill> ...");
         return 1;
     }
-    /* KeyQuorum co-signed delivery: install once, so requests are handled from the first
-     * frame of a session (contracts/drivers/contract_p4_keyquorum.h). */
+    /* Install the KeyQuorum co-signed delivery handler before the first frame. */
     {
         static int kq_installed;
         if (!kq_installed) {
             char dir[CWD_MAX + 32];
-            /* Deliveries are rows of the share root's host catalog (kq_delivery.h). */
             snprintf(dir, sizeof dir, "%s/server_shared", g_cwd);
             kq_installed = fl_net_kq_install(fl_session_user_db, dir) == FL_RESULT_OK;
             if (kq_installed)
@@ -1957,10 +1843,7 @@ int cmd_server_run(int argc, char **argv) {
 #ifdef FL_SECFEAT
     if (cmd_netlab_is_isolated() &&
         strcmp(argv[1], "kill") != 0 && strcmp(argv[1], "leave") != 0) {
-        /* A netlab reverse-shell binding is open: the real network is dropped
-         * for the duration so nothing leaves while the MitM+RS demo runs.
-         * `kill`/`leave` stay available so a real server can still be torn down;
-         * `netlab end` (either side) resumes the real relay. */
+        /* Real network is dropped until `netlab end`; kill and leave still work. */
         fl_color_error("server paused: lab isolated (netlab MitM+RS active) — `netlab end` to resume the real network");
         return 1;
     }

@@ -2,7 +2,6 @@
 #define FL_FREESTANDING_KQ_HEAP_H
 #include <stddef.h>
 #include <stdint.h>
-/* KeyQuorum embedder heap: every allocation fails until fl_kq_heap_init accepts an arena. */
 
 #define FL_KQ_HEAP_ALIGN 16u
 

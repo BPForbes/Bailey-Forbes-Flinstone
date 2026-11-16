@@ -1,7 +1,4 @@
-/**
- * test_kq_mem_storage.c - the in-memory fl_kq_storage_t (kernel/core/vfs/kq_mem_storage.c).
- * The table's own rules first, then the real KeyQuorum checkpoints run on top of it with no file system.
- */
+/* The in-memory fl_kq_storage_t table, then the real KeyQuorum checkpoints run on top of it. */
 #include "kq_checkpoint.h"
 #include "kq_mem_storage.h"
 #include "fl/driver/keyquorum.h"
@@ -56,15 +53,13 @@ static int test_the_table_keeps_the_storage_contract(void) {
     ASSERT(st()->dir_exists(st()->ctx, &held, "a.txt") == 1 && st()->dir_exists(st()->ctx, &held, "b") == 0);
     ASSERT(st()->dir_read(st()->ctx, &held, "a.txt", 10, &d, &n) == 0 && n == 2);
     mem_domain_free(MEM_DOMAIN_FS, d);
-    /* Names are plain: no separator, no dot names, no empty name. */
     ASSERT(st()->dir_read(st()->ctx, &held, "../x", 10, &d, &n) == -1);
     ASSERT(st()->dir_read(st()->ctx, &held, "sub/x", 10, &d, &n) == -1);
     ASSERT(st()->dir_read(st()->ctx, &held, "..", 10, &d, &n) == -1);
     ASSERT(st()->dir_read(st()->ctx, &held, "", 10, &d, &n) == -1);
     ASSERT(st()->dir_open(st()->ctx, "", &held) == -1);
 
-    /* The newest records: 5 records of 4 bytes, keep 2 -> the last 8 bytes; absent is success with nothing; a
-     * size that is not whole records is an error. */
+/* Keeps the newest records; absent is success with nothing; a size that is not whole records is an error. */
     ASSERT(put("/m/t.bin", "0000111122223333AAAA") == 0);
     ASSERT(st()->dir_open(st()->ctx, "/m", &held) == 0);
     ASSERT(st()->dir_read_tail(st()->ctx, &held, "t.bin", 4, 2, &d, &n) == 0 && n == 8 && memcmp(d, "3333AAAA", 8) == 0);
@@ -74,8 +69,7 @@ static int test_the_table_keeps_the_storage_contract(void) {
     ASSERT(st()->dir_read_tail(st()->ctx, &held, "nope", 4, 2, &d, &n) == 0 && d == NULL && n == 0);
     ASSERT(put("/m/odd", "12345") == 0 && st()->dir_read_tail(st()->ctx, &held, "odd", 4, 2, &d, &n) == -1);
     ASSERT(st()->dir_read_tail(st()->ctx, &held, "t.bin", 0, 2, &d, &n) == -1);
-    /* A directory that already ends in '/' (the root) joins without a doubled separator: the path-based and the
-     * directory-based calls reach the same file. */
+/* A directory ending in '/' joins without a doubled separator. */
     ASSERT(put("/top.txt", "root") == 0);
     ASSERT(st()->dir_open(st()->ctx, "/", &held) == 0);
     ASSERT(st()->dir_exists(st()->ctx, &held, "top.txt") == 1);
@@ -99,7 +93,6 @@ static int test_a_commit_replaces_all_files_or_none(void) {
     ASSERT(is("/c/one", "new1") && is("/c/two", "new2") && is("/c/three", "new3"));
 
     before = fl_kq_storage_memory_bytes();
-    /* A commit that will not fit changes nothing, the replaced files included. */
     fl_kq_storage_memory_set_limit(before + 3);
     f[0] = (fl_kq_file_out_t){"one", (const uint8_t *)"AAAA", 4};
     f[1] = (fl_kq_file_out_t){"four", (const uint8_t *)"BBBBBBBB", 8};
@@ -108,7 +101,6 @@ static int test_a_commit_replaces_all_files_or_none(void) {
     fl_kq_storage_memory_set_limit(FL_KQ_MEM_BYTES_MAX);
     ASSERT(st()->dir_commit(st()->ctx, &held, f, 2) == 0 && is("/c/one", "AAAA") && is("/c/four", "BBBBBBBB"));
 
-    /* Bad shapes: no files, too many, the same name twice, a name that is not plain, no data. */
     ASSERT(st()->dir_commit(st()->ctx, &held, f, 0) == -1);
     f[2] = f[3] = f[4] = f[0];
     ASSERT(st()->dir_commit(st()->ctx, &held, f, 5) == -1);
@@ -120,7 +112,6 @@ static int test_a_commit_replaces_all_files_or_none(void) {
     f[1] = (fl_kq_file_out_t){"ok", NULL, 1};
     ASSERT(st()->dir_commit(st()->ctx, &held, f, 2) == -1);
 
-    /* The file table is bounded; replacing a file still works when it is full. */
     fl_kq_storage_memory_reset();
     for (unsigned i = 0; i < FL_KQ_MEM_FILES_MAX; i++) {
         char p[32];
@@ -135,7 +126,6 @@ static int test_a_commit_replaces_all_files_or_none(void) {
     return 0;
 }
 
-/* ---- the checkpoints on this table ------------------------------------------------------------ */
 
 typedef struct {
     const char *label;
@@ -183,13 +173,11 @@ static int test_the_checkpoints_run_on_the_memory_table(void) {
     fl_kq_storage_memory_reset();
     was = fl_kq_cp_set_storage(fl_kq_storage_memory());
 
-    /* Sender: the file and its history live in memory beside each other. */
     ASSERT(put("/mem/src/doc.txt", "v1\n") == 0);
     ASSERT(fl_kq_cp_encode_with(&s_keys, MYA, s_acct[0].sign_sec, STEVE, s_acct[1].box_pub, "/mem/src/doc.txt", T1, &enc) ==
            FL_KQ_CP_OK);
     ASSERT(st()->exists(st()->ctx, "/mem/src/doc.txt" FL_KQ_CONTAINER_SUFFIX) == 1);
 
-    /* Recipient: co-signs, then decodes into a landing directory it holds. */
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, s_acct[1].sign_sec, sig) == FL_KQ_CP_OK);
     ASSERT(st()->dir_open(st()->ctx, "/mem/land", &held) == 0);
     ASSERT(fl_kq_cp_decode_in_with(&s_keys, MYA, s_acct[0].sign_pub, STEVE, s_acct[1].box_sec, &enc.letter, &enc.offer,
@@ -214,7 +202,6 @@ static int test_the_checkpoints_run_on_the_memory_table(void) {
                                    sig, &held, "doc2.txt") == FL_KQ_CP_OK); /* retries cleanly */
     ASSERT(is("/mem/land/doc2.txt", "other\n"));
 
-    /* History, last signature and a new signature, all through the table. */
     ASSERT(fl_kq_cp_history("/mem/src/doc.txt", &lines) == FL_KQ_CP_OK && lines.len > 0);
     fl_kq_buf_free(&lines);
     ASSERT(fl_kq_cp_last_signature("/mem/src/doc.txt", &last) == FL_KQ_CP_OK && last > 0);
@@ -237,8 +224,7 @@ static int test_the_checkpoints_run_on_the_memory_table(void) {
     return 0;
 }
 
-/* The ASM-backed equality the table uses for names: equal bytes, a one-bit difference at either end, and
- * two paths of which one is a prefix of the other (the table compares lengths first, then the bytes). */
+/* ASM-backed name equality: a one-bit difference at either end is unequal. */
 static int test_the_equality_wrapper_is_exact(void) {
     char a[8] = "/a/b/cd", b[8] = "/a/b/cd";
 

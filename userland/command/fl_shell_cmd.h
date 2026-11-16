@@ -1,10 +1,7 @@
 #ifndef FL_SHELL_CMD_H
 #define FL_SHELL_CMD_H
 
-/*
- * Shell command numbers — same idea as fl_syscall_no_t: small integers map to
- * handlers in fl_shell_cmd_dispatch() (see cmd_dispatch.c).
- */
+/* Shell command numbers; handlers are in fl_shell_cmd_dispatch() (cmd_dispatch.c). */
 typedef enum {
     FL_SCMD_UNKNOWN = 0,
     FL_SCMD_CD,

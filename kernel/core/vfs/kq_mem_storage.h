@@ -4,7 +4,6 @@
 #include "kq_storage.h"
 
 #include <stddef.h>
-/* In-memory fl_kq_storage_t for images with no file system. */
 
 #define FL_KQ_MEM_FILES_MAX 32u
 #define FL_KQ_MEM_PATH_MAX 192u

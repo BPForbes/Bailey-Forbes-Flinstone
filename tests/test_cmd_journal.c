@@ -1,9 +1,4 @@
-/**
- * test_cmd_journal.c - the signed command log (userland/shell/cmd_journal.c), over the in-memory
- * fl_kq_storage_t.
- *
- * No literal secrets: every secret-like value is drawn at run time (fl_random_bytes) and hex-encoded.
- */
+/* Signed command log over the in-memory storage; secrets are drawn at run time. */
 #include "cmd_journal.h"
 #include "fl/random.h"
 #include "fl_colors.h"
@@ -29,18 +24,12 @@
 #define DIR_ "/cmdlog"
 #define WHO "Root.Flinstone.Mya"
 
-/* ------------------------------------------------------------------------------------------------
- * TEST-ONLY signer: HMAC-SHA256 over (domain || 0x00 || message) with a key drawn at start. It stands
- * in for KeyQuorum's domain-separated signature, which has no C API yet (see cmd_journal.h). Never
- * use it outside tests: a MAC key that verifies can also forge.
- * ----------------------------------------------------------------------------------------------*/
+/* TEST-ONLY signer: an HMAC stands in for the domain-separated signature; never use it outside tests. */
 typedef struct {
     uint8_t key[32];
     const char *id;
 } test_hmac_t;
 
-/* Two accounts' keys. The verifier knows both, as a KeyQuorum registry would: a journal must still
- * accept records only from its own signer. */
 static test_hmac_t s_keys[2] = {{{0}, "test-hmac-signer"}, {{0}, "test-hmac-signer-b"}};
 
 static int hmac_domain(const uint8_t key[32], const char *domain, const uint8_t *msg, size_t len,
@@ -67,7 +56,6 @@ static int t_sign(void *ctx, const char *domain, const uint8_t *msg, size_t len,
     return 0;
 }
 
-/* Verifies under whichever known key key_id names (ctx unused). */
 static int t_verify(void *ctx, const char *key_id, const char *domain, const uint8_t *msg, size_t len,
                     const uint8_t *sig, size_t sig_len) {
     uint8_t want[32];
@@ -86,10 +74,7 @@ static int t_verify(void *ctx, const char *key_id, const char *domain, const uin
 static const fl_cmdlog_signer_t s_signer = {&s_keys[0], "test-hmac-signer", t_sign, t_verify};
 static const fl_cmdlog_signer_t s_signer_b = {&s_keys[1], "test-hmac-signer-b", t_sign, t_verify};
 
-/* ------------------------------------------------------------------------------------------------
- * A storage over the memory table that can fail every write, write half then fail (a backend that is
- * not atomic), or hide one segment (a missing middle segment; the memory table has no remove).
- * ----------------------------------------------------------------------------------------------*/
+/* Fault-injecting storage: fails writes, writes half then fails, or hides a segment. */
 static int s_fail_writes, s_partial_writes;
 static const char *s_hidden;
 static int hidden(const char *p) { return s_hidden && strcmp(p, s_hidden) == 0; }
@@ -165,7 +150,6 @@ static int contains(const uint8_t *hay, size_t n, const char *needle, size_t m) 
     return 0;
 }
 
-/* ------------------------------------------------------------------------------------------------ */
 
 static int test_a_good_chain_verifies_and_reopens(void) {
     fl_cmdlog_config_t c = config(mem(), NULL);
@@ -180,7 +164,6 @@ static int test_a_good_chain_verifies_and_reopens(void) {
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, NULL, NULL, &r) == 0);
     ASSERT(r.status == FL_CMDLOG_V_OK && r.records == 10 && r.open_attempts == 0 && !r.tail_incomplete);
     ASSERT(r.next_seq == 10 && r.orphan_closes == 0);
-    /* Reopen continues the same chain. */
     ASSERT(fl_cmdlog_open(&c, &j, &r) == 0 && r.records == 10);
     ASSERT(run_one(j, "whoami", 0) == 0);
     fl_cmdlog_close(j);
@@ -188,7 +171,6 @@ static int test_a_good_chain_verifies_and_reopens(void) {
     return 0;
 }
 
-/* Record boundaries of segment 0. */
 static size_t bounds(const uint8_t *d, size_t n, size_t *off, size_t max) {
     size_t k = 0, pos = 0;
 
@@ -266,7 +248,6 @@ static int test_a_truncated_tail_is_reported_and_recovered(void) {
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, NULL, NULL, &r) == 0);
     ASSERT(r.tail_incomplete == 1 && r.tail_bytes > 0 && r.records == 5);
     ASSERT(r.open_attempts == 1); /* the torn record was the last completion */
-    /* Recovery: open reports it, the next append drops the torn bytes, the chain verifies clean. */
     ASSERT(fl_cmdlog_open(&c, &j, &r) == 0 && r.tail_incomplete == 1);
     ASSERT(run_one(j, "version", 0) == 0);
     fl_cmdlog_close(j);
@@ -344,7 +325,6 @@ static int test_bounds_are_enforced(void) {
 
     fresh();
     ASSERT(fl_cmdlog_open(&c, &j, NULL) == 0);
-    /* Retention: three 1 KiB segments, then the journal is full and refuses. */
     while (ok < 100 && fl_cmdlog_attempt(j, WHO, "du", &corr, why, sizeof why) == FL_CMDLOG_ALLOW)
         ok++;
     ASSERT(ok > 3 && ok < 100 && strstr(why, "retention") != NULL);
@@ -353,7 +333,6 @@ static int test_bounds_are_enforced(void) {
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, NULL, &lim, &r) == 0); /* the chain spans the segments */
     ASSERT(r.segments == 3 && r.records == (uint64_t)ok && r.open_attempts == (unsigned)ok);
 
-    /* Total bytes. */
     fresh();
     lim.segments_max = 0;
     lim.total_max = 900;
@@ -363,7 +342,6 @@ static int test_bounds_are_enforced(void) {
     while (ok < 100 && fl_cmdlog_attempt(j, WHO, "du", &corr, why, sizeof why) == FL_CMDLOG_ALLOW)
         ok++;
     ASSERT(ok >= 1 && ok < 10 && strstr(why, "total") != NULL);
-    /* One record: a principal over the label bound does not fit. */
     memset(big, 'p', sizeof big - 1);
     big[sizeof big - 1] = '\0';
     fresh();
@@ -392,7 +370,6 @@ static int test_a_failed_attempt_write_refuses(void) {
     ASSERT(fl_kq_storage_memory_files() == 0);
     s_fail_writes = 0;
     fl_cmdlog_close(j);
-    /* No journal at all refuses too. */
     ASSERT(fl_cmdlog_attempt(NULL, WHO, "dir", &corr, why, sizeof why) == FL_CMDLOG_REFUSE);
     ASSERT(why[0] != '\0' && strstr(why, "log") != NULL);
     return 0;
@@ -454,7 +431,6 @@ static int test_a_missing_middle_segment_fails_and_is_never_overwritten(void) {
     ASSERT(fl_cmdlog_open(&c, &j, &r) == FL_CMDLOG_OPEN_ERROR && j == NULL && r.status == FL_CMDLOG_V_GAP);
     ASSERT(seg_read(2, &after, &na) == 0 && na == nb && memcmp(before, after, nb) == 0); /* untouched */
     s_hidden = NULL;
-    /* A journal larger than the retention bound the reader was given is not "OK" either. */
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, NULL, &one, &r) == -1 && r.status == FL_CMDLOG_V_GAP);
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, NULL, &k_small, &r) == 0 && r.records == 24);
     mem_domain_free(MEM_DOMAIN_FS, before);
@@ -496,7 +472,6 @@ static int test_a_torn_tail_is_dropped_across_a_segment_roll(void) {
     return 0;
 }
 
-/* A backend that is not atomic: a failed write leaves half a record behind. */
 static int test_a_failed_partial_write_is_rewritten(void) {
     fl_cmdlog_config_t c = config(&s_failing, &k_small);
     fl_cmdlog_t *j = NULL;
@@ -531,11 +506,9 @@ static int test_another_journal_device_or_key_is_foreign(void) {
 
     fresh();
     ASSERT(build(mem(), 2, NULL) == 0);
-    /* Key: a second key the verifier knows can neither extend nor pass as this journal. */
     c.signer = &s_signer_b;
     ASSERT(fl_cmdlog_open(&c, &j, &r) == FL_CMDLOG_OPEN_ERROR && j == NULL && r.status == FL_CMDLOG_V_FOREIGN);
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer_b, NULL, NULL, &r) == -1 && r.status == FL_CMDLOG_V_FOREIGN);
-    /* Device. */
     c = config(mem(), NULL);
     memset(c.device_id, 0xd2, sizeof c.device_id);
     memset(other, 0xd2, sizeof other);
@@ -543,7 +516,6 @@ static int test_another_journal_device_or_key_is_foreign(void) {
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, other, NULL, &r) == -1 && r.status == FL_CMDLOG_V_FOREIGN);
     memset(other, 0xd1, sizeof other);
     ASSERT(fl_cmdlog_verify(mem(), DIR_, &s_signer, other, NULL, &r) == 0 && r.records == 4);
-    /* Journal id: another journal's (validly signed, same key and device) segment spliced in. */
     c = config(mem(), NULL);
     c.dir = "/other";
     ASSERT(fl_cmdlog_open(&c, &j, NULL) == FL_CMDLOG_OPEN_OK && run_one(j, "dir", 0) == 0);
@@ -556,7 +528,6 @@ static int test_another_journal_device_or_key_is_foreign(void) {
     return 0;
 }
 
-/* A record re-signed with the right key but a wrong prev_hash: the chain, not the signature, fails. */
 static int test_a_broken_chain_is_detected(void) {
     fl_cmdlog_report_t r;
     uint8_t *d = NULL;

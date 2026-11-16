@@ -1,18 +1,4 @@
-/**
- * **P3-13 — Session wire vocabulary** (normative constants + file-session routing).
- *
- * **Distribution:** one **TCP** byte stream carries length-prefixed **frames**.
- * All multi-byte wire fields are **big-endian (network byte order)** unless noted.
- * Application payloads are UTF-8 unless a future **flags** bit says otherwise.
- * File-transfer frames reuse the same header and channel as chat control traffic;
- * the P3 -> P5 include is an intentional cross-layer seam so packet routing,
- * storage disposition, and command rendering use the same native payload model.
- * Payload layout is in **P5-6** (**contract_p5_file_delivery.h**) and **docs/SERVER.md**.
- * Encode/decode of FILE_* payloads lives in **contract_p3_packet.h**.
- *
- * **Implementation:** **net_server.c** / **cmd_server.c** are **not** part of the
- * network-prep train; this shard exists so contracts and docs stay aligned.
- */
+/* All multi-byte wire fields are big-endian; payloads are UTF-8 unless a flags bit says otherwise. */
 #ifndef FL_CONTRACT_P3_SESSION_WIRE_H
 #define FL_CONTRACT_P3_SESSION_WIRE_H
 
@@ -21,25 +7,20 @@
 #include <stdint.h>
 
 #define FL_CONTRACT_P3_13_SESSION_WIRE_CONTRACT_DEFINED 1
-/* Session wire contract: opcodes and frame limits for the networking session. */
 
-/** v1 magic octet (**'F'**). */
 #define FL_NET_SESSION_MAGIC 0x46u
 #define FL_NET_SESSION_VERSION 1u
 
-/** Frame header size: magic, version, opcode, flags, length_be (2). */
+/* Frame header: magic, version, opcode, flags, length_be (2). */
 #define FL_NET_SESSION_HDR_LEN 6u
 
-/** UDP LAN discovery port — server beacon and reverse-dial join-requests. */
 #define FL_NET_SERVER_DISCOVERY_PORT 7779u
 
-/** Magic bytes for the discovery UDP frame (4 bytes: 'F','L','B','C'). */
 #define FL_NET_DISCOVERY_MAGIC_0 0x46u
 #define FL_NET_DISCOVERY_MAGIC_1 0x4Cu
 #define FL_NET_DISCOVERY_MAGIC_2 0x42u
 #define FL_NET_DISCOVERY_MAGIC_3 0x43u
 
-/** Discovery opcodes (byte 4 of the UDP frame). */
 #define FL_NET_DISCOVERY_OP_BEACON    0x01u  /* server → LAN broadcast */
 #define FL_NET_DISCOVERY_OP_JOIN_REQ  0x02u  /* client → server: please dial back */
 
@@ -55,31 +36,24 @@
 #define FL_NET_SESSION_INBOUND_RING 32u
 #endif
 
-/** Opcodes — chat control plane (v1). */
 #define FL_NET_SESSION_OP_HELLO 0x01u
 #define FL_NET_SESSION_OP_HELLO_ACK 0x02u
-/** Host snapshot or reply: member list for server connected (ids + principals + host nick). */
 #define FL_NET_SESSION_OP_MEMBER_LIST 0x03u
-/** Host to member: principal collision; optional nickname requested (see docs/SERVER.md). */
 #define FL_NET_SESSION_OP_NICK_PROMPT 0x04u
 #define FL_NET_SESSION_OP_MSG 0x10u
 #define FL_NET_SESSION_OP_MSG_BROADCAST 0x11u
 #define FL_NET_SESSION_OP_MSG_DIRECT 0x12u
 #define FL_NET_SESSION_OP_MSG_DIRECT_DELIVER 0x13u
-/** In-flight message sidecar (same layout as FILE_META / fl_channel_sidecar_t). */
 #define FL_NET_SESSION_OP_MSG_META 0x14u
 
 #define FL_NET_SESSION_OP_CTRL_LEAVE 0x20u
 #define FL_NET_SESSION_OP_CTRL_KILL 0x21u
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE 0x22u
-/** Host sets a host-global nickname for member_id (visible to all; target -user nick). */
 #define FL_NET_SESSION_OP_HOST_NICK_SET 0x23u
-/** IPv6 host transfer (#283 / #280); payload [u16 id][16 ipv6_be][u16 port]. */
 #define FL_NET_SESSION_OP_CTRL_HOST_PROMOTE6 0x24u
 #define FL_NET_SESSION_CTRL_HOST_PROMOTE_PAYLOAD_LEN  8u
 #define FL_NET_SESSION_CTRL_HOST_PROMOTE6_PAYLOAD_LEN 20u
 
-/** File-transfer opcodes — same session frame header as chat (v1 extension). */
 #define FL_NET_SESSION_OP_FILE_FIRST    0x30u
 #define FL_NET_SESSION_OP_FILE_OFFER    0x30u
 #define FL_NET_SESSION_OP_FILE_CHUNK    0x31u
@@ -89,16 +63,10 @@
 #define FL_NET_SESSION_OP_FILE_REVOKE   0x35u
 #define FL_NET_SESSION_OP_FILE_LIST     0x36u
 #define FL_NET_SESSION_OP_FILE_STATUS   0x37u
-/** In-flight share sidecar (fl_channel_sidecar_t); stripped before final delivery. */
 #define FL_NET_SESSION_OP_FILE_META     0x38u
 #define FL_NET_SESSION_OP_FILE_LAST     0x38u
 
-/**
- * KeyQuorum co-signed delivery (contracts/drivers/contract_p4_keyquorum.h). A sealed letter
- * travels as KQ_PART frames: [id 16][offset u32 BE][bytes]. Every other frame starts with the
- * 16-byte delivery id. The host verifies signatures against its own account registry; a
- * member's self-asserted principal decides nothing.
- */
+/* The host verifies signatures against its own account registry; a member's self-asserted principal decides nothing. */
 #define FL_NET_SESSION_OP_KQ_FIRST    0x39u
 #define FL_NET_SESSION_OP_KQ_PART     0x39u /* letter bytes, either direction               */
 #define FL_NET_SESSION_OP_KQ_OFFER    0x3Au /* sender -> host: public offer, letter length   */
@@ -110,7 +78,6 @@
 #define FL_NET_SESSION_OP_KQ_KEYS     0x3Fu /* public keys from the host registry            */
 #define FL_NET_SESSION_OP_KQ_LAST     0x3Fu
 
-/** WiFi 802.11ax L2 emulation over session wire (#279 lab; server host/join). */
 #define FL_NET_SESSION_OP_WIFI_FIRST       0x40u
 #define FL_NET_SESSION_OP_WIFI_SAE_COMMIT  0x40u
 #define FL_NET_SESSION_OP_WIFI_SAE_CONFIRM 0x41u
@@ -120,26 +87,19 @@
 #define FL_NET_SESSION_OP_WIFI_AUTH_DONE   0x45u
 #define FL_NET_SESSION_OP_WIFI_LAST        0x45u
 
-/**
- * KeyQuorum history download (second KeyQuorum range, routed to the same hook as KQ_*).
- * REQ: [request id 16][delivery id 16]. DATA: [request id 16][offset u32 BE][total u32 BE][bytes <= 480];
- * the bytes are the history bundle (kq_history_bundle.h): two complete KQPB letters, kind 15 then kind 17.
- * 0x52 to 0x5F are left free for the next feature that needs a range (FL-27's ledger frames).
- */
+/* 0x52 to 0x5F are reserved for the next range (FL-27's ledger frames). */
 #define FL_NET_SESSION_OP_KQH_FIRST        0x50u
 #define FL_NET_SESSION_OP_KQH_REQ          0x50u
 #define FL_NET_SESSION_OP_KQH_DATA         0x51u
 #define FL_NET_SESSION_OP_KQH_LAST         0x51u
 
 #define FL_NET_SESSION_OP_KQR_FIRST        0x52u
-/* REPORT: [delivery id 16][len u16 BE][KQER bytes]; best effort, host keeps nothing. */
 #define FL_NET_SESSION_OP_KQR_REPORT       0x52u
 #define FL_NET_SESSION_OP_KQR_LAST         0x52u
 #define FL_KQ_REPORT_FRAME_MAX             480u
 
 #define FL_NET_SESSION_OP_ERR 0x7Fu
 
-/** Local command status for outbound file offers (not a wire opcode). */
 #define FL_SERVER_FILE_STATUS_QUEUED 1u
 #define FL_SERVER_FILE_STATUS_SENT 2u
 #define FL_SERVER_FILE_STATUS_FAILED 3u
@@ -167,12 +127,7 @@ fl_result_t fl_net_session_validate_file_frame(uint8_t opcode,
                                                uint8_t flags,
                                                uint16_t payload_len);
 
-/**
- * Native Flinstone file transfer mirrors `server msg`: public file offers route
- * to every session except the sender, private offers route to one resolved
- * target, and the sender receives local command status rather than a FILE_OFFER
- * event generated by its own command.
- */
+/* Public offers go to every other session, private offers to one target; the sender gets local status, not FILE_OFFER. */
 fl_result_t fl_server_file_resolve_receiver(const char *target_name,
                                             uint16_t explicit_member_id,
                                             uint16_t sender_member_id,
@@ -201,8 +156,7 @@ _Static_assert(FL_NET_SESSION_OP_WIFI_LAST < FL_NET_SESSION_OP_KQH_FIRST &&
                "KeyQuorum history and report opcodes sit above wifi and below the error opcode");
 _Static_assert(16u + 2u + FL_KQ_REPORT_FRAME_MAX <= FL_NET_SESSION_MAX_MSG,
                "KQR_REPORT header plus the largest report must fit one session message");
-/* KQH_DATA: [request id 16][offset u32][total u32][bytes <= 480] must fit one session message. The
- * bundle (kq_history_bundle.h) is bounded at 1 MiB, so its total fits the u32 field. */
+/* KQH_DATA total fits u32: the history bundle is bounded at 1 MiB. */
 _Static_assert(16u + 4u + 4u + 480u <= FL_NET_SESSION_MAX_MSG,
                "KQH_DATA header plus 480 payload bytes must fit one session message");
 _Static_assert((1u << 20) <= 0xFFFFFFFFu, "history bundle bound must fit the u32 total field");

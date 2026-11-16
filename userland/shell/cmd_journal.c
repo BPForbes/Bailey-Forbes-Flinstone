@@ -1,4 +1,3 @@
-/* Signed command log, hosted only: record format, bounds and failure policy are in cmd_journal.h. */
 #include "cmd_journal.h"
 
 #include "cmd_decl.h"
@@ -42,7 +41,6 @@ struct fl_cmdlog {
 static pthread_mutex_t s_reg_mu = PTHREAD_MUTEX_INITIALIZER;
 static fl_cmdlog_t *s_reg_head;
 
-/* ----- Limits, paths, reasons ----- */
 
 static fl_cmdlog_limits_t limits_or_default(const fl_cmdlog_limits_t *in) {
     fl_cmdlog_limits_t l = {0};
@@ -91,7 +89,6 @@ static int sha256(const uint8_t *p, size_t n, uint8_t out[FL_CMDLOG_HASH_LEN]) {
     return SHA256(p, n, out) ? 0 : -1;
 }
 
-/* ----- Parsing (net_codec.h reader) ----- */
 
 typedef struct {
     size_t len;        /* whole record */
@@ -171,7 +168,6 @@ static int parse_record(const uint8_t *p, size_t avail, size_t record_max, rec_t
     return 0;
 }
 
-/* ----- Verify / recover ----- */
 
 typedef struct {
     fl_cmdlog_corr_t *v;
@@ -358,7 +354,6 @@ int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_c
     return walk(storage, dir, signer, &lim, expect_device, report, NULL, NULL);
 }
 
-/* ----- Open / close ----- */
 
 static int reg_add(fl_cmdlog_t *j) {
     int taken = 0;
@@ -472,7 +467,6 @@ void fl_cmdlog_close(fl_cmdlog_t *j) {
     destroy(j);
 }
 
-/* ----- Redaction ----- */
 
 /* Line-mode builtins parsed before argv. TODO: move these names into the shared command registry. */
 static const char *const k_line_builtins[] = {"exit", "clear", "help", "history", "cc", "bios", "make"};
@@ -507,7 +501,6 @@ const char *fl_cmdlog_category(const char *line, char *out, size_t cap) {
     return out;
 }
 
-/* ----- Append ----- */
 
 /* Caller holds j->mu. Adds rec as the next record; 0, or -1 with a reason. */
 static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *reason, size_t cap) {
@@ -659,7 +652,6 @@ out:
     return ret;
 }
 
-/* ----- Caller API ----- */
 
 fl_cmdlog_decision_t fl_cmdlog_attempt(fl_cmdlog_t *j, const char *principal, const char *line,
                                        fl_cmdlog_corr_t *corr, char *reason, size_t reason_cap) {

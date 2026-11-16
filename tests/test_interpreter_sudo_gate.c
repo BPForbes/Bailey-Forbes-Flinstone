@@ -1,12 +1,5 @@
-/*
- * The sudo window's signing gate runs before every builtin.
- *
- * Inside the window every command is an elevated action signed by Root's key and the account's
- * (cmd_sudo_sign_elevated). The test links the shell's interpreter with the gate wrapped
- * (-Wl,--wrap=cmd_sudo_sign_elevated) and records each call: every command, early handlers
- * (help, history, make, ...) included, passes through the gate once; a sudo is left to its own
- * signing path (cmd_sudo_sign_action) and a blank line signs nothing.
- */
+/* Every builtin passes the sudo window's signing gate once (cmd_sudo_sign_elevated, wrapped with -Wl,--wrap). */
+/* A sudo signs through cmd_sudo_sign_action; a blank line signs nothing. */
 #include "interpreter.h"
 #include <dirent.h>
 #include <stdio.h>
@@ -48,25 +41,20 @@ int main(void) {
         perror("test_interpreter_sudo_gate: temp dir");
         return 1;
     }
-    /* make reads the file's lines from stdin: an empty stdin ends it at once. */
     if (!freopen("/dev/null", "r", stdin)) {
         perror("test_interpreter_sudo_gate: stdin");
         return 1;
     }
 
-    /* The early handlers: each line is signed before the handler runs. */
     expect_gate("help", 1);
     expect_gate("history", 1);
     expect_gate("make gate_made.txt", 1);
     expect_gate("clear", 1);
-    /* A command dispatched after tokenizing is signed once. */
     expect_gate("version -n", 1);
-    /* A sudo signs through its own path, however its first word is written; a blank line signs nothing. */
     expect_gate("sudo -k", 0);
     expect_gate("\"sudo\" -k", 0);
     expect_gate("   ", 0);
 
-    /* The shell's history file and the file make created live in the temp dir: remove them with it. */
     d = opendir(dir);
     while (d && (e = readdir(d)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)

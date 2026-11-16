@@ -49,14 +49,12 @@ assert.deepStrictEqual(parseGuestLine("SERVER_RELAY announce hi"), { type: "serv
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY kill"), { type: "server", op: "kill" });
 assert.deepStrictEqual(parseGuestLine("SERVER_RELAY dns example.com"), { type: "dns", host: "example.com" });
 assert.strictEqual(parseGuestLine("WHOAMI flinstone"), null);
-// Sending a file: the guest's SERVER_FILE line becomes a file event with its bytes.
 const fileEvent = parseGuestLine("SERVER_FILE bob note.txt 686920626f62\r");
 assert.deepStrictEqual({ ...fileEvent, bytes: Array.from(fileEvent.bytes) },
                        { type: "file", to: "bob", name: "note.txt", bytes: Array.from(new TextEncoder().encode("hi bob")) });
 assert.strictEqual(parseGuestLine("SERVER_FILE bob note.txt 6"), null, "odd hex is not a file");
 assert.strictEqual(parseGuestLine("SERVER_FILE bob note.txt 6G"), null);
 assert.strictEqual(bytesToHex(hexToBytes("00ff10")), "00ff10");
-// Receiving one: typed into the guest in parts that fit its 128-character line.
 const big = new Uint8Array(150).fill(0x61);
 const recv = fileRecvLines("alice", "got.txt", big).split("\n").filter(Boolean);
 assert.strictEqual(recv[0], "filerecv begin alice got.txt");
@@ -65,7 +63,6 @@ assert(recv.every(line => line.length < 128), "every line fits the guest's buffe
 assert.strictEqual(recv.slice(1, -1).map(l => l.slice("filerecv data ".length)).join(""), bytesToHex(big));
 assert.strictEqual(fileRecvLines("alice", "../evil", big), "", "a path is never typed into the guest");
 assert.strictEqual(fileRecvLines("a b", "got.txt", big), "");
-// Accepting: waiting files are typed only in answer to `server file accept`.
 assert.deepStrictEqual(parseGuestLine("SERVER_FILE_ACCEPT\r"), { type: "file-accept" });
 assert.deepStrictEqual(parseGuestLine("SERVER_FILE_DECLINE"), { type: "file-decline" });
 assert.strictEqual(fileAcceptLines([]), "filerecv none\n");
@@ -79,7 +76,6 @@ assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
 {
-  // switchuser follows su: own account free, another account asks its password.
   // Passwords are drawn at run time; a secret step is only ever the answer to Password:.
   const draw = () => require("crypto").randomBytes(9).toString("hex");
   const pw = draw(), rootPw = draw();
@@ -333,9 +329,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
   await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
-  // A password exchange owns the guest from its command until its
-  // password is sent. A fake guest takes the next line after Password: as that prompt's answer,
-  // so two exchanges that cross would hand one account's password to the other's prompt.
+// A password exchange owns the guest until its password is sent; crossed exchanges would leak one password.
   {
     const fakeGuest = () => {
       const guest = { out: "", prompt: null, answers: {}, commands: [], waiters: [] };
@@ -359,7 +353,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
       });
       return guest;
     };
-    // The page's exchange: the command, then the password only once Password: has appeared.
     const exchange = async (guest, name, password) => {
       const from = guest.out.length;
       await guest.send(`switchuser ${name}`);
@@ -376,18 +369,15 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     ]);
     assert.deepStrictEqual(guest.answers, { Ada: pwA, Root: pwB }, "each password answers its own prompt");
     assert.deepStrictEqual(guest.commands, ["switchuser Ada", "switchuser Root"], "no password is typed as a command");
-    // Control: without the queue the same two exchanges cross (the test can see the bug).
     const loose = fakeGuest();
     void exchange(loose, "Ada", pwA);
     void exchange(loose, "Root", pwB);
     await new Promise(r => setTimeout(r, 20));
     assert.strictEqual(loose.answers.Ada, "switchuser Root", "unserialized exchanges cross");
-    // A turn that throws releases the guest for the next one.
     const order = [];
     await assert.rejects(lock.run(async () => { order.push(1); throw new Error("guest gone"); }), /guest gone/);
     await lock.run(async () => { order.push(2); });
     assert.deepStrictEqual(order, [1, 2]);
-    // lab.js routes every person-sent input through the exchange owner.
     assert(/function sendGuestLines\(script, patterns\) \{\s*return guestExchange\.run\(\(\) => driveGuestLines\(script, patterns\)\);/.test(labJs),
       "sendGuestLines must hold the exchange for the whole script");
     assert(labJs.includes("guestExchange.run(() => enqueueGuest(() => emulator.typeChar(ch)))"), "keystrokes wait for the exchange");
@@ -396,18 +386,13 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     assert.strictEqual((accountJs.match(/await guestExchange\.run\(/g) || []).length, 3, "Switch, New session and Register each take one exchange turn");
     assert(!/[^.]sendGuestLines\(/.test(accountJs), "account actions drive their steps inside their own turn");
   }
-  // A reply the guest asked for (dnsack, file lines) goes out
-  // at once through the byte queue, so it can reach an exchange's Password: prompt first. The
-  // password must then not be sent, or the shell would take it as a command (echoed, in history).
-  // This fake guest echoes a command as typed and a password as *, like the shell, and prints the
-  // result of a password a moment after the echo.
+  // A reply the guest asked for goes out first, so the password never reaches a dnsack prompt.
   {
     const drawPw = () => require("crypto").randomBytes(9).toString("hex");
     const echoGuest = (accounts, staleFor) => {
       const g = { out: "", prompt: staleFor || null, late: Boolean(staleFor), answers: {}, commands: [], waiters: [] };
       const flush = () => g.waiters.splice(0).forEach(w => w());
       const tick = () => new Promise(r => setImmediate(r));
-      // write() resolves once the line is delivered, as sendText does; the guest answers after.
       let chain = Promise.resolve();
       g.write = value => {
         chain = chain.then(() => answer(value));
@@ -453,7 +438,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     };
     const pw = drawPw();
     const dnsack = "dnsack example.lab 10.0.0.5";
-    // Plain switch: the password answers its own prompt.
     {
       const g = echoGuest({ Ada: pw });
       const r = await run(g, createGuestInput(), guestSwitchLines("Ada", pw, "Flinstone"));
@@ -461,7 +445,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
       assert.deepStrictEqual(g.answers, { Ada: pw });
       assert.deepStrictEqual(g.commands, ["switchuser Ada"]);
     }
-    // A dnsack reaches the prompt first: the password is not sent.
     {
       const g = echoGuest({ Ada: pw });
       const input = createGuestInput();
@@ -472,7 +455,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
       assert(!g.commands.includes(pw), "the password must not be typed as a command");
       assert(/Other input reached the guest/.test(r.statuses.join("\n")));
     }
-    // Control (secret sent whatever else went first): the password is typed as a command.
     {
       const g = echoGuest({ Ada: pw });
       const input = createGuestInput();
@@ -481,8 +463,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
         () => { void input.send(() => g.write(`${dnsack}\n`)); });
       assert(g.commands.includes(pw), "control: without the guard the password becomes a command");
     }
-    // A late Password: from an earlier, abandoned exchange: it takes this command as its answer
-    // and shows no echo of it, so this exchange does not send its password.
     {
       const rootPw = drawPw();
       const g = echoGuest({ Ada: pw, Root: rootPw }, "Ada");
@@ -495,7 +475,6 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     assert.strictEqual(promptAfterEcho("switchuser Root\r\nPassword:", "switchuser Root"), true);
     assert.strictEqual(promptAfterEcho("Password:***************\r\n", "switchuser Root"), false);
     assert.strictEqual(promptAfterEcho("Password:switchuser Root\r\n", "switchuser Root"), false);
-    // A send counts even when the guest is mid-exchange; sendIfLast checks and sends in one turn.
     {
       const input = createGuestInput();
       const first = await input.send(() => {});

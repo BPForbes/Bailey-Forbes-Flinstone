@@ -1,7 +1,6 @@
 #ifndef FL_FREESTANDING_BOOTMAP_H
 #define FL_FREESTANDING_BOOTMAP_H
 #include <stdint.h>
-/* Boot memory map: picks the heap arena from the E820 map. Pure C, no hardware access. */
 
 #define FL_E820_USABLE 1u
 #define FL_E820_ATTR_ENABLED 1u

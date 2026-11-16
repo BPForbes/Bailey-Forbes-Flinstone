@@ -1,8 +1,4 @@
-/**
- * Property-style tests for mem_asm vs libc (memcpy/memset).
- * Build: make test_mem_asm
- * Run with -fsanitize=address,undefined when not using ASM allocator.
- */
+/* mem_asm against libc memcpy/memset over every alignment and length. */
 #include "mem_asm.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +48,6 @@ static int test_block_fill_vs_memset(void) {
 
 static int test_mem_secure_zero_vs_memset(void) {
     char buf1[256], buf2[256], buf3[256];
-    /* Every start alignment: the child runs its parent's qword and byte paths. */
     for (int off = 0; off < 8; off++) {
         for (int n = 0; n <= 128; n++) {
             memset(buf1, 0x5C, sizeof(buf1));
@@ -75,7 +70,6 @@ static int test_mem_ct_equal_vs_memcmp(void) {
     ASSERT(asm_mem_ct_equal(a, b, 0) == 1);
     for (int n = 1; n <= 128; n++) {
         ASSERT(asm_mem_ct_equal(a, b, (size_t)n) == 1);
-        /* Every position, every single-bit difference, is caught. */
         for (int pos = 0; pos < n; pos++) {
             for (int bit = 0; bit < 8; bit++) {
                 b[pos] ^= (unsigned char)(1u << bit);
@@ -93,8 +87,7 @@ static int test_mem_ct_equal_vs_memcmp(void) {
     return 0;
 }
 
-/* Equality the key and storage paths rely on: every start alignment, every length across the
- * qword/byte boundary, a single differing bit anywhere (first, middle, last byte) is unequal. */
+/* Key and storage equality: every alignment and length; a one-bit difference anywhere is unequal. */
 static int test_mem_ct_equal_alignments(void) {
     unsigned char a[160], b[160];
     for (int i = 0; i < 160; i++) a[i] = b[i] = (unsigned char)(i * 7 + 3);

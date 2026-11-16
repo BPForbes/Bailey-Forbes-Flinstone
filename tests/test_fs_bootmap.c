@@ -1,9 +1,4 @@
-/*
- * Freestanding boot memory map: fl_bootmap_select_arena picks the KeyQuorum heap arena from an E820
- * map. Then fl_bootinfo_validate, the kernel's check of stage 2's handoff; that bootinfo.inc (the
- * loader's copy of the layout) agrees with bootinfo.h; and the KeyQuorum heap (kq_heap.c) over an
- * arena of its own.
- */
+/* Boot memory map to arena selection, bootinfo validation and the KeyQuorum heap. */
 #include "bootinfo.h"
 #include "bootmap.h"
 #include "kq_heap.h"
@@ -46,7 +41,6 @@ static int test_qemu_map(void)
 
     ASSERT(pick(k_qemu64, 6, k_low_res, 3, &k_limits, &b, &s) == FL_BOOTMAP_OK);
     ASSERT(b == 0x100000 && s == 0x3ee0000);
-    /* 32 MiB of RAM cannot hold a 40 MiB arena: refused, nothing written. */
     {
         fl_e820_entry_t small[6];
 
@@ -75,7 +69,6 @@ static int test_overlapping_usable_join(void)
     const fl_e820_entry_t e[] = { E(8 * MIB, 40 * MIB, 1), E(MIB, 9 * MIB, 1), E(48 * MIB, 4 * MIB, 1) };
     uint64_t b, s;
 
-    /* [1, 10) and [8, 48) overlap, [48, 52) touches: one span [1, 52) MiB. */
     ASSERT(pick(e, 3, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
     ASSERT(b == MIB && s == 51 * MIB);
     return 0;
@@ -83,7 +76,6 @@ static int test_overlapping_usable_join(void)
 
 static int test_reserved_entry_wins_overlap(void)
 {
-    /* The reserved entry is listed first and overlaps the usable one: it is never in the arena. */
     const fl_e820_entry_t e[] = { E(30 * MIB, MIB, 2), E(MIB, 63 * MIB, 1) };
     fl_bootmap_limits_t lim = k_limits;
     uint64_t b, s;
@@ -102,9 +94,7 @@ static int test_reservation_splits_region(void)
     const fl_boot_range_t kernel[] = { { MIB, 2 * MIB } };
     uint64_t b, s;
 
-    /* Split into 24 + 38 MiB: neither half holds 40 MiB, and the halves are never joined. */
     ASSERT(pick(e, 1, mid, 1, &k_limits, &b, &s) == FL_BOOTMAP_E_NOFIT);
-    /* A kernel loaded at 1 MiB pushes the arena above it. */
     ASSERT(pick(e, 1, kernel, 1, &k_limits, &b, &s) == FL_BOOTMAP_OK);
     ASSERT(b == 2 * MIB && s == 62 * MIB);
     return 0;
@@ -136,7 +126,6 @@ static int test_zero_length_and_disabled_ignored(void)
 
     ASSERT(pick(e, 5, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
     ASSERT(b == MIB && s == 63 * MIB);
-    /* Only zero-length or disabled memory: nothing to use. */
     ASSERT(pick(e + 1, 4, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_E_NOFIT);
     return 0;
 }
@@ -170,7 +159,6 @@ static int test_alignment_and_map_limit(void)
     const fl_e820_entry_t e[] = { E(MIB + 1, 4ull << 30, 1) };
     uint64_t b, s;
 
-    /* Starts on 4 KiB and stops at the 1 GiB identity map. */
     ASSERT(pick(e, 1, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
     ASSERT(b == MIB + 4096 && s == (1ull << 30) - b);
     ASSERT((b & 4095) == 0 && b + s <= (1ull << 30));
@@ -179,7 +167,6 @@ static int test_alignment_and_map_limit(void)
 
 static int test_below_min_base_excluded(void)
 {
-    /* All usable memory below 1 MiB (or above the map limit): nothing for the arena. */
     const fl_e820_entry_t e[] = { E(0, 0x9fc00, 1), E(2ull << 30, 1ull << 30, 1) };
     fl_bootmap_limits_t lim = k_limits;
     uint64_t b, s;
@@ -189,20 +176,17 @@ static int test_below_min_base_excluded(void)
     return 0;
 }
 
-/* ---- boot info -------------------------------------------------------------------------- */
 
 #define K_START 0x10000ull
 #define K_BSS 0x81a00ull
 #define K_END 0x97160ull
 
-/* The struct and its E820 buffer, side by side as stage 2 lays them out (at host addresses here). */
 static struct {
     fl_boot_info_t bi;
     fl_e820_entry_t map[FL_BOOTINFO_E820_CAP];
 } s_low;
 
-/* A handoff as stage 2 writes it: the same seven reservations (stage2.asm `reserved`), with the
- * boot-info block's range moved to the host buffer that stands in for 0x510-0x1000. */
+/* Stage 2's handoff layout; the boot-info block sits in a host buffer standing in for 0x510-0x1000. */
 static void good_info(fl_boot_info_t *bi)
 {
     memset(&s_low, 0, sizeof s_low);
@@ -265,10 +249,8 @@ static int test_bootinfo_validate(void)
     BAD(bi.reserved[1].end -= 24, FL_BOOTMAP_E_INVAL);                 /* E820 buffer not reserved */
     BAD(bi.reserved[1].base += 8, FL_BOOTMAP_E_INVAL);                 /* boot info not reserved */
     BAD((bi.reserved_count = 8, bi.reserved[7] = (fl_boot_range_t){ 9, 9 }), FL_BOOTMAP_E_INVAL);
-    /* A full map (count == capacity) is whole: stage 2 flags truncation only for an entry past it. */
     BAD(bi.e820_count = FL_BOOTINFO_E820_CAP, FL_BOOTMAP_OK);
 #undef BAD
-    /* The validated map feeds arena selection as the kernel does it. */
     good_info(&bi);
     {
         uint64_t b, s;
@@ -356,7 +338,6 @@ static int test_full_buffer(void)
     static fl_e820_entry_t e[CAP];
     uint64_t b, s;
 
-    /* CAP - 1 small regions split by reserved gaps, then one large region last. */
     for (uint32_t i = 0; i + 1 < CAP; i++)
         e[i] = (fl_e820_entry_t)E(MIB + i * 2 * 4096, 4096, (i & 1) ? 2u : 1u);
     e[CAP - 1] = (fl_e820_entry_t)E(64 * MIB, 48 * MIB, 1);
@@ -378,7 +359,6 @@ static int test_equal_spans_lowest_wins(void)
 
 static int test_other_types_block(void)
 {
-    /* ACPI reclaimable (3), ACPI NVS (4), bad memory (5) and an unknown type all block. */
     const uint32_t types[] = { 3, 4, 5, 12 };
 
     for (size_t i = 0; i < sizeof types / sizeof types[0]; i++) {
@@ -391,7 +371,6 @@ static int test_other_types_block(void)
     return 0;
 }
 
-/* ---- KeyQuorum heap (kq_heap.c) ------------------------------------------------------------ */
 
 static int all_zero(const unsigned char *p, size_t n)
 {
@@ -433,7 +412,6 @@ static int test_kq_heap(void)
     ASSERT(all_zero(c, 300));
     fl_kq_heap_free(NULL);
 
-    /* Two 20 MiB blocks fit; after both are freed the arena coalesces and 40 MiB fits again. */
     a = fl_kq_heap_alloc(20 * MIB, 16);
     c = fl_kq_heap_alloc(20 * MIB, 16);
     ASSERT(a && c && fl_kq_heap_alloc(2 * MIB, 16) == NULL);

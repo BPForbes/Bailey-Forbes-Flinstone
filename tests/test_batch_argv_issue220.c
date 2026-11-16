@@ -1,9 +1,4 @@
-/**
- * Issue #219 / #220 / #234: batch token arity helpers and sh.c clamp integration.
- * Each cmd_*.c object is built with -ffunction-sections so only *_batch_tokens_count
- * is linked (not cmd_*_run). Ping/check helpers are dispatched only from
- * fl_shell_cmd_batch_tokens_count() in cmd_batch_dispatch.c (see cmd_decl.h).
- */
+/* Batch token arity helpers (issue #220) and sh.c clamp integration. */
 #include "cmd_decl.h"
 #include "cmd_batch.h"
 #include <stdio.h>
@@ -123,8 +118,6 @@ static int test_issue204_batch_clamp_login_sudo_su(void) {
     return 0;
 }
 
-/* bridge: list, request/accept/revoke take one argument, and kq-import takes a store, a uid and an
- * optional --roster-only, never reading into the next shell command. */
 static int test_bridge_batch_tokens(void) {
     char *only[] = {"p", "bridge"};
     ASSERT(cmd_bridge_batch_tokens_count(2, only, 1) == 1);
@@ -148,7 +141,6 @@ static int test_bridge_batch_tokens(void) {
     char *kq_next2[] = {"p", "bridge", "kq-import", "store.sqlite", "whoami"};
     ASSERT(cmd_bridge_batch_tokens_count(5, kq_next2, 1) == 3);
 
-    /* assembly takes a parent and an optional --reissue, never reading into the next shell command. */
     char *as[] = {"p", "bridge", "assembly", "Mgr", "whoami"};
     ASSERT(cmd_bridge_batch_tokens_count(5, as, 1) == 3);
     char *as_re[] = {"p", "bridge", "assembly", "Mgr", "--reissue", "whoami"};

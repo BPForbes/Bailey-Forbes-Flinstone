@@ -1,10 +1,4 @@
-/*
- * Freestanding identity: with no KeyQuorum ops the account's own password check is used. With ops
- * installed, login, su and sudo ask unlock, passwd re-seals and userdel forgets. switch_allowed is
- * optional: left NULL, switchuser to another account still needs that account's password (as su);
- * when it refuses, sudo -i still enters Root.
- * Passwords are drawn at run time.
- */
+/* Freestanding identity: login, su and sudo go through the KeyQuorum ops when installed. */
 #include "identity.h"
 #include "tests/kq_test_util.h"
 
@@ -116,7 +110,6 @@ static int test_plaintext_then_sealed(void) {
     fl_fs_identity_set_kq(NULL);
     fl_fs_identity_init();
 
-    /* No ops: a drawn password is the account's own check, and unlock is not called. */
     ASSERT(fl_fs_identity_switchuser(0, "Root", NULL) == 0); /* another account: password needed */
     ASSERT(strcmp(fl_fs_identity_user(0), "Flinstone") == 0);
     ASSERT(fl_fs_identity_switchuser(0, "flinstone", NULL) == 1); /* its own account is free */
@@ -135,7 +128,6 @@ static int test_plaintext_then_sealed(void) {
     ASSERT(fl_fs_identity_login(0, "Ada", wrong) == 0);
     ASSERT(strcmp(fl_fs_identity_user(0), "Ada") == 0);
 
-    /* Ops installed before the accounts are seeded: login goes through unlock. */
     memset(s_held, 0, sizeof s_held);
     fl_fs_identity_set_kq(&s_ops);
     fl_fs_identity_init();
@@ -145,7 +137,6 @@ static int test_plaintext_then_sealed(void) {
     unlocks_before = s_unlocks;
     ASSERT(fl_fs_identity_useradd(0, "Ada", pw) == 1);
     ASSERT(held_find("Ada") != NULL);
-    /* With ops, the switch password is checked through unlock too. */
     unlocks_before = s_unlocks;
     ASSERT(fl_fs_identity_switchuser(0, "Ada", pw) == 1);
     ASSERT(s_unlocks > unlocks_before);
@@ -159,15 +150,13 @@ static int test_plaintext_then_sealed(void) {
     fl_fs_identity_sudo_k(0);
     ASSERT(fl_fs_identity_sudo(0, wrong) == 0);
 
-    /* After passwd, only the new password opens the seal. */
     ASSERT(kq_test_random_hex(next, 8) == 0);
     ASSERT(strcmp(pw, next) != 0);
     ASSERT(fl_fs_identity_passwd(0, NULL, next) == 1);
     ASSERT(fl_fs_identity_login(0, "Ada", pw) == 0);
     ASSERT(fl_fs_identity_login(0, "Ada", next) == 1);
 
-    /* switch_allowed may refuse, even with Root's right password (the seeded "root", which
-     * unlock accepts). sudo -i does not ask it. */
+/* switch_allowed may refuse even with the right Root password; sudo -i does not ask it. */
     ASSERT(test_unlock("Root", "root") == 1);
     fl_fs_identity_set_kq(&s_ops_closed);
     ASSERT(fl_fs_identity_switchuser(0, "Root", "root") == 0);
@@ -175,7 +164,6 @@ static int test_plaintext_then_sealed(void) {
     ASSERT(fl_fs_identity_enter_root(0) == 1);
     ASSERT(strcmp(fl_fs_identity_user(0), "Root") == 0);
 
-    /* With no forget op, userdel refuses a sealed account and leaves it whole. */
     fl_fs_identity_set_kq(&s_ops_noforget);
     ASSERT(fl_fs_identity_userdel(0, "Ada") == 0);
     ASSERT(fl_fs_identity_has_user("Ada") == 1);
@@ -193,7 +181,6 @@ static int test_plaintext_then_sealed(void) {
             forgotten += s_held[i].forgotten;
         ASSERT(forgotten == 1);
     }
-    /* The key went with the account, so the name can be registered again. */
     ASSERT(fl_fs_identity_useradd(0, "Ada", next) == 1);
     ASSERT(held_find("Ada") != NULL);
     return 0;

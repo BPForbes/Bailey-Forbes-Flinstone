@@ -1,8 +1,4 @@
-/*
- * The KeyQuorum key service (FL-20, absorbs FL-24): online through a login, offline at logout, no key for
- * `su`, a thread that cannot be cancelled or signalled, protected work that is never dropped, a heartbeat
- * the watchdog reads, the control op refused for everyone, and the periodic sweep.
- */
+/* The KeyQuorum key service: online through a login, offline at logout, no key for su, never dropped under load. */
 #include <sys/resource.h>
 #include "kq_service.h"
 
@@ -40,7 +36,6 @@
 
 #define ASSERT(c) do { if (!(c)) { fprintf(stderr, "FAIL [%s:%d]: %s\n", __FILE__, __LINE__, #c); return 1; } } while (0)
 
-/* bg_jobs.c ticks the network background; this test has no network core. */
 void fl_net_background_init(void) {}
 void fl_net_background_shutdown(void) {}
 void fl_net_background_tick(unsigned max_items) { (void)max_items; }
@@ -61,8 +56,7 @@ static void blocking_job(void *ctx) {
     sem_wait(&s_hold);
 }
 
-/* A barrier on the service thread: it runs after the job the thread is in now, so once it returns nothing
- * of that job is still in flight. */
+/* A barrier on the service thread: once it returns, nothing of the job it waited behind is in flight. */
 static sem_t s_barrier;
 static void barrier_job(void *ctx) { (void)ctx; sem_post(&s_barrier); }
 static int service_barrier(void) {
@@ -82,8 +76,7 @@ static const fl_user_record_t *account(const char *name) {
     return fl_user_db_find(fl_session_user_db(), name);
 }
 
-/* Remove the token the kernel may have made for name at an earlier sign-in, and its pairing: a test
- * of a token-mode account that has no token. */
+/* Removes any token the kernel made for name earlier; a test of a token-mode account with no token. */
 static void drop_token(const char *name) {
     const fl_user_record_t *u = account(name);
     fl_user_kqst_row_t none;
@@ -119,7 +112,6 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     ASSERT(mode == KQ_SIGNING_OWN && memcmp(key, expect, 32) == 0);
     ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES); /* only the signed-in account */
 
-    /* su without a password opens no key; restoring the original account keeps its key (su -c). */
     ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
     ASSERT(fl_kq_service_online_count() == 1);
     ASSERT(fl_kq_obtain_author_key(root->key_id, key, &mode) == FL_RESULT_ACCES);
@@ -135,8 +127,7 @@ static int test_login_brings_the_key_online_and_logout_wipes_it(void) {
     return 0;
 }
 
-/* The resident keys are locked in RAM: the process's locked size (VmLck) covers them whenever the service
- * reports the lock, and a refused lock (no RLIMIT_MEMLOCK room) is reported, never silent. */
+/* Resident keys are locked in RAM (VmLck); a refused lock is reported, never silent. */
 static long vm_locked_kb(void) {
     FILE *f = fopen("/proc/self/status", "r");
     char line[256];
@@ -214,8 +205,7 @@ static int test_kqst_login_commits_only_after_token_open(void) {
     return 0;
 }
 
-/* The box secret of a session. A password login publishes none; one a KQST login opened is kept next to the
- * signing secret, only for that session's own account and generation, and goes with it at logout. */
+/* A box secret is kept only for that session's own account and generation, and goes with it at logout. */
 static int test_box_key_residency(void) {
     const fl_user_record_t *flin = account("Flinstone"), *root = account("Root");
     fl_user_db_t *db = fl_session_user_db_mut();
@@ -237,8 +227,6 @@ static int test_box_key_residency(void) {
     ASSERT(fl_kq_obtain_box_key(NULL, got) == FL_RESULT_INVAL && fl_kq_obtain_box_key(flin->key_id, NULL) == FL_RESULT_INVAL);
     ASSERT(fl_session_logout() == FL_RESULT_OK);
     ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_ACCES); /* wiped with the session */
-    /* The first sign-in had the kernel make Flinstone's token, so this one is a token sign-in: its
-     * box key comes online again, opened from the token, for the new session only. */
     ASSERT(account("Flinstone")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     ASSERT(fl_kq_obtain_box_key(flin->key_id, got) == FL_RESULT_OK && memcmp(got, box, 32) == 0);
@@ -265,9 +253,7 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     return 0;
 }
 
-/* Open refuses when the store has no pairing/path, or the token file is junk. There is no C
- * seal export: the success-path open is tests/test_kq_real_token.c (make test_kq_real_token), whose
- * KQST is minted by the keyquorum CLI. */
+/* Open refuses a store with no pairing or a junk token; the success path is in test_kq_real_token.c. */
 static int test_kqst_open_refusal_matrix(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     const fl_user_record_t *flin;
@@ -324,9 +310,7 @@ static int test_kqst_open_refusal_matrix(void) {
     return 0;
 }
 
-/* The key derivation runs outside the session lock, so a logout can overlap it. The key of a login that
- * has already ended must not come online afterwards; the publish is checked against the login generation
- * under the session lock. */
+/* A login that ended mid-derivation must not come online: the publish is checked against the login generation. */
 static int test_a_logout_that_overlaps_the_key_derivation_wins(void) {
     fl_user_record_t rec;
     uint64_t ended, again;
@@ -342,12 +326,10 @@ static int test_a_logout_that_overlaps_the_key_derivation_wins(void) {
     ASSERT(fl_kq_service_online_count() == 0);
     ASSERT(fl_session_login_generation() != ended); /* a logout starts a new generation */
 
-    /* the derivation for the login that ended finishes late: refused, nothing published */
     ASSERT(fl_kq_service_online_for_session(&rec, "flinstone", ended) == FL_RESULT_BUSY);
     ASSERT(fl_kq_service_online_count() == 0);
     ASSERT(fl_kq_obtain_author_key(flin->key_id, key, &mode) == FL_RESULT_ACCES);
 
-    /* a wrong password is refused whatever the generation, and a login that is still current publishes */
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
     again = fl_session_login_generation();
     ASSERT(again != ended);
@@ -488,7 +470,6 @@ static int test_the_periodic_sweep(void) {
     ASSERT(atomic_load(&forked.signed_count) == 0);               /* two heads: nobody is the author */
     ASSERT(atomic_load(&away.signed_count) == 0);                 /* the author is not signed in: it waits */
 
-    /* once the author signs in, the waiting object is signed on a later period */
     ASSERT(fl_session_logout() == FL_RESULT_OK);
     ASSERT(fl_session_login("Root", "root") == FL_RESULT_OK);
     sleep_ms(2200);
@@ -497,8 +478,7 @@ static int test_the_periodic_sweep(void) {
     return 0;
 }
 
-/* Autosign lifetime: an object removed while its signature is being made finishes that one
- * signature (the run works on a copy) and is never signed again; the author's key copy is wiped either way. */
+/* An object removed mid-signature finishes that one signature and is never signed again. */
 static _Atomic int s_gate_in, s_gate_open;
 static fl_result_t gated_sign(void *c, const char *author, const uint8_t key[32], kq_signing_mode_t m) {
     fake_obj_t *o = (fake_obj_t *)c;
@@ -541,9 +521,7 @@ static int test_autosign_removed_mid_run(void) {
     return 0;
 }
 
-/* Autosign lifetime: the table holds FL_KQ_AUTOSIGN_MAX objects. One more is refused with NOMEM and
- * nothing is queued for it, and the service stays up. A removed object keeps its slot (its periodic item
- * cannot be cancelled and still points at it), so removal does not make room. */
+/* The autosign table holds FL_KQ_AUTOSIGN_MAX objects; a removed object keeps its slot, so removal makes no room. */
 static int test_autosign_table_full(void) {
     static fake_obj_t fill[FL_KQ_AUTOSIGN_MAX + 1];
     fl_kq_autosign_t spec = {.last_signature_sec = fake_last, .head_author = fake_head, .sign = fake_sign,
@@ -576,7 +554,6 @@ static int test_autosign_table_full(void) {
     return 0;
 }
 
-/* The audit lines the service writes, captured through the audit sink (the service thread emits). */
 static pthread_mutex_t s_audit_mu = PTHREAD_MUTEX_INITIALIZER;
 static char s_audit[8192];
 static void audit_emit(struct fl_log_sink *sink, int level, int facility, const char *msg) {
@@ -600,7 +577,6 @@ static int audited(const char *needle) {
 static char s_tmp[256];
 static char s_home[1024];
 
-/* The audit file is written in the working directory: capture from inside the test's own. */
 static void audit_capture(int on) {
     pthread_mutex_lock(&s_audit_mu);
     s_audit[0] = '\0';
@@ -619,7 +595,6 @@ static void audit_capture(int on) {
     }
 }
 
-/* Containers made by the driver, beside s_tmp/<name>: one head by author, two heads, or none. */
 static int put_container(const char *name, const fl_kq_buf_t *c) {
     char path[512];
     snprintf(path, sizeof path, "%s/%s", s_tmp, name);
@@ -668,9 +643,7 @@ static void real_init(real_obj_t *o, const char *name) {
     o->file.path = o->path;
 }
 
-/* The production head-author callback asks KeyQuorum. The single head's author is signed for;
- * a forked file is audited kq-autosign-forked and never signed; an empty or missing container names
- * nobody. */
+/* The production head-author callback asks KeyQuorum: a forked file is audited and never signed. */
 static int test_autosign_asks_keyquorum_for_the_head_author(void) {
     static real_obj_t single, forked, empty, missing;
     const fl_user_record_t *flin = account("Flinstone");
@@ -716,8 +689,6 @@ static int test_autosign_asks_keyquorum_for_the_head_author(void) {
     return 0;
 }
 
-/* The production callbacks sign a tracked file with KeyQuorum. Containers hold the history; the file
- * beside each holds the bytes a check-in signs. */
 static int put_plain(const char *name, const char *text) {
     char path[512];
     snprintf(path, sizeof path, "%s/%s", s_tmp, name);
@@ -751,7 +722,6 @@ static int test_autosign_signs_a_tracked_file(void) {
     snprintf(empty, sizeof empty, "%s/empty.txt", s_tmp);
     snprintf(missing, sizeof missing, "%s/missing.txt", s_tmp);
 
-    /* last_signature: the 09:00:00Z check-in is the newest signature of the one-revision history. */
     ASSERT(fl_kq_cp_last_signature(single, &before) == FL_KQ_CP_OK && before == 1794301200);
     ASSERT(fl_kq_autosign_last_signature(&(fl_kq_autosign_file_t){.path = single}) == 1794301200);
     ASSERT(fl_kq_cp_last_signature(empty, &none) == FL_KQ_CP_OK && none == 0); /* no signature yet */
@@ -779,15 +749,13 @@ static int test_autosign_signs_a_tracked_file(void) {
     ASSERT(count_lines(&lines) == forked_events);
     fl_kq_buf_free(&lines);
 
-    /* Remove stops it; the queued item finds the object inactive. */
     ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_OK);
     ASSERT(fl_kq_service_autosign_remove(single) == FL_RESULT_NOENT);
     ASSERT(service_barrier() == 0); /* any sweep already running has finished before the baseline is read */
     ASSERT(fl_kq_cp_last_signature(single, &after) == FL_KQ_CP_OK);
     sleep_ms(2300);
     ASSERT(fl_kq_cp_last_signature(single, &again) == FL_KQ_CP_OK && again == after);
-    /* Two tracked paths that share their first 96 bytes are two registrations: removing one by its full path
-     * leaves the other (the label is cut to fit, the path is not). */
+/* Two tracked paths sharing their first 96 bytes are two registrations; the label is cut, the path is not. */
     {
         char longa[300], longb[300];
 
@@ -802,11 +770,9 @@ static int test_autosign_signs_a_tracked_file(void) {
         ASSERT(fl_kq_service_autosign_remove(longa) == FL_RESULT_NOENT);
         ASSERT(fl_kq_service_autosign_remove(longb) == FL_RESULT_OK); /* still registered until removed itself */
     }
-    /* Tracking it again resumes the same item. */
     ASSERT(fl_kq_service_autosign_track_file(single, 1) == FL_RESULT_OK);
     sleep_ms(2300);
     ASSERT(fl_kq_cp_last_signature(single, &again) == FL_KQ_CP_OK && again > after);
-    /* Direct calls: a fork refuses, a missing file is an IO result, no key is no signature. */
     {
         uint8_t k2[32];
         ASSERT(fl_user_db_open_key(fl_session_user_db(), "Flinstone", "flinstone", k2) == FL_RESULT_OK);
@@ -843,9 +809,7 @@ static int report_code_class(const char *path, unsigned *code, unsigned *class_c
     return 0;
 }
 
-/* A refused receive leaves a KQER signed by the account that is online, named by the offer's
- * SHA-256, inside the held landing directory; it verifies only for that artifact, and nothing is
- * written when nobody is online or no directory is held. */
+/* A refused receive leaves a KQER signed by the online account in the held landing directory; none is written if nobody is online. */
 static int test_a_refusal_is_reported_as_the_online_account(void) {
     static const struct {
         fl_result_t why;
@@ -881,18 +845,15 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     unlink(report);
     ASSERT(fl_kq_cp_storage()->dir_open(NULL, s_tmp, &held) == 0);
 
-    /* nobody online: nothing is signed or written, and that is audited */
     audit_capture(1);
     fl_kq_report_refusal_in(&offer, FL_RESULT_ACCES, &held);
     ASSERT(access(report, F_OK) != 0);
     ASSERT(audited("event=kq-report-offline"));
 
     ASSERT(fl_session_login("Flinstone", "flinstone") == FL_RESULT_OK);
-    /* the declared entry point has no held directory: it writes nothing, never a guessed path */
     fl_kq_report_refusal(&offer, FL_RESULT_ACCES);
     ASSERT(access(report, F_OK) != 0);
     ASSERT(audited("event=kq-report-uncontained"));
-    /* a local problem is not a refusal of the letter */
     for (i = 0; i < sizeof others / sizeof others[0]; i++) {
         fl_kq_report_refusal_in(&offer, others[i], &held);
         ASSERT(access(report, F_OK) != 0);
@@ -900,11 +861,9 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     fl_kq_report_refusal_in(&offer, FL_RESULT_ACCES, &held);
     ASSERT(access(report, F_OK) == 0 && access(other_report, F_OK) != 0);
     ASSERT(audited("event=kq-report subject=receive"));
-    /* the same offer again: not rewritten, not counted */
     fl_kq_report_refusal_in(&offer, FL_RESULT_INVAL, &held);
     ASSERT(report_code_class(report, &code, &class_code) == 0 && code == 8u && class_code == 5u);
     ASSERT(audited("event=kq-report-exists"));
-    /* every row of the table: the code and class it names */
     each = offer;
     for (i = 0; i < sizeof rows / sizeof rows[0]; i++) {
         each.policy_hash[0] = (uint8_t)(0xA0 + i);
@@ -914,8 +873,7 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
         ASSERT(report_code_class(each_report, &code, &class_code) == 0);
         ASSERT(code == rows[i].code && class_code == rows[i].class_code);
     }
-    /* a directory that cannot be written: audited as failed, and the caller's refusal stands as
-     * it was (the entry point returns nothing that could change it) */
+/* A directory that cannot be written is audited as failed; the caller's refusal stands. */
     snprintf(missing, sizeof missing, "%s/no-such-dir", s_tmp);
     gone.fd = -1;
     gone.dir = missing;
@@ -923,7 +881,6 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     fl_kq_report_refusal_in(&other, FL_RESULT_ACCES, &gone);
     ASSERT(audited("event=kq-report-failed"));
     ASSERT(access(other_report, F_OK) != 0);
-    /* past the cap: nothing written, audited, no report text or ref in the audit */
     each = offer;
     for (i = 0; i < FL_KQ_REPORT_CAP; i++) {
         each.policy_hash[1] = (uint8_t)(0x01 + i);
@@ -943,7 +900,6 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     audit_capture(0);
     fl_kq_cp_storage()->dir_close(NULL, &held);
 
-    /* KeyQuorum accepts it for this artifact and this reporter, and records one ErrorReported */
     fl_user_db_keydir_init(&keys, fl_session_user_db());
     ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, other_ref, single) == FL_KQ_CP_BAD_SIGNATURE);
     ASSERT(fl_kq_cp_inject_report_with(&keys.base, flin->key_id, report, ref, single) == FL_KQ_CP_OK);
@@ -957,7 +913,6 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
     return 0;
 }
 
-/* The service queue has no executor: it polls, and it consumes no durable record. */
 static int test_the_private_queue_consumes_no_durable_record(void) {
     fl_wq_work_t w = {.fn = count_job, .pq_layer = FL_WQ_LAYER_URGENT};
     fl_wq_journal_record_t r;
@@ -998,8 +953,7 @@ static int test_orderly_shutdown_is_the_only_end(void) {
     return 0;
 }
 
-/* An account made before account keys existed has none: its first password login provisions one, and that key
- * must come online with the login. The online hook takes the record as it is once the key is saved. */
+/* An account made before account keys existed has none: its first password login provisions one and brings it online. */
 static int test_a_keyless_account_comes_online_at_its_first_login(void) {
     int before;
 
@@ -1014,9 +968,7 @@ static int test_a_keyless_account_comes_online_at_its_first_login(void) {
 }
 
 
-/* A login that replaces another without a logout in between ends the first account's slot: its signing
- * secret and its box secret are wiped, not left to be obtained by key id. A key brought
- * online without a session (the Root fallback path, generation 0) is not touched by a later login. */
+/* A login replacing another ends the first account's slot: its signing and box secrets are wiped. */
 static int test_a_replacing_login_wipes_the_previous_box_key(void) {
     uint8_t box[32], got[32], key[32];
     kq_signing_mode_t mode = 0;
@@ -1057,7 +1009,6 @@ static int register_device(const char *label, unsigned char dev) {
     return kq_test_pair_account(getenv("FL_USERS_DB_PATH"), label, "", id, sig, enc, 1, 0) == 0;
 }
 
-/* Brings a child online with its box secret, as a login that opened the KQST would. */
 static int child_online(const char *name, const char *pw) {
     fl_user_record_t rec;
     uint8_t box[32];
@@ -1095,8 +1046,7 @@ out:
     return ok;
 }
 
-/* A parent who is not signed in is assembled from the children who are (the driver's assembly ops, the
- * record in the account store, each child's box secret and its device id from the account registry). */
+/* A parent not signed in is assembled from the children who are; the record is in the account store. */
 static int test_a_parent_is_assembled_from_the_children_online(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     const char *kids[] = {"AsmKid1", "AsmKid2", "AsmKid3"};
@@ -1123,25 +1073,21 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
     ASSERT(fl_kq_service_start() == FL_RESULT_OK);
     audit_capture(1);
 
-    /* No record: nothing to assemble from, nothing audited as refused (the sweep just waits). */
     ASSERT(child_online("AsmKid1", "kid-pw"));
     ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
     ASSERT(!audited("event=kq-assemble-refused"));
     ASSERT(fl_user_db_assembly_get(fl_session_user_db(), mgr_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &gen, &thr) ==
            FL_RESULT_NOENT);
 
-    /* Three children, threshold two: one child online is no quorum. */
     ASSERT(deal(mgr_key, seed, kids, 3, 1));
     ASSERT(fl_user_db_assembly_get(fl_session_user_db(), mgr_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &gen, &thr) ==
                FL_RESULT_OK && gen == 1 && thr == 2 && rlen > 0);
     ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
     ASSERT(audited("event=kq-assemble-refused"));
-    /* Kid3 shares kid1's device: two shares from one physical device do not meet two devices. */
     ASSERT(child_online("AsmKid3", "kid-pw"));
     audit_clear();
     ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_ACCES);
     ASSERT(audited("event=kq-assemble-refused"));
-    /* Kid2 is on its own device: assembled, and the key is the parent's own. */
     ASSERT(child_online("AsmKid2", "kid-pw"));
     memset(key, 0xEE, sizeof key);
     ASSERT(fl_kq_obtain_author_key(mgr_key, key, &mode) == FL_RESULT_OK);
@@ -1149,7 +1095,6 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
     ASSERT(audited("event=kq-assembled"));
     ASSERT(fl_kq_obtain_author_key(account("AsmKid1")->key_id, other, &mode) == FL_RESULT_OK && mode == KQ_SIGNING_OWN);
 
-    /* A record that deals some other seed is refused (the recovered seed is not the parent's). */
     memset(other, 0x42, sizeof other);
     ASSERT(deal(mgr_key, other, kids, 3, 2));
     memset(key, 0xEE, sizeof key);
@@ -1162,7 +1107,6 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
     }
     ASSERT(deal(mgr_key, seed, kids, 3, 3));
 
-    /* The sweep: a tracked file authored by the parent is signed with the assembled key, audited "assembled". */
     {
         fl_kq_buf_t base = {0}, one = {0};
         uint8_t id[16], rev[32];
@@ -1189,7 +1133,6 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
         snprintf(want, sizeof want, "event=kq-autosign subject=%s detail=assembled", single);
         ASSERT(audited(want) || audited("detail=assembled"));
     }
-    /* Children offline again: the parent is not obtainable and the sweep waits. */
     fl_kq_service_offline("AsmKid2");
     fl_kq_service_offline("AsmKid3");
     audit_clear();
@@ -1205,8 +1148,7 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
     return 0;
 }
 
-/* A reload that fails ends the signed-in account's session and takes its key offline: the records it would be
- * looked up by are gone, so the key id is taken before the load. The store is put back. */
+/* A reload that fails ends the signed-in session and takes its key offline; the key id is taken before the load. */
 static int test_a_failed_reload_takes_the_signed_in_key_offline(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
     char a_key[FL_HERITAGE_KEY_ID_MAX], junk[64];

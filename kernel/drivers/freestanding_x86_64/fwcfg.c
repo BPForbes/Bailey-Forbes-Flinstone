@@ -21,7 +21,6 @@ static uint32_t read_be(unsigned bytes)
     return v;
 }
 
-/* 1 when the device answers with QEMU's signature (a machine with no fw_cfg reads 0xFF). */
 static int fwcfg_present(void)
 {
     select_item(FW_CFG_SIGNATURE);

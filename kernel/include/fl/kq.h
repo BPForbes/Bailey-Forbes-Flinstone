@@ -1,10 +1,7 @@
 #ifndef FL_KQ_H
 #define FL_KQ_H
 
-/*
- * The monitor's entry points. Every body calls fl_kq_driver_get() and the existing fl_kq_cp_*
- * checkpoints; nothing here talks to Rust directly, so no behaviour is decided twice.
- */
+/* Every body calls fl_kq_driver_get() and the fl_kq_cp_* checkpoints; no policy here. */
 
 #include "contract_result.h"
 #include "fl/driver/keyquorum.h"
@@ -44,7 +41,6 @@ typedef struct {
 } fl_kq_requirement_t;
 struct fl_user_record;
 struct fl_user_bridge;
-/* Any error is REFUSED, never INVALID. */
 fl_kq_requirement_t fl_kq_unlock_requirement(const char *current_user, const char *target_user, int sudo);
 fl_kq_requirement_t fl_kq_requirement_from_snapshot(const struct fl_user_record *current,
                                                    const struct fl_user_record *target, int sudo,
@@ -52,13 +48,8 @@ fl_kq_requirement_t fl_kq_requirement_from_snapshot(const struct fl_user_record 
 fl_result_t fl_kq_bridge_facts_hex(const struct fl_user_bridge *facts, const char *selected_label,
                                    const unsigned char *sealed, size_t sealed_len,
                                    const unsigned char wrap_salt[16], char facts_hex[65]);
-/* Every secret is wiped before return. */
 int fl_kq_prove_bridge_member(const char *uid, const char *member_user, const char *member_password,
                               char facts_hex[65]);
-/**
- * Open the account's KQST (pairing from the store). Returns KQ_ACCOUNT_*. On OK,
- * signing_secret_out holds the signing secret (caller wipes); the encryption secret is wiped inside.
- */
 int fl_kq_open_account_secrets(const char *user, const char *password, const char *kqst_path_or_null,
                                uint8_t signing_secret_out[32]);
 /* Caller wipes both on OK; both are zeroed otherwise. */
@@ -67,12 +58,10 @@ int fl_kq_open_account_keys(const char *user, const char *password, const char *
 int fl_kq_check_token(const char *key_id, const char *password, const char *kqst_path,
                       const unsigned char device_id[16], const unsigned char signing_public[32],
                       const unsigned char encryption_public[32]);
-/** Open and wipe both secrets; status only (for refusal checks and tooling). */
 int fl_kq_open_account(const char *user, const char *password, const char *kqst_path_or_null);
 
 #define FL_KQ_TOKEN_PATH_MAX 512u
 int fl_kq_account_token_path(const char *db_path, const char *key_id, char *out, size_t cap);
-/* Caller wipes the secrets. */
 int fl_kq_write_account_token(const char *key_id, const char *password,
                               const uint8_t signing_secret[32], const uint8_t box_secret[32],
                               const unsigned char device_id[16], const char *path,
@@ -85,7 +74,6 @@ int fl_kq_lock_pages(void *p, size_t len);
 #define FL_KQ_COSIGN_AUTHORITY 1
 #define FL_KQ_COSIGN_INVOKER   2
 #define FL_KQ_COSIGN_SIGN      3
-/* Secrets not kept are wiped before return. */
 int  fl_kq_sudo_hold_open(const char *invoker_name, const char *invoker_password, int invoker_kqst,
                           const char *root_name, const char *root_password, const char *action,
                           int64_t expires_ns, uint8_t nonce_out[16], uint8_t invoker_sig_out[64],

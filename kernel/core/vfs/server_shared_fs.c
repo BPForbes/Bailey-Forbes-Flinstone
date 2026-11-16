@@ -1033,11 +1033,9 @@ fl_result_t fl_server_shared_resolve_local_path(const char *local_path,
         return FL_RESULT_INVAL;
     if (strlen(comp[n - 1u]) >= leaf_cap)
         return FL_RESULT_INVAL;
-    /* The destination's file name follows the landing rules, so no caller can reach a name the
-     * delivery keeps for its own files. */
+    /* Reserved names are refused here too. */
     if (!fl_fs_name_is_plain(comp[n - 1u]) || fl_server_shared_name_is_reserved(comp[n - 1u]))
         return FL_RESULT_ACCES;
-    /* The gate sees the validated components, so every spelling of one place is gated alike. */
     {
         size_t w = (size_t)snprintf(joined, sizeof(joined), "%s", base);
 
@@ -1196,13 +1194,7 @@ fl_result_t fl_server_shared_overwrite_local(const fl_server_file_offer_t *offer
     rc = fl_server_shared_resolve_local_path(local_path, 1, &dfd, leaf, sizeof(leaf));
     if (rc != FL_RESULT_OK)
         return rc;
-    /*
-     * The write stages a new owner-only (0600) file and renames it over the leaf, so the old
-     * content stays whole if the write fails and a leaf with other names is replaced, not
-     * written through. The rename never follows the name. The checks below therefore only
-     * pick the return code and keep the old rule (a leaf the caller could not write is
-     * refused); they are not the safety gate. A missing leaf is created.
-     */
+    /* Not the safety gate: the rename never follows the leaf. */
     if (fstatat(dfd, leaf, &st, AT_SYMLINK_NOFOLLOW) == 0) {
         if (!S_ISREG(st.st_mode)) {
             close(dfd);

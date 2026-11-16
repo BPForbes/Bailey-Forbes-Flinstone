@@ -1,13 +1,6 @@
 #ifndef FL_CMD_JOURNAL_H
 #define FL_CMD_JOURNAL_H
-/*
- * Signed, hash-chained, append-only command journal (hosted only). Fails closed: no ATTEMPT, no command.
- * Signature covers the bytes after record_len up to sig_len. Record, big-endian (see docs/COMMAND_LOG.md):
- *   u32 record_len | u8 magic[4] "FLCL" | u16 format_version | u8 domain_len, domain | u8 journal_id[16]
- *   u8 device_id[16] | u64 seq | u8 prev_hash[32] | u8 event_id[16] | u8 key_id_len, key_id
- *   u8 principal_len, principal | u8 event_type | u8 category_len, category | i32 result_code
- *   i64 timestamp_sec | u8 time_trust | u8 correlation_id[16] | u8 cosig_present | u8 sig_len, signature
- */
+/* Hosted only; fails closed. Signature covers bytes after record_len to sig_len (layout: docs/COMMAND_LOG.md). */
 
 #include "kq_storage.h"
 

@@ -1,7 +1,4 @@
-/*
- * WASM / host-lab entry: identity + ramfs + labdisk + labnet + interactive shell.
- * Do not compile kernel.c here (IDT / hlt). Prompt is shell> with -DFL_WASM_SHELL_PROMPT.
- */
+/* WASM / host-lab entry. Do not compile kernel.c here (IDT / hlt). */
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif

@@ -12,8 +12,7 @@ HOST = ROOT / "dist" / "flintstone_wasm_host"
 def main():
     if not HOST.is_file():
         raise SystemExit(f"missing {HOST}; run ./scripts/build_wasm_lab.sh")
-    # switchuser to another account asks for its password, as su does. Root's is the
-    # public demo seed; demo's is drawn at run time.
+    # su asks for a password: Root's is the public demo seed; demo's is drawn at run time.
     demo_pw = secrets.token_hex(9)
     commands = [
         "whoami",
@@ -27,11 +26,8 @@ def main():
         "whoami",
         "server msg hi",
         "dir",
-        # Sending a file: the guest hands it to the page as one SERVER_FILE line.
         "write note.txt hi bob",
         "server file -user bob note.txt",
-        # Receiving one: it waits in the page until the user accepts; the page then types it
-        # in hex parts, and an existing name is never replaced.
         "server file accept",
         "server file decline",
         "filerecv none",

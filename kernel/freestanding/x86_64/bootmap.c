@@ -1,5 +1,4 @@
-/* Boot memory map (rules in bootmap.h). No sorting and no scratch memory: each candidate start is grown
- * through the usable entries that touch it and cut at the first blocker. */
+/* No sorting, no scratch memory: each candidate start grows through the usable entries that touch it. */
 #include "bootinfo.h"
 #include "bootmap.h"
 
@@ -67,7 +66,6 @@ int fl_bootmap_select_arena(const fl_e820_entry_t *entries, uint32_t count, uint
         if (reservations[i].base >= reservations[i].end)
             return FL_BOOTMAP_E_INVAL;
 
-    /* Candidate starts: index 0 is min_base, then one per entry, then one per reservation. */
     for (uint32_t c = 0; c <= count + reservation_count; c++) {
         uint64_t s, end;
 
@@ -103,7 +101,6 @@ int fl_bootmap_select_arena(const fl_e820_entry_t *entries, uint32_t count, uint
     return FL_BOOTMAP_OK;
 }
 
-/* [base, end) lies inside one of the loader's reservations. */
 static int reserved_covers(const fl_boot_info_t *bi, uint64_t base, uint64_t end)
 {
     for (uint32_t i = 0; i < bi->reserved_count; i++)
@@ -135,8 +132,7 @@ int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64
     for (uint32_t i = 0; i < bi->reserved_count; i++)
         if (bi->reserved[i].base >= bi->reserved[i].end)
             return FL_BOOTMAP_E_INVAL;
-    /* The image, its stack, the page tables, the E820 buffer and this struct are reserved: no
-     * arena can take them. */
+    /* Reserved: the image, its stack, page tables, E820 buffer and this struct; no arena takes them. */
     if (map_end < bi->e820_addr || !reserved_covers(bi, kernel_start, kernel_end) ||
         !reserved_covers(bi, FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP) ||
         !reserved_covers(bi, FL_PAGE_TABLES, FL_PAGE_TABLES_END) ||

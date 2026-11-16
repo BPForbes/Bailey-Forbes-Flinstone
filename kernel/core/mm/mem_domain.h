@@ -1,8 +1,3 @@
-/**
- * Memory domains - architectural virtualization.
- * Tag allocations by domain; use ASM primitives for buffer ops.
- * Domains share heap initially; abstraction allows future quotas/pools.
- */
 #ifndef MEM_DOMAIN_H
 #define MEM_DOMAIN_H
 
@@ -16,21 +11,16 @@ typedef enum {
     MEM_DOMAIN_USER,
 } mem_domain_t;
 
-/* Allocate in domain (uses malloc/calloc; domain is metadata for future) */
 void *mem_domain_alloc(mem_domain_t domain, size_t size);
 void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size);
 void *mem_domain_realloc(mem_domain_t domain, void *ptr, size_t size);
 void mem_domain_free(mem_domain_t domain, void *ptr);
 
-/* Buffer ops - always use ASM for hot path */
 void mem_domain_copy(void *dst, const void *src, size_t n);
 void mem_domain_zero(void *ptr, size_t n);
-/* Extends mem_domain_zero for secrets (keys, passwords): the same zeroing, then a barrier
- * so the stores are complete before the buffer is freed or reused (asm_mem_secure_zero). */
+/* Secret wipe: fenced so the stores finish before the buffer is freed or reused. */
 void mem_domain_secure_zero(void *ptr, size_t n);
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n);
-/* 1 when the n bytes at a and b are equal, else 0. Constant time in n (asm_mem_ct_equal), so it
- * serves both path/name equality and comparing secrets; there is no ordered compare. */
 int mem_domain_equal(const void *a, const void *b, size_t n);
 
 #endif /* MEM_DOMAIN_H */

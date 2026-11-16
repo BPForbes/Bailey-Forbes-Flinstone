@@ -1,18 +1,5 @@
-/**
- * test_kq_history_member.c - end to end in process: a session member downloads a co-signed delivery's
- * history from the host and opens it (fl_net_kq_request_history, then fl_net_kq_history_open).
- *
- * The host's gate and source in the native shell (kq_history_gate, kq_history_source) are static in
- * userland/command/cmd_server_file.c, which links the whole shell. So this test installs a gate and a
- * source that do what those do, over the real producer; the policy check the native gate adds
- * (fl_authz_subsystem_check) is not part of this test. The member side is the verb's own code
- * (userland/command/cmd_server_history.c).
- *
- * A recording transport stands in for sockets, as in test_kq_net.c: frames a member sends go to the host
- * handler as that member, and frames the host sends to a member go to the client handler.
- *
- * Passwords are drawn at run time; none is written here.
- */
+/* End to end in process: a member downloads a co-signed delivery's history and opens it.
+/* The host gate and source are static in cmd_server_file.c, so this test installs equivalents over the real producer. */
 #include "net_kq_delivery.h"
 #include "cmd_server_history.h"
 #include "kq_checkpoint.h"
@@ -40,7 +27,6 @@
     } \
 } while (0)
 
-/* For a test that owns resources: fail, then release them at out. */
 #define CHECK(c) do { \
     if (!(c)) { \
         fprintf(stderr, "FAIL [%s:%d]: %s\n", __FILE__, __LINE__, #c); \
@@ -56,7 +42,6 @@
 #define ANA "Root.Flinstone.Ana"
 #define STEVE "Root.Flinstone.Steve"
 
-/* ---- recording transport ---------------------------------------------------------------------------- */
 
 #define MEMBER_ANA (&s_members[1])
 #define MEMBER_STEVE (&s_members[2])
@@ -80,13 +65,10 @@ static void client_send(fl_net_client_t *client, uint8_t opcode, const uint8_t *
     fl_net_kq_host_handle(s_srv, s_actor, opcode, payload, plen);
 }
 
-/* ---- fixtures ----------------------------------------------------------------------------------------- */
 
 static char s_dir[256];
-/* Drawn at run time (fl_random_bytes, hex); wiped at exit. */
 static char s_pw_mya[33], s_pw_ana[33], s_pw_steve[33];
 
-/* Mya checks a file in and seals it to Steve: the container beside the file and the delivery. */
 static int encode_from_mya(const char *name, const void *data, size_t n, char path[PATH_MAX],
                            fl_kq_encoded_t *enc) {
     unsigned char sign[FL_USER_SIGNING_SECRET_LEN];
@@ -101,9 +83,7 @@ static int encode_from_mya(const char *name, const void *data, size_t n, char pa
     return rc;
 }
 
-/* ---- the host side: what kq_history_gate and kq_history_source do --------------------------------------- */
 
-/* The host shell's record of a delivery it sent (kq_sent_remember): who it went to, the file it sits beside. */
 #define SENT_MAX 4u
 typedef struct {
     int used;
@@ -131,7 +111,6 @@ static const sent_t *sent_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
     return NULL;
 }
 
-/* How the source misbehaves, for the member-side checks. */
 enum {
     SRC_REAL,           /* as kq_history_source */
     SRC_OTHER_SNAPSHOT, /* the snapshot of another file: valid letters, but it does not cover the history */
@@ -152,7 +131,6 @@ static int hist_gate(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_L
     return requester && e && strcmp(e->recipient, requester) == 0;
 }
 
-/* kq_history_source: the host account's key (ACCES without it), the real letters, packed. */
 static fl_result_t hist_source(const char *requester, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out,
                                size_t cap, size_t *out_len) {
     const sent_t *e = sent_find(id);
@@ -201,7 +179,6 @@ done:
     return rc;
 }
 
-/* ---- the member side ------------------------------------------------------------------------------------ */
 
 static unsigned char s_steve_box[FL_USER_SIGNING_SECRET_LEN], s_ana_box[FL_USER_SIGNING_SECRET_LEN];
 static fl_kq_encoded_t s_enc;           /* plan.txt, Mya to Steve */
@@ -217,15 +194,12 @@ static int count_line(const char *line, size_t n, void *ctx) {
 
 static pthread_mutex_t s_session_mu = PTHREAD_MUTEX_INITIALIZER; /* stands in for ctx->mutex */
 
-/* What `server file history <id>` does on the member after its password prompt (fl_server_history_fetch):
- * request under the session lock, open bound to the delivery's file id when known, drop on timeout. */
 static fl_result_t member_history(const fl_net_server_member_t *who, const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                                   const unsigned char box[32], const char *sender, const char *me,
                                   const uint8_t sender_public[32], unsigned wait_ms, fl_kq_buf_t *lines,
                                   uint32_t *events) {
     fl_server_history_got_t got;
 
-    /* The decoded record when there is one (its file id binds the answer); the sender as the test names it. */
     if (!fl_server_history_find(id, &got)) {
         memset(&got, 0, sizeof got);
         memcpy(got.id, id, FL_KQ_DELIVERY_ID_LEN);
@@ -236,7 +210,6 @@ static fl_result_t member_history(const fl_net_server_member_t *who, const uint8
                                    events);
 }
 
-/* The same, with no decoded record (the -from path): nothing to bind the file to. */
 static fl_result_t member_history_unbound(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], fl_kq_buf_t *lines,
                                           uint32_t *events) {
     fl_server_history_got_t got;
@@ -249,10 +222,7 @@ static fl_result_t member_history_unbound(const uint8_t id[FL_KQ_DELIVERY_ID_LEN
                                    fl_user_db_signing_public(&s_db, MYA), 0, lines, events);
 }
 
-/* ---- tests ------------------------------------------------------------------------------------------------ */
 
-/* Mya sends plan.txt to Steve over the wire; Steve's shell sees it with Mya as its sender, and once decoded
- * remembers it as kq_decode_and_ack does (id, sender, file name, the offer's file id). */
 static int test_a_delivery_mya_sends_to_steve(void) {
     static const char text[] = "quarterly plan v1\n";
     fl_net_kq_inbox_t inbox[4];
@@ -274,7 +244,6 @@ static int test_a_delivery_mya_sends_to_steve(void) {
     return 0;
 }
 
-/* The real store: the host's gate and the real source answer, and the events open for Steve. */
 static int test_the_recipient_downloads_and_opens_the_history(void) {
     fl_net_kq_keys_t mya;
     fl_kq_buf_t lines = {0};
@@ -285,7 +254,6 @@ static int test_the_recipient_downloads_and_opens_the_history(void) {
 
     s_source_mode = SRC_REAL;
     s_gate_calls = s_source_calls = 0;
-    /* Steve's shell gets the sender's key from the host registry, by its exact id. */
     s_actor = MEMBER_STEVE;
     CHECK(fl_net_kq_lookup(s_srv, NULL, 0, s_sender, 0, &mya) == FL_RESULT_OK);
     CHECK(fl_server_history_sender_matches(&mya, s_sender));
@@ -317,7 +285,6 @@ static int test_the_sender_key_must_be_the_exact_account(void) {
     return 0;
 }
 
-/* The host's key is not available: the source says ACCES, the host refuses, nothing arrives. */
 static int test_without_the_host_key_the_request_is_refused_and_times_out(void) {
     fl_kq_buf_t lines = {0};
     uint32_t events = 0;
@@ -334,7 +301,6 @@ static int test_without_the_host_key_the_request_is_refused_and_times_out(void) 
     return 0;
 }
 
-/* A request the member gives up on stays pending until it is dropped (the fetch drops it); then it is gone. */
 static int test_a_timed_out_request_waits_until_dropped(void) {
     uint8_t req[16], a[16], b[16];
     fl_kq_buf_t l15 = {0}, l17 = {0}, lines = {0};
@@ -349,12 +315,10 @@ static int test_a_timed_out_request_waits_until_dropped(void) {
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_TIMEDOUT); /* still pending */
     fl_net_kq_history_drop(req);
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_NOENT);
-    /* Bad arguments drop the request too, as documented. */
     ASSERT(fl_net_kq_request_history(s_srv, NULL, 0, s_enc.delivery_id, req) == FL_RESULT_OK);
     ASSERT(fl_net_kq_history_open(req, 0, NULL, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), NULL, &lines,
                                   &events) == FL_RESULT_INVAL);
     ASSERT(fl_net_kq_history_take(req, 0, &l15, &l17) == FL_RESULT_NOENT);
-    /* Timed-out fetches leave no slot behind: both slots are still free afterwards. */
     s_host_key_available = 0;
     for (int i = 0; i < 3; i++)
         ASSERT(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, MYA, STEVE,
@@ -371,7 +335,6 @@ static int test_a_timed_out_request_waits_until_dropped(void) {
     return 0;
 }
 
-/* Ana is not the recipient: the gate refuses, the source never runs, nothing arrives. */
 static int test_a_requester_who_is_not_the_recipient_is_refused(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     fl_kq_buf_t lines = {0};
@@ -385,7 +348,6 @@ static int test_a_requester_who_is_not_the_recipient_is_refused(void) {
     ASSERT(s_gate_calls == 1 && s_source_calls == 0);
     ASSERT(strstr(s_last_err, "history refused: ") && strstr(s_last_err, drv->error_name(KQER_DENIED)));
     ASSERT(s_data_to[1] == 0);
-    /* An id the host never sent is refused the same way. */
     memset(unknown, 0x5a, sizeof unknown);
     ASSERT(member_history(MEMBER_STEVE, unknown, s_steve_box, MYA, STEVE, fl_user_db_signing_public(&s_db, MYA), 0,
                           &lines, &events) == FL_RESULT_TIMEDOUT);
@@ -415,7 +377,6 @@ static int test_an_oversized_history_is_refused_not_truncated(void) {
     have_enc = 1;
     sent_remember(enc.delivery_id, STEVE, path);
 
-    /* The real letters are over the bound, and packing them fails rather than cutting them short. */
     CHECK(fl_user_db_open_key(&s_db, "Mya", s_pw_mya, key) == FL_RESULT_OK);
     fl_user_db_keydir_init(&dir, &s_db);
     CHECK(fl_kq_cp_history_letters_with(&dir.base, MYA, key, STEVE, path, &l15, &l17) == FL_KQ_CP_OK);
@@ -424,7 +385,6 @@ static int test_an_oversized_history_is_refused_not_truncated(void) {
                                  l17.len) == FL_RESULT_INVAL);
     CHECK(blen == 0);
 
-    /* Over the wire: refused, and not one DATA frame goes out. */
     s_last_err[0] = '\0';
     CHECK(member_history(MEMBER_STEVE, enc.delivery_id, s_steve_box, MYA, STEVE,
                          fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_TIMEDOUT);
@@ -448,24 +408,19 @@ static int test_a_wrong_sender_or_key_does_not_open(void) {
     uint32_t events = 0;
 
     s_source_mode = SRC_REAL;
-    /* A sender the letters are not from. */
     ASSERT(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, ANA, STEVE,
                           fl_user_db_signing_public(&s_db, ANA), 0, &lines, &events) == FL_RESULT_ACCES);
     ASSERT(lines.data == NULL && events == 0);
-    /* The right sender's name with someone else's key. */
     ASSERT(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, MYA, STEVE,
                           fl_user_db_signing_public(&s_db, ANA), 0, &lines, &events) == FL_RESULT_ACCES);
-    /* The right sender's key under another name. */
     ASSERT(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, ANA, STEVE,
                           fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_ACCES);
-    /* Letters sealed to Steve do not open with another box key. */
     ASSERT(member_history(MEMBER_STEVE, s_enc.delivery_id, s_ana_box, MYA, STEVE,
                           fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_ACCES);
     ASSERT(lines.data == NULL && events == 0);
     return 0;
 }
 
-/* other.txt: a second file Mya sealed to Steve, for the answers about the wrong file. */
 static int ensure_other_file(void) {
     static const char text[] = "an unrelated file\nwith its own history\n";
     fl_kq_encoded_t other;
@@ -478,7 +433,6 @@ static int ensure_other_file(void) {
     return 0;
 }
 
-/* Valid letters whose snapshot is another file's: the snapshot does not cover the history. */
 static int test_a_snapshot_that_does_not_cover_the_history_is_refused(void) {
     fl_kq_buf_t lines = {0};
     uint32_t events = 0;
@@ -492,9 +446,7 @@ static int test_a_snapshot_that_does_not_cover_the_history_is_refused(void) {
     return 0;
 }
 
-/* The host answers plan.txt's delivery with both letters of other.txt. They open and the snapshot covers
- * them, but they are not the delivery's file: refused when the member knows the file id (it decoded the
- * delivery), and only the unbound -from path, which says so in the verb, takes them. */
+/* Letters of another file open and cover the snapshot, but are refused when the file id is known. */
 static int test_both_letters_of_another_file_are_refused(void) {
     fl_kq_buf_t lines = {0};
     uint32_t events = 0;
@@ -508,7 +460,6 @@ static int test_both_letters_of_another_file_are_refused(void) {
     CHECK(member_history_unbound(s_enc.delivery_id, &lines, &events) == FL_RESULT_OK);
     fl_kq_buf_free(&lines);
     events = 0;
-    /* The right file still opens with its file id. */
     s_source_mode = SRC_REAL;
     CHECK(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, MYA, STEVE,
                          fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_OK);
@@ -518,8 +469,7 @@ out:
     return rc;
 }
 
-/* The file id is the file's, not the revision's: after Mya checks in a newer revision, the host's fresh reseal
- * of the new head still matches the id Steve recorded at decode. */
+/* The file id is the file's, not the revision's: a newer revision keeps the id Steve recorded. */
 static int test_the_file_id_still_matches_after_the_head_moves(void) {
     static const char text[] = "quarterly plan v2\n";
     fl_kq_encoded_t newer;
@@ -562,10 +512,8 @@ static int test_both_letters_are_required(void) {
                          fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_ACCES);
     s_source_mode = SRC_REAL;
     CHECK(lines.data == NULL && events == 0);
-    /* A host cannot even build a bundle with one letter missing. */
     CHECK(fl_history_bundle_pack(bundle, sizeof bundle, &blen, &one, 1, &one, 0) == FL_RESULT_INVAL);
     CHECK(fl_history_bundle_pack(bundle, sizeof bundle, &blen, &one, 0, &one, 1) == FL_RESULT_INVAL);
-    /* And after all that, the real answer still opens. */
     CHECK(member_history(MEMBER_STEVE, s_enc.delivery_id, s_steve_box, MYA, STEVE,
                          fl_user_db_signing_public(&s_db, MYA), 0, &lines, &events) == FL_RESULT_OK);
 out:
@@ -574,7 +522,6 @@ out:
     return rc;
 }
 
-/* ---- the verb's argument and sender resolution (fl_server_history_args) ---------------------------------- */
 
 static fl_server_history_args_t args_of(char **argv, int argc, fl_server_history_got_t *got, const char **bad) {
     const char *hex = NULL;
@@ -595,7 +542,6 @@ static int test_the_history_arguments_resolve_the_sender(void) {
     memset(long_key, 'k', sizeof long_key - 1);
     long_key[sizeof long_key - 1] = '\0';
     {
-        /* Decoded here: the remembered sender and file id, with or without a -from that agrees. */
         char *a1[] = {"history", hex};
         char *a2[] = {"history", hex, "-from", MYA};
         char *a3[] = {"history", "-from", MYA, hex};
@@ -606,12 +552,10 @@ static int test_the_history_arguments_resolve_the_sender(void) {
         ASSERT(args_of(a3, 4, &got, &bad) == FL_SERVER_HISTORY_ARGS_OK && got.has_file_id);
     }
     {
-        /* A -from that disagrees with the delivery's sender is refused. */
         char *a[] = {"history", hex, "-from", ANA};
         ASSERT(args_of(a, 4, &got, &bad) == FL_SERVER_HISTORY_ARGS_FROM_MISMATCH);
     }
     {
-        /* Not decoded here: -from is required, and then nothing binds the file. */
         char *a1[] = {"history", unknown_hex};
         char *a2[] = {"history", unknown_hex, "-from", MYA};
         ASSERT(args_of(a1, 2, &got, &bad) == FL_SERVER_HISTORY_ARGS_NO_SENDER);
@@ -619,7 +563,6 @@ static int test_the_history_arguments_resolve_the_sender(void) {
         ASSERT(strcmp(got.sender, MYA) == 0 && !got.has_file_id && memcmp(got.id, unknown, sizeof unknown) == 0);
     }
     {
-        /* An empty or oversized -from, a share id, and malformed command lines. */
         char *empty[] = {"history", unknown_hex, "-from", ""};
         char *toolong[] = {"history", unknown_hex, "-from", long_key};
         char *share[] = {"history", "share-42"};
@@ -638,7 +581,6 @@ static int test_the_history_arguments_resolve_the_sender(void) {
     return 0;
 }
 
-/* The ring: the newest 16, the same id replacing its own record, bad input never stored. */
 static int test_the_decoded_deliveries_ring(void) {
     fl_server_history_got_t got;
     uint8_t id[FL_KQ_DELIVERY_ID_LEN], fid[16];
@@ -657,7 +599,6 @@ static int test_the_decoded_deliveries_ring(void) {
     fid[0] = 0x22;
     fl_server_history_remember(id, MYA, "a2.txt", fid);     /* the same delivery: replaced in place */
     ASSERT(fl_server_history_find(id, &got) == 1 && strcmp(got.file_name, "a2.txt") == 0 && got.file_id[0] == 0x22);
-    /* 15 more distinct deliveries: 17 remembered in all (plan.txt, 0xee, 15), so the oldest, plan.txt, is gone. */
     for (unsigned i = 0; i < FL_SERVER_HISTORY_GOT_MAX - 1u; i++) {
         uint8_t other[FL_KQ_DELIVERY_ID_LEN] = {0};
 

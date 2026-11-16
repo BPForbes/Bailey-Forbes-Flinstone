@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# Unified test driver — runs the standard make test_* matrix in one pass.
-# Usage (from repo root):
-#   make test_all
-#   make test_all-quiet
-#   ./scripts/run_all_tests.sh
-#
-# Optional:
-#   FL_TEST_QUICK=1          CI-ish subset (faster smoke)
-#   FL_NETNS_PCAP_OK=1       include test_netns_pcap (sudo/netns)
-#   FL_TEST_INCLUDE_VM_REPLAY=1   test_replay (runs make clean first — last)
-#   FL_TEST_INCLUDE_SHELL_CTRL_C=1   test_shell_ctrl_c (python + shell)
-#   FL_TEST_INCLUDE_NETWORK_BRIDGE_PY=1
-#   USE_ASM_ALLOC=1          use test_alloc_asm instead of test_alloc_libc
-#   SKIP_NETWORK_INTEROP=1   skip check-network-requirements
+# Runs the make test_* matrix. Toggles: FL_TEST_QUICK, FL_NETNS_PCAP_OK, FL_TEST_INCLUDE_*, USE_ASM_ALLOC, SKIP_NETWORK_INTEROP.
+# Run from the repo root (make test_all, or this script).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
