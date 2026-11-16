@@ -53,15 +53,75 @@ void fl_session_test_set_switch_pre_commit(void (*fn)(void)) {
     s_switch_pre_commit = fn;
 }
 
+/* One character of a store path, or -1 when it may not be in one: letters, digits, '/', '.', '_',
+ * '-' and '+'. Spaces, quotes, control bytes, '\\', '%', '~' and everything else are refused. */
+static int store_path_char(int c) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '.' ||
+        c == '_' || c == '-' || c == '+')
+        return c;
+    return -1;
+}
+
+/*
+ * Where the account store is, from FL_USERS_DB_PATH (the operator's to set; tests use it for a temporary
+ * store). Every file the kernel keeps beside the store (its tokens, its kqst directory) is under the same
+ * directory, so the value is checked once, here, before anything opens it (CodeQL cpp/path-injection on
+ * PR 416): only the characters store_path_char takes, no ".." part, and it fits. The store is opened at
+ * the copy built from the checked characters, never at the environment's string. 0 when it is unset,
+ * 1 when out holds the checked path, -1 when it is refused.
+ */
+static int store_path_from_env(char *out, size_t cap) {
+    const char *v = getenv("FL_USERS_DB_PATH");
+    size_t i, n;
+
+    if (!v || !v[0])
+        return 0;
+    n = strlen(v);
+    if (n >= cap)
+        return -1;
+    for (i = 0; i < n; i++) {
+        int c = store_path_char((unsigned char)v[i]);
+
+        if (c < 0) {
+            out[0] = '\0';
+            return -1;
+        }
+        out[i] = (char)c;
+    }
+    out[n] = '\0';
+    /* A ".." part: at the start, after a '/', and followed by '/' or the end. */
+    for (i = 0; i + 1 < n; i++) {
+        if (out[i] == '.' && out[i + 1] == '.' && (i == 0 || out[i - 1] == '/') &&
+            (i + 2 == n || out[i + 2] == '/')) {
+            out[0] = '\0';
+            return -1;
+        }
+    }
+    return 1;
+}
+
 static void session_load_once(void) {
-    const char *path = getenv("FL_USERS_DB_PATH");
+    static char env_path[sizeof s_db.path];
+    const char *path = FL_SESSION_USERS_PATH;
     fl_result_t rc;
+    int from_env;
 
     /* Seeded accounts call the driver before sh.c reaches drivers_init. */
     (void)fl_kq_driver_get_or_register();
 
-    if (!path || !path[0])
-        path = FL_SESSION_USERS_PATH;
+    from_env = store_path_from_env(env_path, sizeof env_path);
+    if (from_env < 0) {
+        /* Never fall back to another store: the session stays unavailable until the setting is fixed. */
+        fprintf(stderr, "session: FL_USERS_DB_PATH is not a path the kernel uses (letters, digits, "
+                        "'/', '.', '_', '-', '+'; no \"..\")\n");
+        pthread_mutex_lock(&s_session_mu);
+        s_db_ready = 0;
+        s_current[0] = '\0';
+        pthread_mutex_unlock(&s_session_mu);
+        return;
+    }
+    if (from_env > 0)
+        path = env_path;
     pthread_mutex_lock(&s_session_mu);
     rc = fl_user_db_load(&s_db, path);
     if (rc != FL_RESULT_OK) {
