@@ -195,29 +195,37 @@ static int test_below_min_base_excluded(void)
 #define K_BSS 0x81a00ull
 #define K_END 0x97160ull
 
-static fl_e820_entry_t s_map[FL_BOOTINFO_E820_CAP];
+/* The struct and its E820 buffer, side by side as stage 2 lays them out (at host addresses here). */
+static struct {
+    fl_boot_info_t bi;
+    fl_e820_entry_t map[FL_BOOTINFO_E820_CAP];
+} s_low;
 
-/* A handoff as stage 2 writes it, with the E820 buffer and the struct at host addresses. */
+/* A handoff as stage 2 writes it: the same seven reservations (stage2.asm `reserved`), with the
+ * boot-info block's range moved to the host buffer that stands in for 0x510-0x1000. */
 static void good_info(fl_boot_info_t *bi)
 {
-    memset(bi, 0, sizeof *bi);
-    memcpy(s_map, k_qemu64, sizeof k_qemu64);
+    memset(&s_low, 0, sizeof s_low);
+    memcpy(s_low.map, k_qemu64, sizeof k_qemu64);
     bi->magic = FL_BOOTINFO_MAGIC;
     bi->version = FL_BOOTINFO_VERSION;
     bi->size = sizeof *bi;
     bi->boot_drive = 0x80;
-    bi->e820_addr = (uintptr_t)s_map;
+    bi->e820_addr = (uintptr_t)s_low.map;
     bi->e820_count = 6;
     bi->e820_capacity = FL_BOOTINFO_E820_CAP;
     bi->kernel_base = K_START;
     bi->kernel_load_end = K_START + 912 * 512;
     bi->kernel_end = K_END;
     bi->mapped_end = 1ull << 30;
-    bi->reserved_count = 4;
-    bi->reserved[0] = (fl_boot_range_t){ (uintptr_t)s_map, (uintptr_t)s_map + sizeof s_map };
-    bi->reserved[1] = (fl_boot_range_t){ (uintptr_t)bi, (uintptr_t)bi + sizeof *bi };
-    bi->reserved[2] = (fl_boot_range_t){ FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP };
-    bi->reserved[3] = (fl_boot_range_t){ K_START, K_END };
+    bi->reserved_count = 7;
+    bi->reserved[0] = (fl_boot_range_t){ 0, FL_BOOTINFO_ADDR };
+    bi->reserved[1] = (fl_boot_range_t){ (uintptr_t)&s_low, (uintptr_t)&s_low + sizeof s_low };
+    bi->reserved[2] = (fl_boot_range_t){ FL_PAGE_TABLES, FL_PAGE_TABLES_END };
+    bi->reserved[3] = (fl_boot_range_t){ 0x7000, 0x8e00 };
+    bi->reserved[4] = (fl_boot_range_t){ FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP };
+    bi->reserved[5] = (fl_boot_range_t){ K_START, K_END };
+    bi->reserved[6] = (fl_boot_range_t){ 0xa0000, 0x100000 };
 }
 
 static int validate(const fl_boot_info_t *bi)
@@ -227,7 +235,7 @@ static int validate(const fl_boot_info_t *bi)
 
 static int test_bootinfo_validate(void)
 {
-    fl_boot_info_t bi;
+#define bi (s_low.bi)
 
     good_info(&bi);
     ASSERT(validate(&bi) == FL_BOOTMAP_OK);
@@ -251,11 +259,14 @@ static int test_bootinfo_validate(void)
     BAD(bi.mapped_end = K_END - 1, FL_BOOTMAP_E_INVAL);
     BAD(bi.reserved_count = 0, FL_BOOTMAP_E_INVAL);
     BAD(bi.reserved_count = FL_BOOTINFO_MAX_RESERVED + 1, FL_BOOTMAP_E_INVAL);
-    BAD(bi.reserved[3].end = K_END - 1, FL_BOOTMAP_E_INVAL);           /* image not reserved */
-    BAD(bi.reserved[2].base += 16, FL_BOOTMAP_E_INVAL);                /* stack not reserved */
-    BAD(bi.reserved[0].end -= 24, FL_BOOTMAP_E_INVAL);                 /* E820 buffer not reserved */
-    BAD(bi.reserved[1].end -= 1, FL_BOOTMAP_E_INVAL);                  /* boot info not reserved */
-    BAD((bi.reserved_count = 5, bi.reserved[4] = (fl_boot_range_t){ 9, 9 }), FL_BOOTMAP_E_INVAL);
+    BAD(bi.reserved[5].end = K_END - 1, FL_BOOTMAP_E_INVAL);           /* image not reserved */
+    BAD(bi.reserved[4].base += 16, FL_BOOTMAP_E_INVAL);                /* stack not reserved */
+    BAD(bi.reserved[2].end -= 0x1000, FL_BOOTMAP_E_INVAL);             /* page tables not reserved */
+    BAD(bi.reserved[1].end -= 24, FL_BOOTMAP_E_INVAL);                 /* E820 buffer not reserved */
+    BAD(bi.reserved[1].base += 8, FL_BOOTMAP_E_INVAL);                 /* boot info not reserved */
+    BAD((bi.reserved_count = 8, bi.reserved[7] = (fl_boot_range_t){ 9, 9 }), FL_BOOTMAP_E_INVAL);
+    /* A full map (count == capacity) is whole: stage 2 flags truncation only for an entry past it. */
+    BAD(bi.e820_count = FL_BOOTINFO_E820_CAP, FL_BOOTMAP_OK);
 #undef BAD
     /* The validated map feeds arena selection as the kernel does it. */
     good_info(&bi);
@@ -266,6 +277,7 @@ static int test_bootinfo_validate(void)
                     bi.reserved_count, &k_limits, &b, &s) == FL_BOOTMAP_OK);
         ASSERT(b == 0x100000 && s == 0x3ee0000);
     }
+#undef bi
     return 0;
 }
 
@@ -281,6 +293,8 @@ static int test_inc_matches_header(const char *path)
         { "FL_BOOTINFO_E820_CAP", FL_BOOTINFO_E820_CAP },
         { "FL_BOOTINFO_MAX_RESERVED", FL_BOOTINFO_MAX_RESERVED },
         { "FL_BOOTINFO_F_E820_TRUNCATED", FL_BOOTINFO_F_E820_TRUNCATED },
+        { "FL_PAGE_TABLES", FL_PAGE_TABLES },
+        { "FL_PAGE_TABLES_END", FL_PAGE_TABLES_END },
         { "FL_KERNEL_STACK_BOTTOM", FL_KERNEL_STACK_BOTTOM },
         { "FL_KERNEL_STACK_TOP", FL_KERNEL_STACK_TOP },
         { "BI_MAGIC", offsetof(fl_boot_info_t, magic) },

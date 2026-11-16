@@ -18,7 +18,11 @@ for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/d
 fsdir="${root}/kernel/freestanding/x86_64"
 nasm -f bin -I"${fsdir}/" "${fsdir}/boot.asm" -o "${build}/boot.bin"
 nasm -f bin -I"${fsdir}/" "${fsdir}/stage2.asm" -o "${build}/stage2.bin"
-stage2_sectors=$(awk '$1=="%define" && $2=="FL_STAGE2_SECTORS"{print $3}' "${fsdir}/bootinfo.inc")
+# One source for the layout: the loader's bootinfo.inc.
+layout() { awk -v n="$1" '$1=="%define" && $2==n{print $3}' "${fsdir}/bootinfo.inc"; }
+stage2_sectors=$(layout FL_STAGE2_SECTORS)
+load_addr=$(layout FL_KERNEL_LOAD_ADDR)
+low_budget=$(layout FL_LOW_BUDGET)
 (( stage2_sectors > 0 && $(stat -c%s "${build}/stage2.bin") == stage2_sectors * 512 )) || { echo "stage 2 is not ${stage2_sectors} sectors" >&2; exit 1; }
 nasm -f elf64 -I"${fsdir}/" "${fsdir}/entry.asm" -o "${build}/entry.o"
 cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -DFL_FREESTANDING -DNDEBUG -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
@@ -93,8 +97,9 @@ objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
 # 512 KiB payload ends at 0x90000; the boundary itself is at 1152 sectors).
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 (( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
-# The payload is followed by bss (the stack, the queues, the KeyQuorum library's statics) in the same
-# conventional memory: its end must stay below 0x9f000 (the EBDA starts at 0x9fc00, VGA at 0xa0000).
+# The payload is followed by bss (the queues, the KeyQuorum library's statics; the stack is below the
+# image since FL-02) in the same conventional memory: its end must stay below FL_LOW_BUDGET, 0x9f000
+# (the EBDA starts at 0x9fc00, VGA at 0xa0000).
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
 payload_bytes=$(stat -c%s "${build}/kernel.bin")
 # FL-02 image layout: the entry is the first loaded byte at the link address the loader jumps to,
@@ -103,7 +108,7 @@ payload_bytes=$(stat -c%s "${build}/kernel.bin")
 nm "${build}/kernel.elf" | python3 -c '
 import sys
 payload, sectors = int(sys.argv[1]), int(sys.argv[2])
-base_expected, budget = 0x10000, 0x9f000
+base_expected, budget = int(sys.argv[3], 0), int(sys.argv[4], 0)
 sym = {}
 for line in sys.stdin:
     f = line.split()
@@ -119,6 +124,9 @@ if start != base_expected or entry != start:
     problems.append("entry %#x / image start %#x is not the load address %#x" % (entry, start, base_expected))
 if start + payload > bss_start:
     problems.append("loaded bytes end at %#x, past the bss start %#x" % (start + payload, bss_start))
+# fl_bootinfo_validate refuses a handoff whose whole-sector read ends before the bss starts.
+if start + sectors * 512 < bss_start:
+    problems.append("the loader reads up to %#x, short of the bss start %#x" % (start + sectors * 512, bss_start))
 if bss_end < bss_start:
     problems.append("bss end %#x is below its start %#x" % (bss_end, bss_start))
 if start + sectors * 512 > budget:
@@ -127,7 +135,7 @@ if not 0 < bss_end < budget:
     problems.append("image plus bss ends at %#x: past the conventional-memory budget (%#x)" % (bss_end, budget))
 if problems:
     sys.exit("image layout: " + "; ".join(problems))
-' "${payload_bytes}" "${sectors}"
+' "${payload_bytes}" "${sectors}" "${load_addr}" "${low_budget}"
 # FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
 # Stage 2 learns the payload's sector count and the bss end from its tagged patch block.
 python3 - "${build}/stage2.bin" "$sectors" "$bss_end" <<'PY'

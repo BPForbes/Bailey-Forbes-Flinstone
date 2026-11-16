@@ -10,7 +10,7 @@
 BITS 16
 ORG FL_STAGE2_ADDR
 %define E820_SMAP 0x534d4150
-%define E820_MAX_CALLS 128 ; a BIOS that never ends its list fails the boot instead of hanging it
+%define E820_MAX_CALLS 160 ; a BIOS that never ends its list fails the boot instead of hanging it
 %define KERNEL_MAX_SECTORS ((FL_LOW_BUDGET - FL_KERNEL_LOAD_ADDR) / 512)
 %define KERNEL_LBA (1 + FL_STAGE2_SECTORS)
 
@@ -32,6 +32,9 @@ stage2:
     rep stosw
 
 ; ---- 1. E820 -------------------------------------------------------------------------------
+; Entries go to the buffer until it is full. Then the next call goes to a spare slot: a valid entry
+; there means the map did not fit (flagged; the kernel refuses it), while carry or an empty reply
+; means the list had ended, so a map of exactly FL_BOOTINFO_E820_CAP entries is whole.
     mov si, msg_e820
     xor ebx, ebx
     mov word [e820_di], FL_BOOTINFO_E820_ADDR
@@ -40,6 +43,10 @@ stage2:
     cmp word [e820_calls], E820_MAX_CALLS
     ja boot_fail
     mov di, [e820_di]
+    cmp word [FL_BOOTINFO_ADDR + BI_E820_COUNT], FL_BOOTINFO_E820_CAP
+    jb .e820_slot
+    mov di, e820_spare
+.e820_slot:
     mov dword [di + 20], 1 ; ACPI 3.0 "use this entry", for a BIOS that returns only 20 bytes
     mov eax, 0xe820
     mov edx, E820_SMAP
@@ -51,13 +58,15 @@ stage2:
     jne boot_fail
     cmp ecx, 20
     jb .e820_skip ; too short to be an entry: dropped, the slot is reused
+    cmp word [FL_BOOTINFO_ADDR + BI_E820_COUNT], FL_BOOTINFO_E820_CAP
+    jae .e820_truncated
     inc word [FL_BOOTINFO_ADDR + BI_E820_COUNT]
     add word [e820_di], 24
 .e820_skip:
     test ebx, ebx
-    jz .e820_done
-    cmp word [FL_BOOTINFO_ADDR + BI_E820_COUNT], FL_BOOTINFO_E820_CAP
-    jb .e820_next
+    jnz .e820_next
+    jmp .e820_done
+.e820_truncated:
     or dword [FL_BOOTINFO_ADDR + BI_FLAGS], FL_BOOTINFO_F_E820_TRUNCATED ; the kernel rejects it
     jmp .e820_done
 .e820_carry: ; carry on the first call: no E820. Later: the end of the list.
@@ -68,32 +77,31 @@ stage2:
     je boot_fail
 
 ; ---- 2. A20 --------------------------------------------------------------------------------
+; BIOS first, then the keyboard controller, then port 0x92 (the one with side effects on some
+; boards). Each is followed by a bounded wait for the verified result.
     call a20_off
     jnc .a20_on
     mov ax, 0x2401 ; BIOS
     int 0x15
-    call a20_off
+    call a20_wait
     jnc .a20_on
-    in al, 0x92 ; fast A20 (bit 0 would reset the machine: kept clear)
-    or al, 2
-    and al, 0xfe
-    out 0x92, al
-    call a20_off
-    jnc .a20_on
-    call kbc_wait ; keyboard controller: write output port with A20 set
+    cli ; the BIOS keyboard handler must not read port 0x60 between the command and its data
+    call kbc_wait ; keyboard controller: write the output port with A20 set
     mov al, 0xd1
     out 0x64, al
     call kbc_wait
     mov al, 0xdf
     out 0x60, al
     call kbc_wait
-    mov cx, 0x100
-.a20_retry:
-    push cx
-    call a20_off
-    pop cx
+    sti
+    call a20_wait
     jnc .a20_on
-    loop .a20_retry
+    in al, 0x92 ; fast A20 (bit 0 would reset the machine: kept clear)
+    or al, 2
+    and al, 0xfe
+    out 0x92, al
+    call a20_wait
+    jnc .a20_on
     mov si, msg_a20
     jmp boot_fail
 .a20_on:
@@ -203,7 +211,8 @@ stage2:
     jmp dword 0x08:FL_KERNEL_LOAD_ADDR
 
 ; Carry set when A20 is off: a byte below 1 MiB and its alias 1 MiB higher are the same byte.
-; Two patterns, so a byte that already held the second value cannot fake an answer.
+; Two patterns, so a byte that already held the second value cannot fake an answer. With A20 on,
+; 0xa5 stays at FL_A20_PROBE + 1 MiB: no live object is there (see bootinfo.inc).
 a20_off:
     push ds
     push es
@@ -230,6 +239,19 @@ a20_off:
     pop ds
     ret
 
+; Carry clear as soon as A20 reads on, carry set if it is still off after a bounded number of checks.
+a20_wait:
+    mov cx, 0x100
+.again:
+    push cx
+    call a20_off
+    pop cx
+    jnc .done
+    loop .again
+    stc
+.done:
+    ret
+
 ; Wait (bounded) until the keyboard controller can take a byte.
 kbc_wait:
     mov cx, 0xffff
@@ -248,6 +270,8 @@ msg_read: db "FLINTSTONE_BOOT_FAIL kernel-read", 13, 10, 0
 drive: db 0
 e820_calls: dw 0
 e820_di: dw 0
+align 4
+e820_spare: times 24 db 0 ; the probe slot once the buffer is full
 remaining: dw 0
 chunk: dw 0
 cur_seg: dw FL_KERNEL_LOAD_ADDR >> 4

@@ -13,12 +13,14 @@
 #define FL_BOOTINFO_MAGIC 0x49424c46u /* "FLBI" */
 #define FL_BOOTINFO_VERSION 1u
 #define FL_BOOTINFO_SIZE 200u
-#define FL_BOOTINFO_ADDR 0x500u
+#define FL_BOOTINFO_ADDR 0x510u
 #define FL_BOOTINFO_E820_ADDR 0x600u
-#define FL_BOOTINFO_E820_CAP 64u
+#define FL_BOOTINFO_E820_CAP 106u
 #define FL_BOOTINFO_MAX_RESERVED 8u
 #define FL_BOOTINFO_F_E820_TRUNCATED 1u /* the BIOS had more entries than the buffer holds */
-#define FL_KERNEL_STACK_BOTTOM 0xc000u /* entry.asm's stack, below the image */
+#define FL_PAGE_TABLES 0x1000u /* the loader's identity map, live for the whole run */
+#define FL_PAGE_TABLES_END 0x5000u
+#define FL_KERNEL_STACK_BOTTOM 0xc000u /* entry.asm's stack, below the image; no guard page */
 #define FL_KERNEL_STACK_TOP 0x10000u
 
 typedef struct fl_boot_info {
@@ -41,6 +43,7 @@ typedef struct fl_boot_info {
 
 _Static_assert(sizeof(fl_boot_info_t) == FL_BOOTINFO_SIZE, "boot info size is shared with bootinfo.inc");
 _Static_assert(FL_BOOTINFO_ADDR + FL_BOOTINFO_SIZE <= FL_BOOTINFO_E820_ADDR, "boot info overlaps the E820 buffer");
+_Static_assert(FL_BOOTINFO_E820_ADDR + FL_BOOTINFO_E820_CAP * 24u <= FL_PAGE_TABLES, "E820 buffer overlaps the page tables");
 
 /* FL_BOOTMAP_OK, or the reason the handoff is unusable (FL_BOOTMAP_E_INVAL, or
  * FL_BOOTMAP_E_TRUNCATED for a truncated E820 map). kernel_start, bss_start and kernel_end are the

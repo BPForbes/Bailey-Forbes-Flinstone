@@ -16,10 +16,10 @@ start:
     sti
     mov [boot_drive], dl
 
-    mov si, msg_lba
     mov ah, 0x41
     mov bx, 0x55aa
     int 0x13
+    mov si, msg_lba ; after the call: a BIOS may change si
     jc boot_fail
     cmp bx, 0xaa55
     jne boot_fail

@@ -140,9 +140,11 @@ int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64
     for (uint32_t i = 0; i < bi->reserved_count; i++)
         if (bi->reserved[i].base >= bi->reserved[i].end)
             return FL_BOOTMAP_E_INVAL;
-    /* The image, its stack, the E820 buffer and this struct are reserved: no arena can take them. */
+    /* The image, its stack, the page tables, the E820 buffer and this struct are reserved: no
+     * arena can take them. */
     if (map_end < bi->e820_addr || !reserved_covers(bi, kernel_start, kernel_end) ||
         !reserved_covers(bi, FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP) ||
+        !reserved_covers(bi, FL_PAGE_TABLES, FL_PAGE_TABLES_END) ||
         !reserved_covers(bi, bi->e820_addr, map_end) ||
         !reserved_covers(bi, (uintptr_t)bi, (uintptr_t)bi + sizeof(*bi)))
         return FL_BOOTMAP_E_INVAL;
