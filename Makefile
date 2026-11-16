@@ -1105,11 +1105,12 @@ test_fs_identity:
 	  -o tests/test_fs_identity tests/test_fs_identity.c kernel/freestanding/x86_64/identity.c
 	./tests/test_fs_identity
 
-# FL-02: the freestanding image's E820 arena selection, run on the host.
+# FL-02: the freestanding image's E820 arena selection and KeyQuorum heap, run on the host.
 .PHONY: test_fs_bootmap
-test_fs_bootmap:
+test_fs_bootmap: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -Ikernel/freestanding/x86_64 \
-	  -o tests/test_fs_bootmap tests/test_fs_bootmap.c kernel/freestanding/x86_64/bootmap.c
+	  -o tests/test_fs_bootmap tests/test_fs_bootmap.c kernel/freestanding/x86_64/bootmap.c \
+	  kernel/freestanding/x86_64/kq_heap.c $(MEM_ASM_OBJ)
 	./tests/test_fs_bootmap
 
 .PHONY: test_hex

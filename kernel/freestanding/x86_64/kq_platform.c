@@ -5,10 +5,7 @@
  * linking with -nostdlib. The same symbols tools/browser-lab/wasm/lab_kq.c supplies for the
  * WebAssembly lab; the byte primitives reuse the assembly layer (arch/x86_64/gas/mem_asm.s).
  *
- * Heap: one arena that fl_kernel_main picks from the firmware's E820 map (bootmap.c) inside the
- * boot code's identity map, clear of every range the loader reserved, and hands to fl_kq_heap_init
- * (FL-02). Until then every allocation fails. A first-fit free list with coalescing; every freed
- * block is zeroed, as the library asks.
+ * Heap: kq_heap.c, over the arena fl_kernel_main picks from the firmware's E820 map (FL-02).
  *
  * Entropy: RDRAND, else the launcher's fw_cfg file opt/flintstone/entropy (below). With neither,
  * kq_platform_random returns non-zero and the library fails closed (a panic through
@@ -17,105 +14,23 @@
 #include "contract_result.h"
 #include "fl/mem_asm.h"
 #include "ioport.h"
-#include "kq_platform.h"
+#include "kq_heap.h"
 #include "mem_domain.h"
 #include "serial.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
-#define KQ_ALIGN 16u
-
-typedef struct kq_blk {
-    size_t size; /* payload bytes after this header */
-    int used;
-    struct kq_blk *next;
-} kq_blk_t;
-
-#define HDR ((size_t)((sizeof(kq_blk_t) + KQ_ALIGN - 1) & ~(size_t)(KQ_ALIGN - 1)))
-
-static kq_blk_t *s_head;
-static size_t s_heap_size;
-
-int fl_kq_heap_init(uint64_t base, uint64_t size)
-{
-    if (s_head || (base & (KQ_ALIGN - 1)) || size < FL_KQ_HEAP_MIN || size > UINT64_MAX - base)
-        return -1;
-    s_head = (kq_blk_t *)(uintptr_t)base;
-    s_heap_size = (size_t)size;
-    s_head->size = s_heap_size - HDR;
-    s_head->used = 0;
-    s_head->next = 0;
-    return 0;
-}
-
-static void heap_split_tail(kq_blk_t *b, size_t need)
-{
-    kq_blk_t *t = (kq_blk_t *)((uintptr_t)b + HDR + need);
-
-    t->size = b->size - need - HDR;
-    t->used = 0;
-    t->next = b->next;
-    b->size = need;
-    b->next = t;
-}
-
-/* Payload pointer aligned to `align` (<= 4096): the block's payload is over-sized so an aligned
- * address with a back-pointer to the block header fits inside it. */
-static void *heap_alloc(size_t len, size_t align)
-{
-    kq_blk_t *b;
-    size_t need;
-
-    if (!s_head)
-        return 0; /* no arena from the boot map: fail closed */
-    if (align < KQ_ALIGN)
-        align = KQ_ALIGN;
-    if (align > 4096 || (align & (align - 1)) || len > s_heap_size)
-        return 0;
-    need = (len + align + sizeof(void *) + KQ_ALIGN - 1) & ~(size_t)(KQ_ALIGN - 1);
-    for (b = s_head; b; b = b->next) {
-        if (!b->used && b->size >= need) {
-            uintptr_t raw = (uintptr_t)b + HDR + sizeof(void *);
-            uintptr_t p = (raw + align - 1) & ~(uintptr_t)(align - 1);
-
-            if (b->size >= need + HDR + KQ_ALIGN)
-                heap_split_tail(b, need);
-            b->used = 1;
-            ((kq_blk_t **)p)[-1] = b;
-            return (void *)p;
-        }
-    }
-    return 0;
-}
-
-static void heap_free(void *ptr)
-{
-    kq_blk_t *b;
-
-    if (!ptr)
-        return;
-    b = ((kq_blk_t **)ptr)[-1];
-    asm_mem_secure_zero((void *)((uintptr_t)b + HDR), b->size); /* freed memory is zeroed */
-    b->used = 0;
-    for (b = s_head; b; b = b->next) /* coalesce neighbours */
-        while (!b->used && b->next && !b->next->used) {
-            b->size += HDR + b->next->size;
-            b->next = b->next->next;
-        }
-}
-
-
 uint8_t *kq_platform_alloc(size_t len, size_t align)
 {
-    return (uint8_t *)heap_alloc(len ? len : 1, align);
+    return (uint8_t *)fl_kq_heap_alloc(len ? len : 1, align);
 }
 
 void kq_platform_free(uint8_t *ptr, size_t len, size_t align)
 {
     (void)len;
     (void)align;
-    heap_free(ptr);
+    fl_kq_heap_free(ptr);
 }
 
 __attribute__((noreturn)) void kq_platform_panic(void)
@@ -192,7 +107,7 @@ int kq_platform_random(uint8_t *buf, size_t len)
 void *mem_domain_alloc(mem_domain_t d, size_t n)
 {
     (void)d;
-    return heap_alloc(n ? n : 1, KQ_ALIGN);
+    return fl_kq_heap_alloc(n ? n : 1, FL_KQ_HEAP_ALIGN);
 }
 
 void *mem_domain_calloc(mem_domain_t d, size_t m, size_t n)
@@ -210,27 +125,25 @@ void *mem_domain_calloc(mem_domain_t d, size_t m, size_t n)
 void *mem_domain_realloc(mem_domain_t d, void *p, size_t n)
 {
     void *q;
-    kq_blk_t *b;
     size_t have;
 
     if (!p)
         return mem_domain_alloc(d, n);
-    b = ((kq_blk_t **)p)[-1];
-    have = b->size - ((uintptr_t)p - ((uintptr_t)b + HDR));
+    have = fl_kq_heap_usable(p);
     if (n <= have)
         return p;
     q = mem_domain_alloc(d, n);
     if (!q)
         return 0;
     asm_mem_copy(q, p, have);
-    heap_free(p);
+    fl_kq_heap_free(p);
     return q;
 }
 
 void mem_domain_free(mem_domain_t d, void *p)
 {
     (void)d;
-    heap_free(p);
+    fl_kq_heap_free(p);
 }
 
 void mem_domain_copy(void *dst, const void *src, size_t n)

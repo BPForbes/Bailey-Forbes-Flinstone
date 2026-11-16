@@ -12,7 +12,7 @@
 #include "vga.h"
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
-#include "kq_platform.h"
+#include "kq_heap.h"
 #ifndef FL_SECFEAT
 void fl_fs_kq_bind_identity(void);
 #endif

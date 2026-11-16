@@ -2,11 +2,13 @@
  * Freestanding boot memory map (FL-02): fl_bootmap_select_arena picks the KeyQuorum heap arena
  * from an E820 map. Covers QEMU's map, unsorted and overlapping entries, reservations that split
  * a usable region, overflowing, zero-length and disabled entries, truncated maps, alignment and
- * the identity-map limit. Then fl_bootinfo_validate, the kernel's check of stage 2's handoff, and
- * that bootinfo.inc (the loader's copy of the layout) agrees with bootinfo.h.
+ * the identity-map limit, the 40 MiB boundary, a full buffer and ties. Then fl_bootinfo_validate,
+ * the kernel's check of stage 2's handoff; that bootinfo.inc (the loader's copy of the layout) agrees
+ * with bootinfo.h; and the KeyQuorum heap (kq_heap.c) over an arena of its own.
  */
 #include "bootinfo.h"
 #include "bootmap.h"
+#include "kq_heap.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -21,7 +23,7 @@
 } while (0)
 
 #define MIB (1ull << 20)
-#define CAP 64u
+#define CAP FL_BOOTINFO_E820_CAP
 #define E(b, l, t) { (b), (l), (t), FL_E820_ATTR_ENABLED }
 
 static const fl_bootmap_limits_t k_limits = { MIB, 1ull << 30, 40 * MIB, 4096 };
@@ -339,13 +341,121 @@ static int test_inc_matches_header(const char *path)
     return 0;
 }
 
+static int test_min_size_boundary(void)
+{
+    fl_e820_entry_t e[] = { E(MIB, 40 * MIB, 1) };
+    uint64_t b, s;
+
+    ASSERT(pick(e, 1, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK); /* exactly FL_KQ_HEAP_MIN */
+    ASSERT(b == MIB && s == 40 * MIB && s == FL_KQ_HEAP_MIN);
+    e[0].length -= 1;
+    ASSERT(pick(e, 1, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_E_NOFIT);
+    return 0;
+}
+
+static int test_full_buffer(void)
+{
+    static fl_e820_entry_t e[CAP];
+    uint64_t b, s;
+
+    /* CAP - 1 small regions split by reserved gaps, then one large region last. */
+    for (uint32_t i = 0; i + 1 < CAP; i++)
+        e[i] = (fl_e820_entry_t)E(MIB + i * 2 * 4096, 4096, (i & 1) ? 2u : 1u);
+    e[CAP - 1] = (fl_e820_entry_t)E(64 * MIB, 48 * MIB, 1);
+    ASSERT(fl_bootmap_select_arena(e, CAP, CAP, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
+    ASSERT(b == 64 * MIB && s == 48 * MIB);
+    ASSERT(fl_bootmap_select_arena(e, CAP, CAP - 1, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_E_TRUNCATED);
+    return 0;
+}
+
+static int test_equal_spans_lowest_wins(void)
+{
+    const fl_e820_entry_t e[] = { E(200 * MIB, 40 * MIB, 1), E(MIB, 40 * MIB, 1), E(100 * MIB, 40 * MIB, 1) };
+    uint64_t b, s;
+
+    ASSERT(pick(e, 3, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
+    ASSERT(b == MIB && s == 40 * MIB);
+    return 0;
+}
+
+static int test_other_types_block(void)
+{
+    /* ACPI reclaimable (3), ACPI NVS (4), bad memory (5) and an unknown type all block. */
+    const uint32_t types[] = { 3, 4, 5, 12 };
+
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++) {
+        const fl_e820_entry_t e[] = { E(MIB, 63 * MIB, 1), E(20 * MIB, MIB, types[i]) };
+        uint64_t b, s;
+
+        ASSERT(pick(e, 2, NULL, 0, &k_limits, &b, &s) == FL_BOOTMAP_OK);
+        ASSERT(b == 21 * MIB && s == 43 * MIB);
+    }
+    return 0;
+}
+
+/* ---- KeyQuorum heap (kq_heap.c) ------------------------------------------------------------ */
+
+static int all_zero(const unsigned char *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++)
+        if (p[i])
+            return 0;
+    return 1;
+}
+
+static int test_kq_heap(void)
+{
+    const size_t arena_size = FL_KQ_HEAP_MIN + MIB;
+    unsigned char *arena = aligned_alloc(4096, arena_size);
+    unsigned char *a, *c, *big;
+
+    ASSERT(arena != NULL);
+    memset(arena, 0x5a, arena_size);
+    ASSERT(fl_kq_heap_alloc(16, 16) == NULL); /* no arena yet: fail closed */
+    ASSERT(fl_kq_heap_init((uintptr_t)arena + 8, arena_size - 8) == -1);           /* misaligned */
+    ASSERT(fl_kq_heap_init((uintptr_t)arena, FL_KQ_HEAP_MIN - 1) == -1);          /* too small */
+    ASSERT(fl_kq_heap_init(UINT64_MAX - 15, FL_KQ_HEAP_MIN) == -1);               /* wraps */
+    ASSERT(fl_kq_heap_alloc(16, 16) == NULL);
+    ASSERT(fl_kq_heap_init((uintptr_t)arena, arena_size) == 0);
+    ASSERT(fl_kq_heap_init((uintptr_t)arena, arena_size) == -1);                  /* only once */
+
+    ASSERT(fl_kq_heap_alloc(16, 24) == NULL && fl_kq_heap_alloc(16, 8192) == NULL); /* not a power of two; over 4096 */
+    ASSERT(fl_kq_heap_alloc(arena_size + 1, 16) == NULL);
+    a = fl_kq_heap_alloc(1000, 4096);
+    ASSERT(a && ((uintptr_t)a & 4095) == 0 && a >= arena && a + 1000 <= arena + arena_size);
+    ASSERT(fl_kq_heap_usable(a) >= 1000);
+    c = fl_kq_heap_alloc(300, 16);
+    ASSERT(c && ((uintptr_t)c & 15) == 0 && (c >= a + 1000 || c + 300 <= a));
+    memset(a, 0xab, 1000);
+    memset(c, 0xcd, 300);
+    fl_kq_heap_free(a);
+    ASSERT(all_zero(a, 1000));       /* freed memory is wiped */
+    ASSERT(c[0] == 0xcd && c[299] == 0xcd);
+    fl_kq_heap_free(c);
+    ASSERT(all_zero(c, 300));
+    fl_kq_heap_free(NULL);
+
+    /* Two 20 MiB blocks fit; after both are freed the arena coalesces and 40 MiB fits again. */
+    a = fl_kq_heap_alloc(20 * MIB, 16);
+    c = fl_kq_heap_alloc(20 * MIB, 16);
+    ASSERT(a && c && fl_kq_heap_alloc(2 * MIB, 16) == NULL);
+    fl_kq_heap_free(a);
+    fl_kq_heap_free(c);
+    big = fl_kq_heap_alloc(FL_KQ_HEAP_MIN, 16);
+    ASSERT(big != NULL);
+    fl_kq_heap_free(big);
+    free(arena);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int (*const tests[])(void) = {
         test_qemu_map, test_unsorted_same_answer, test_overlapping_usable_join,
         test_reserved_entry_wins_overlap, test_reservation_splits_region, test_overflow_rejected,
         test_zero_length_and_disabled_ignored, test_truncated_and_invalid,
-        test_alignment_and_map_limit, test_below_min_base_excluded,
+        test_alignment_and_map_limit, test_below_min_base_excluded, test_min_size_boundary,
+        test_full_buffer, test_equal_spans_lowest_wins, test_other_types_block, test_kq_heap,
     };
 
     for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++)
