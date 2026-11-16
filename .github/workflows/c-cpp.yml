@@ -204,6 +204,17 @@ jobs:
       - name: Test — KeyQuorum key service
         run: make test_kq_service
 
+      # FL-15: the real-token test needs the keyquorum CLI to mint KQSTs and a bridge. CI builds it
+      # from the pinned submodule, and KQ_RT_REQUIRE=1 turns the fixture's skip into a failure, so
+      # the test cannot pass here by not running.
+      - name: Build — keyquorum CLI (real-token fixture)
+        run: cargo build --release --locked --manifest-path third_party/keyquorum/Cargo.toml --bin keyquorum --bin keyquorum-device
+
+      - name: Test — real KeyQuorum tokens (KQST login, sudo window, bridge su)
+        env:
+          KQ_RT_REQUIRE: "1"
+        run: make test_kq_real_token
+
       - name: Test — userspace connection
         run: make test_userspace_connection
 

@@ -17,7 +17,7 @@
 # KQ_CLI_DIR names the directory holding keyquorum and keyquorum-device (default: the submodule's
 # target/release). Building them is `cargo build --release --locked` in third_party/keyquorum and
 # is not part of the default make. Without them, or without python3, the fixture is skipped (exit
-# 0) and says so.
+# 0) and says so, unless KQ_RT_REQUIRE=1 (CI), which makes that a failure.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test_bin="${1:?usage: kq_real_token_fixture.sh TEST_BINARY}"
@@ -27,15 +27,23 @@ kq="${cli_dir}/keyquorum"
 kqd="${cli_dir}/keyquorum-device"
 answer="${root}/scripts/kq_pty_answer.py"
 
+# KQ_RT_REQUIRE=1 (CI, FL-15) makes a skip a failure: the test must run there.
+skip() {
+    if [ "${KQ_RT_REQUIRE:-0}" = "1" ]; then
+        echo "test_kq_real_token: FAILED: $* (KQ_RT_REQUIRE=1 does not allow a skip)" >&2
+        exit 1
+    fi
+    echo "test_kq_real_token: SKIPPED: $*"
+    exit 0
+}
+
 if [ ! -x "${kq}" ] || [ ! -x "${kqd}" ]; then
-    echo "test_kq_real_token: SKIPPED: no keyquorum CLI at ${cli_dir}" \
+    skip "no keyquorum CLI at ${cli_dir}" \
          "(build it with: cargo build --release --locked --manifest-path third_party/keyquorum/Cargo.toml," \
          "or set KQ_CLI_DIR)"
-    exit 0
 fi
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "test_kq_real_token: SKIPPED: python3 is needed to answer the CLI's terminal prompts"
-    exit 0
+    skip "python3 is needed to answer the CLI's terminal prompts"
 fi
 
 umask 077
