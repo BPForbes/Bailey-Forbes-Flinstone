@@ -17,6 +17,7 @@
 #define MODE_SUDO_CMD 5
 #define MODE_SUDO_I 6
 #define MODE_PASSWD 7
+#define MODE_SWITCHUSER 8
 
 struct perspective {
     int valid;
@@ -278,7 +279,7 @@ static void session_go(int session)
 static int switchuser_to(int session, const char *name)
 {
     int target;
-    if (!fl_fs_identity_switchuser(session, name))
+    if (!fl_fs_identity_switchuser(session, name, (const char *)0))
         return 0;
     target = fl_fs_identity_user_index(session);
     perspective_switch_user(target, session);
@@ -304,6 +305,8 @@ static void finish_password(int session, const char *password)
         ok = fl_fs_identity_sudo(session, password);
     else if (mode == MODE_PASSWD)
         ok = fl_fs_identity_passwd(session, s_pending[session], password);
+    else if (mode == MODE_SWITCHUSER)
+        ok = fl_fs_identity_switchuser(session, s_pending[session], password);
     if (ok && mode == MODE_SUDO_I)
         ok = fl_fs_identity_enter_root(session);
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
@@ -314,6 +317,12 @@ static void finish_password(int session, const char *password)
         str_copy(held, s_pending[session], sizeof(held));
         s_pending[session][0] = 0;
         run_command(session, held);
+        return;
+    }
+    if (mode == MODE_SWITCHUSER) {
+        s_pending[session][0] = 0;
+        if (ok)
+            announce_switchuser();
         return;
     }
     announce_session();
@@ -379,8 +388,16 @@ static void run_command(int session, char *line)
             emit("usage: switchuser <user>\r\n");
             return;
         }
-        if (!switchuser_to(session, name))
+        if (!fl_fs_identity_has_user(name)) {
             emit("unknown user\r\n");
+            return;
+        }
+        /* The session's own account is free; another one asks for its password, as su does
+         * (owner decision, FL-14 #406). */
+        if (switchuser_to(session, name))
+            return;
+        str_copy(s_pending[session], name, sizeof(s_pending[session]));
+        s_mode[session] = MODE_SWITCHUSER;
         return;
     }
     if (str_eq(verb, "login") || str_eq(verb, "su") || str_eq(verb, "useradd")) {

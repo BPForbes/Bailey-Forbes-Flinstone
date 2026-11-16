@@ -182,7 +182,15 @@ int fl_fs_identity_su(int session, const char *name, const char *password)
     return fl_fs_identity_login(session, name, password);
 }
 
-int fl_fs_identity_switchuser(int session, const char *name)
+int fl_fs_identity_has_user(const char *name)
+{
+    return find_user(name) >= 0;
+}
+
+/* switchuser follows su on the hosted shell (owner decision, FL-14 #406): the session's own
+ * account is free, any other account needs that account's password. A switch_allowed op, when
+ * installed, may refuse first; it never replaces the password. */
+int fl_fs_identity_switchuser(int session, const char *name, const char *password)
 {
     int idx;
     if (session < 0 || session >= FL_FS_MAX_SESSIONS || !s_session_used[session])
@@ -190,10 +198,12 @@ int fl_fs_identity_switchuser(int session, const char *name)
     idx = find_user(name);
     if (idx < 0 || s_session_user[session] < 0)
         return 0;
-    /* A switch_allowed op is the relation check. With none installed, switchuser stays open:
-     * the lab reconnects a seat with it, and that restriction is not confirmed. */
+    if (idx == s_session_user[session])
+        return 1;
     if (s_kq && s_kq->switch_allowed &&
         !s_kq->switch_allowed(s_users[s_session_user[session]].name, s_users[idx].name))
+        return 0;
+    if (!password_ok(&s_users[idx], password))
         return 0;
     s_session_user[session] = idx;
     return 1;

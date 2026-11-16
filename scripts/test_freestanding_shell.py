@@ -269,21 +269,32 @@ try:
     read_until("Flinstone@flintstone>", 4)
     send("whoami\n")
     read_until("WHOAMI Flinstone", 4)
+    # switchuser to another account asks for its password, as su does (FL-14 #406). These are the
+    # public image's seeded demo accounts.
+    start = len(buf)
     send("switchuser root\n")
+    wait_from("Password:", start)
+    send("root\n")
     read_until("SWITCHUSER user=Root", 4)
     send("whoami\n")
     read_until("WHOAMI Root elevated", 4)
     send("history\n")
     read_until("1: whoami", 4)
+    start = len(buf)
     send("switchuser flinstone\n")
+    wait_from("Password:", start)
+    send("flinstone\n")
     read_until("SWITCHUSER user=Flinstone", 4)
     send("whoami\n")
     read_until("WHOAMI Flinstone", 4)
     send("history\n")
     read_until("1: whoami", 4)
     # Lab "New session" sends both lines in one burst, matching the iframe UI.
+    start = len(buf)
     send("session new\nswitchuser root\n")
     read_until("SESSION 2 user=Flinstone", 4)
+    wait_from("Password:", start)
+    send("root\n")
     read_until("SWITCHUSER user=Root", 4)
     if b"no such session" in buf.replace(b"\r", b""):
         raise SystemExit(

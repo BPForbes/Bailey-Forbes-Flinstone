@@ -2,7 +2,8 @@
  * Freestanding identity (FL-14): with no KeyQuorum ops the demo password is checked as before.
  * With ops installed, login, su and sudo ask unlock, passwd re-seals, userdel forgets, and the
  * password the test drew is not what a later unlock sees after passwd. switch_allowed is optional:
- * left NULL, switchuser still changes account; when it refuses, sudo -i still enters Root.
+ * left NULL, switchuser to another account still needs that account's password (FL-14 #406, as su);
+ * when it refuses, sudo -i still enters Root.
  * Passwords are drawn at run time.
  */
 #include "identity.h"
@@ -125,13 +126,21 @@ static int test_plaintext_then_sealed(void) {
     fl_fs_identity_init();
 
     /* No ops: a drawn password is the account's own check, and unlock is not called. */
-    ASSERT(fl_fs_identity_switchuser(0, "Root") == 1);
+    ASSERT(fl_fs_identity_switchuser(0, "Root", NULL) == 0); /* another account: password needed */
+    ASSERT(strcmp(fl_fs_identity_user(0), "Flinstone") == 0);
+    ASSERT(fl_fs_identity_switchuser(0, "flinstone", NULL) == 1); /* its own account is free */
+    ASSERT(fl_fs_identity_enter_root(0) == 1);
     ASSERT(draw_pw(pw, sizeof pw) == 0);
     ASSERT(fl_fs_identity_useradd(0, "Ada", pw) == 1);
-    ASSERT(fl_fs_identity_login(0, "Ada", pw) == 1);
-    ASSERT(s_unlocks == 0);
     snprintf(wrong, sizeof wrong, "%s", pw);
     wrong[0] = (char)(wrong[0] == 'a' ? 'b' : 'a');
+    ASSERT(fl_fs_identity_switchuser(0, "Ada", wrong) == 0);
+    ASSERT(strcmp(fl_fs_identity_user(0), "Root") == 0);
+    ASSERT(fl_fs_identity_switchuser(0, "Ada", pw) == 1);
+    ASSERT(strcmp(fl_fs_identity_user(0), "Ada") == 0);
+    ASSERT(fl_fs_identity_has_user("ADA") == 1 && fl_fs_identity_has_user("nobody") == 0);
+    ASSERT(fl_fs_identity_login(0, "Ada", pw) == 1);
+    ASSERT(s_unlocks == 0);
     ASSERT(fl_fs_identity_login(0, "Ada", wrong) == 0);
     ASSERT(strcmp(fl_fs_identity_user(0), "Ada") == 0);
 
@@ -140,11 +149,16 @@ static int test_plaintext_then_sealed(void) {
     (void)fl_fs_identity_set_kq(&s_ops);
     fl_fs_identity_init();
     ASSERT(held_find("Flinstone") && held_find("Root"));
-    ASSERT(fl_fs_identity_switchuser(0, "Root") == 1);
+    ASSERT(fl_fs_identity_enter_root(0) == 1);
     ASSERT(draw_pw(pw, sizeof pw) == 0);
     unlocks_before = s_unlocks;
     ASSERT(fl_fs_identity_useradd(0, "Ada", pw) == 1);
     ASSERT(held_find("Ada") != NULL);
+    /* With ops, the switch password is checked through unlock too. */
+    unlocks_before = s_unlocks;
+    ASSERT(fl_fs_identity_switchuser(0, "Ada", pw) == 1);
+    ASSERT(s_unlocks > unlocks_before);
+    ASSERT(fl_fs_identity_enter_root(0) == 1);
     unlocks_before = s_unlocks;
     ASSERT(fl_fs_identity_login(0, "Ada", pw) == 1);
     ASSERT(s_unlocks > unlocks_before);
@@ -163,7 +177,7 @@ static int test_plaintext_then_sealed(void) {
 
     /* switch_allowed may refuse. sudo -i does not ask it. */
     (void)fl_fs_identity_set_kq(&s_ops_closed);
-    ASSERT(fl_fs_identity_switchuser(0, "Root") == 0);
+    ASSERT(fl_fs_identity_switchuser(0, "Root", NULL) == 0);
     ASSERT(strcmp(fl_fs_identity_user(0), "Ada") == 0);
     ASSERT(fl_fs_identity_enter_root(0) == 1);
     ASSERT(strcmp(fl_fs_identity_user(0), "Root") == 0);

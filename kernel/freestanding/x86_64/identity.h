@@ -9,8 +9,9 @@
  * demo passwords in the account table. The WebAssembly lab installs a table before
  * fl_fs_identity_init: enroll seals a signing key and a box key under the password through the
  * driver, and identity then stores no password. unlock is 1 when that seal opens. switch_allowed
- * is consulted only when it is non-NULL; leaving it NULL keeps password-free switchuser, which
- * the lab still uses until that restriction is confirmed. change_password re-seals (0 on
+ * is consulted only when it is non-NULL, as an extra refusal before the password; switchuser to
+ * another account always needs that account's password, as su does on the hosted shell
+ * (FL-14 #406). change_password re-seals (0 on
  * success). forget drops the sealed keys at userdel.
  */
 typedef struct fl_fs_identity_kq_ops {
@@ -28,7 +29,10 @@ const char *fl_fs_identity_user(int session);
 int fl_fs_identity_elevated(int session);
 int fl_fs_identity_login(int session, const char *name, const char *password);
 int fl_fs_identity_su(int session, const char *name, const char *password);
-int fl_fs_identity_switchuser(int session, const char *name);
+/* 1 when an account of that name exists (any case). */
+int fl_fs_identity_has_user(const char *name);
+/* The session's own account needs no password; another account needs its password (NULL refuses). */
+int fl_fs_identity_switchuser(int session, const char *name, const char *password);
 /* sudo -i, after the sudo password was accepted: become Root with no second check. */
 int fl_fs_identity_enter_root(int session);
 int fl_fs_identity_user_index(int session);

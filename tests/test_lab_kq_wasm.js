@@ -135,12 +135,24 @@ function makeRelay() {
   return relay;
 }
 
+// switchuser to another account asks for its password, as su does (FL-14 #406). Root's is the
+// public demo seed; each lab account's password is drawn at run time.
+const ROOT_DEMO = "root";
+const passwords = {};
+function asRoot(t) {
+  t.run("switchuser root");
+  t.run(ROOT_DEMO);
+}
+
 function registered(t, user) {
   // The lab's own way in: Root adds the account, then the session switches to it.
-  t.run("switchuser root");
+  passwords[user] = require("crypto").randomBytes(9).toString("hex");
+  asRoot(t);
   t.run(`useradd ${user}`);
-  t.run(user);
+  t.run(passwords[user]);
   t.run(`switchuser ${user}`);
+  t.run(passwords[user]);
+  assert.match(t.text(), new RegExp(`SWITCHUSER user=${user}`));
 }
 
 (async () => {
@@ -245,7 +257,7 @@ function registered(t, user) {
   alice.run("server file send -t other.txt -user bob");
   relay.drain();
   const req3 = bob.events.filter(e => e.kind === "request").pop();
-  bob.run("switchuser root");
+  asRoot(bob);
   bob.run(`server file cosign ${req3.a}`);
   relay.drain();
   assert.match(bob.text(), /host checkpoint refused\n  co-signature refused: not addressed to this account/);

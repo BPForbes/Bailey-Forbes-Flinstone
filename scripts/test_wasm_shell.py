@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Host-gcc smoke test for the Emscripten/WASM lab shell."""
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -11,13 +12,18 @@ HOST = ROOT / "dist" / "flintstone_wasm_host"
 def main():
     if not HOST.is_file():
         raise SystemExit(f"missing {HOST}; run ./scripts/build_wasm_lab.sh")
+    # switchuser to another account asks for its password, as su does (FL-14 #406). Root's is the
+    # public demo seed; demo's is drawn at run time.
+    demo_pw = secrets.token_hex(9)
     commands = [
         "whoami",
         "switchuser root",
+        "root",
         "whoami",
         "useradd demo",
-        "demo",
+        demo_pw,
         "switchuser demo",
+        demo_pw,
         "whoami",
         "server msg hi",
         "dir",

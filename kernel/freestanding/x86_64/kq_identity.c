@@ -124,7 +124,7 @@ static void kqi_forget(const char *name)
 static const fl_fs_identity_kq_ops_t s_ops = {
     .enroll = kqi_enroll,
     .unlock = kqi_unlock,
-    .switch_allowed = NULL, /* password-free switchuser unchanged: an open owner point */
+    .switch_allowed = NULL, /* no extra refusal: switchuser asks the target's password (FL-14 #406) */
     .change_password = kqi_change_password,
     .forget = kqi_forget,
 };

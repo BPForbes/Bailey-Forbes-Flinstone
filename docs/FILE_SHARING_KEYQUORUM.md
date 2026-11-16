@@ -745,7 +745,10 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
 - **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo
   accounts are seeded. A new account's signing key and box key are sealed with the driver's `account_seal`,
   and the password is not kept in the account table; login, `su` and `sudo` open that seal. `switchuser`
-  stays password-free: the lab reconnects a seat with it, and restricting it is still an open question.
+  follows `su` on the hosted shell (owner decision, FL-14 #406): the session's own account is free, and
+  another account asks for that account's password. `sudo -i` still enters Root after the sudo password.
+  In the lab page, Register user asks for Root's password, and Switch user and New session ask for the
+  account's password.
   The QEMU image installs a slimmer table (`kernel/freestanding/x86_64/kq_identity.c`: one sealed signing key per account, nothing kept
   open, opened only to check the password) unless it is the security-lab image; sealing the two demo accounts at boot adds about 1.5 s. The
   public image keeps its demo accounts (`FL_SEED_DEFAULT_ACCOUNTS` stays 1).
