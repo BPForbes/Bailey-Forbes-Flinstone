@@ -28,7 +28,6 @@ void fl_authz_subsystem_set_deny_audit(void (*sink)(unsigned op));
 /** Map a **fl_shell_cmd_no_t** to **FL_AUTHZ_OP_*** for subsystem gates (0 = unspecified). */
 unsigned fl_authz_subsystem_op_for_shell_cmd(unsigned cmd_no);
 
-/** Returns 1 when su or sudo must stop before a password prompt; a denial is audited. */
 int fl_authz_identity_switch_denied(const char *line);
 
 /** Guest **FL_PRINCIPAL=guest** deny list for shell builtins (shared with shell gate). */

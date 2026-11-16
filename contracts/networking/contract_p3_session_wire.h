@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #define FL_CONTRACT_P3_13_SESSION_WIRE_CONTRACT_DEFINED 1
+/* Session wire contract: opcodes and frame limits for the networking session. */
 
 /** v1 magic octet (**'F'**). */
 #define FL_NET_SESSION_MAGIC 0x46u
@@ -123,19 +124,15 @@
  * KeyQuorum history download (second KeyQuorum range, routed to the same hook as KQ_*).
  * REQ: [request id 16][delivery id 16]. DATA: [request id 16][offset u32 BE][total u32 BE][bytes <= 480];
  * the bytes are the history bundle (kq_history_bundle.h): two complete KQPB letters, kind 15 then kind 17.
- * 0x53 to 0x5F are left free for the next range.
+ * 0x52 to 0x5F are left free for the next feature that needs a range (FL-27's ledger frames).
  */
 #define FL_NET_SESSION_OP_KQH_FIRST        0x50u
 #define FL_NET_SESSION_OP_KQH_REQ          0x50u
 #define FL_NET_SESSION_OP_KQH_DATA         0x51u
 #define FL_NET_SESSION_OP_KQH_LAST         0x51u
 
-/**
- * KeyQuorum refusal report, recipient to host, forwarded unchanged to the delivery's sender.
- * REPORT: [delivery id 16][len u16 BE][KQER bytes, len <= FL_KQ_REPORT_FRAME_MAX].
- * Best effort: the host keeps nothing.
- */
 #define FL_NET_SESSION_OP_KQR_FIRST        0x52u
+/* REPORT: [delivery id 16][len u16 BE][KQER bytes]; best effort, host keeps nothing. */
 #define FL_NET_SESSION_OP_KQR_REPORT       0x52u
 #define FL_NET_SESSION_OP_KQR_LAST         0x52u
 #define FL_KQ_REPORT_FRAME_MAX             480u

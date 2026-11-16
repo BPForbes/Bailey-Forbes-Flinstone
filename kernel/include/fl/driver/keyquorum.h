@@ -18,6 +18,7 @@
 #include "contract_p4_keyquorum.h"
 #include "fl/driver/driver.h"
 #include "keyquorum_access.h"
+/* KeyQuorum driver interface: the file, account and bridge ABI as C function tables. */
 #include "keyquorum_assembly.h"
 #include "keyquorum_bridge.h"
 #include "keyquorum_error.h"
@@ -178,17 +179,9 @@ struct fl_kq_driver {
                      const uint8_t expected_encryption_pub[32], uint8_t signing_secret_out[32],
                      uint8_t encryption_secret_out[32]);
 
-    /*
-     * Head author (file ABI version 5), appended after slot_open. Returns KQ_FILE_OK, FORKED (two
-     * heads), NO_REVISION, NO_ROOM or INVALID; out is "" on every failure.
-     */
     int (*head_author)(const fl_kq_buf_t *c, char *out, size_t cap);
 
-    /*
-     * Access policy and private-bridge proof (file ABI version 4), appended after head_author. Return
-     * the KQ_ACCESS_* factor or KQ_BRIDGE_* status unchanged. The caller passes only live bridges and
-     * wipes the secrets it passed. NULL in the freestanding image.
-     */
+/* NULL in the freestanding image (no account store). */
     int (*access_requirement)(const char *current, const char *target, int sudo,
                               const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
                               int *bridge_index_out, int *needs_parent_grant_out);
@@ -204,19 +197,9 @@ struct fl_kq_driver {
                          size_t nmembers, const char *verifier_label, const uint8_t *challenge,
                          size_t clen, const uint8_t *artifact, size_t alen);
 
-    /*
-     * Bridge reach (kq_bridge_connects), appended after bridge_verify. Returns 1 when a bridge between
-     * end_a and end_b connects actor to scope; liveness is the caller's check. NULL in the
-     * freestanding image, read as "does not connect".
-     */
     int (*bridge_connects)(const char *end_a, const char *end_b, const char *actor,
                            const char *scope);
 
-    /*
-     * Parent-key assembly (file ABI version 6), appended after bridge_connects. Return the
-     * KQ_ASSEMBLY_* status unchanged. The caller wipes seed_out and every secret it passed. NULL in
-     * the freestanding image, read as "refused".
-     */
     unsigned (*assembly_threshold)(unsigned holders);
     int (*assembly_split)(const uint8_t seed[32], unsigned generation,
                           const char *const *child_labels, const uint8_t (*child_box_public)[32],
@@ -229,11 +212,7 @@ struct fl_kq_driver {
                              const uint8_t (*unlocked_device_id)[16], size_t nunlocked,
                              size_t minimum_devices, uint8_t seed_out[32]);
 
-    /*
-     * Co-signed sudo and token sealing (file ABI version 7), appended after assembly_assemble. Return
-     * the KQ_ACCOUNT_* code unchanged (sudo_verify: 1/0). slot_seal writes KQ_SLOT_TOKEN_LEN(label
-     * length) bytes. The caller wipes the secrets. NULL in the freestanding image: "refused".
-     */
+/* Caller wipes the secrets. NULL in the freestanding image. */
     int (*sudo_sign)(int role, const char *invoker, const char *authority, const uint8_t *action,
                      size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],
                      uint8_t sig_out[64]);

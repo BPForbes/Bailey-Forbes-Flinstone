@@ -18,8 +18,6 @@ typedef struct cmd_server_ctx {
 
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv);
 
-/** Installs the history gate and source for deliveries this shell sent. Call once, after
- *  fl_net_kq_install; until then every history request is refused. */
 void cmd_server_file_install_history(void);
 int cmd_server_send_file_alias(const cmd_server_ctx_t *ctx, int argc, char **argv);
 

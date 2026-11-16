@@ -123,10 +123,7 @@ size_t      fl_kq_store_leak(fl_kq_store_t *s, int64_t now);
 fl_result_t fl_kq_store_events(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN],
                                fl_server_catalog_event_t *out, size_t cap, size_t *count);
 
-/**
- * Claims the one refusal-report forward of a delivery, recorded as a durable "reported" event.
- * Returns OK the first time, BUSY after, ERR when the log cannot be read or written.
- */
+/* OK the first time, BUSY after, ERR on a log failure (nothing forwarded). */
 fl_result_t fl_kq_store_claim_report(fl_kq_store_t *s, const uint8_t id[FL_KQ_DELIVERY_ID_LEN], int64_t at);
 
 void fl_kq_delivery_id_hex(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], char out[2 * FL_KQ_DELIVERY_ID_LEN + 1]);

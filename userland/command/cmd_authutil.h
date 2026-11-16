@@ -12,25 +12,16 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size);
 void cmd_wipe_password(char *buf, size_t buf_size);
 
 /**
- * Non-elevated users give Root's password and their own (the sudo co-signature) before elevation.
+ * Non-elevated users must verify their own password before sudo elevation.
  * Elevated accounts succeed immediately. Returns 0 on success.
  */
 int cmd_sudo_require_auth(void);
 
 /** Like cmd_sudo_require_auth; uses reason for elevation grant and audit. */
 int cmd_sudo_require_auth_reason(const char *reason);
-/** Signs a sudo command line and restarts the window; asks for the full co-signature again when the
- *  window cannot be renewed. Returns 0 when signed, 1 when sudo cannot go on. */
 int cmd_sudo_sign_action(const char *line);
-/** Signs a command run inside the window without restarting it. When Root's key is unavailable the
- *  elevation ends and the command runs as the account itself. */
 void cmd_sudo_sign_elevated(const char *line);
 
-/**
- * Runs su or sudo -i (sudo non-zero): prompts for the factor KeyQuorum demands and hands it to
- * fl_session_switch_user. Every refusal prints the same message; every password is wiped.
- * Returns 0 when the session is now target.
- */
 int cmd_switch_user(const char *cmd, const char *target, int sudo);
 
 /**

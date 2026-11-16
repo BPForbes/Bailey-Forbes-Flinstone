@@ -4,6 +4,7 @@
 #include "contract_result.h"
 #include "contract_p2_credential_store.h"
 #include "contract_p2_heritage.h"
+/* Native account store: accounts, password records, signing and box keys, KQST pairings, bridges. */
 #include "password_hash.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -18,7 +19,7 @@ _Static_assert(FL_USER_NAME_MAX <= FL_CREDENTIAL_USERNAME_MAX_CHARS + 1u,
 #define FL_USER_SIGNING_PUBLIC_LEN  32u
 #define FL_USER_SIGNING_SEALED_LEN  81u
 
-/** How an account proves itself at login. */
+/** How an account proves itself at login. Every account that exists today is PASSWORD. */
 #define FL_USER_AUTH_PASSWORD      0 /* the password alone (legacy) */
 #define FL_USER_AUTH_PASSWORD_KQST 1 /* the password and the account's KQST slot token */
 
@@ -80,13 +81,13 @@ fl_result_t fl_user_db_kqst_pairing(const fl_user_db_t *db, const char *key_id,
                                     unsigned char device_id[16], unsigned char signing_public[32],
                                     unsigned char encryption_public[32]);
 
-/* One account_keys row, copied whole so a caller that replaces it can restore it exactly. */
 #define FL_USER_KQST_PATH_MAX   512u
 #define FL_USER_KQST_TEXT_MAX   128u
 #define FL_USER_KQST_HASH_MAX   64u
 
+/* Copied whole so a replacement can be restored exactly. */
 typedef struct fl_user_kqst_row {
-    int           present; /* 0: there was no row; a restore deletes the one written since */
+    int           present;
     char          purpose[FL_USER_KQST_TEXT_MAX];
     int64_t       holds_share;
     char          minted_by[FL_USER_KQST_TEXT_MAX];
@@ -102,28 +103,17 @@ typedef struct fl_user_kqst_row {
     size_t        event_hash_len;
 } fl_user_kqst_row_t;
 
-/**
- * Pairs key_id with the slot token at kqst_path, replacing any earlier account_keys row; the
- * generation is one past the earlier row's (1 for the first). generation_out may be NULL.
- * Returns INVAL for a malformed argument (empty or over-long path).
- */
+/* INVAL for an empty or over-long path. */
 fl_result_t fl_user_db_kqst_register(const fl_user_db_t *db, const char *key_id, const char *kqst_path,
                                      const unsigned char device_id[16],
                                      const unsigned char signing_public[32],
                                      const unsigned char encryption_public[32], int64_t minted_at,
                                      int64_t *generation_out);
-/** Copies key_id's account_keys row (present = 0 when there is none). */
 fl_result_t fl_user_db_kqst_row_get(const fl_user_db_t *db, const char *key_id, fl_user_kqst_row_t *out);
-/** Restores a row copied by fl_user_db_kqst_row_get: rewritten whole, or deleted when not present. */
 fl_result_t fl_user_db_kqst_row_restore(const fl_user_db_t *db, const char *key_id,
                                         const fl_user_kqst_row_t *row);
 
-/*
- * Private bridges (KeyQuorum's; not the account-to-account bridges of bridge.c), read from the
- * account store at call time. A bridge is live when destroyed = 0 and its facts are well formed:
- * generation 1..UINT32_MAX, 16-byte salt, 32-byte public key, at least two valid members.
- */
-#define FL_USER_BRIDGE_UID_MAX     65u /* KeyQuorum's uid (32 hex) and its NUL, with room */
+#define FL_USER_BRIDGE_UID_MAX     65u
 #define FL_USER_BRIDGE_MEMBERS_MAX 16u
 #define FL_USER_BRIDGES_MAX        16u
 #define FL_USER_BRIDGE_SALT_LEN    16u
@@ -145,74 +135,37 @@ typedef struct fl_user_bridge {
     fl_user_bridge_member_t members[FL_USER_BRIDGE_MEMBERS_MAX];
 } fl_user_bridge_t;
 
-/** Writes a bridge's facts and member roster, replacing the row and its members' keys. */
 fl_result_t fl_user_db_bridge_put(const fl_user_db_t *db, const fl_user_bridge_t *bridge);
-/**
- * fl_user_db_bridge_put plus member label's sealed bridge key and wrap salt, in one transaction.
- * Returns INVAL for a malformed bridge or key, NOENT when label is not on the roster (nothing written).
- */
+/* NOENT when label is not on the roster; nothing is written. */
 fl_result_t fl_user_db_bridge_put_with_key(const fl_user_db_t *db, const fl_user_bridge_t *bridge, const char *label,
                                            const unsigned char *sealed, size_t len,
                                            const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 
-/**
- * Copies bridge uid from a KeyQuorum store, with local_label's sealed key when not NULL. Unseals
- * nothing. Returns NOENT (no bridge, label or sealed key), NOMEM (roster over the cap, never
- * truncated), ERR (bad column), BUSY (a newer generation is held). Destroyed stays destroyed.
- */
+/* NOENT, NOMEM (never truncated), ERR, BUSY (a newer generation is held). */
 fl_result_t fl_user_db_bridge_import_from_kq(const fl_user_db_t *db, const char *kq_store_path, const char *uid,
                                              const char *local_label);
 
-/**
- * Stores member label's sealed bridge secret with its wrap salt in one statement, never one alone.
- * Returns NOENT when the member row does not exist.
- */
 fl_result_t fl_user_db_bridge_put_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
                                              const unsigned char *sealed, size_t len,
                                              const unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
-/**
- * Reads bridge uid's current facts (destroyed included) and roster as one deferred snapshot.
- * Returns NOENT for an unknown or malformed row, ERR when the store cannot be read.
- */
 fl_result_t fl_user_db_bridge_get(const fl_user_db_t *db, const char *uid, fl_user_bridge_t *out);
-/**
- * Fills out[0..cap) with every live bridge in uid order, from one deferred snapshot. Never a partial
- * list: a malformed or unreadable live row is ERR and more live rows than cap is NOMEM (*count 0).
- * A store with no account_bridges table is OK with no bridge.
- */
+/* Never a partial list: a malformed live row is ERR; too many is NOMEM. */
 fl_result_t fl_user_db_bridges_live(const fl_user_db_t *db, fl_user_bridge_t *out, size_t cap,
                                     size_t *count);
-/**
- * Reads member label's sealed bridge key (*len bytes) and its wrap salt.
- * Returns NOENT unless both are present and the right sizes.
- */
 fl_result_t fl_user_db_bridge_sealed_key(const fl_user_db_t *db, const char *uid, const char *label,
                                          unsigned char *sealed, size_t cap, size_t *len,
                                          unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
-/**
- * Reads the facts and one member's sealed key from one read-only deferred snapshot. A missing or
- * malformed bridge leaves *out zeroed; a missing sealed key leaves *out filled.
- */
 fl_result_t fl_user_db_bridge_snapshot(const fl_user_db_t *db, const char *uid, const char *label,
                                        fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
                                        size_t *len,
                                        unsigned char wrap_salt[FL_USER_BRIDGE_SALT_LEN]);
 
-/** Writer reservation over the account database (opaque). */
 typedef struct fl_user_bridge_hold fl_user_bridge_hold_t;
-/**
- * Takes the SQLite writer slot (BEGIN IMMEDIATE, busy_timeout 0) until fl_user_db_bridge_release,
- * which rolls back. Returns BUSY when another writer holds the database, ACCES on any other failure.
- */
+/* BUSY when another writer holds the database; release rolls back. */
 fl_result_t fl_user_db_bridge_reserve(const fl_user_db_t *db, fl_user_bridge_hold_t **out);
 void        fl_user_db_bridge_release(fl_user_bridge_hold_t *hold);
-/** Reads live bridges on a reserved connection; results as fl_user_db_bridges_live. */
 fl_result_t fl_user_db_bridge_live_held(fl_user_bridge_hold_t *hold, fl_user_bridge_t *out, size_t cap,
                                         size_t *count);
-/**
- * Reads the facts on a reserved connection and, when label is non-NULL, that member's sealed key,
- * as one snapshot. A missing sealed key leaves *out filled.
- */
 fl_result_t fl_user_db_bridge_read_held(fl_user_bridge_hold_t *hold, const char *uid, const char *label,
                                         fl_user_bridge_t *out, unsigned char *sealed, size_t cap,
                                         size_t *len,
@@ -289,21 +242,21 @@ void        fl_user_db_forget_created(fl_user_db_t *db, const char *name, int cr
  * signature is ever made with a key the store does not hold.
  */
 void        fl_user_db_forget_key(fl_user_db_t *db, const char *name);
-/**
- * Opens the signing key of the account named name with its password into secret
- * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
- * account has no key. The caller wipes secret; once the open was attempted, every non-OK return
- * leaves it securely zeroed.
- */
+/* Caller wipes secret. */
 /**
  * The same open, from a copy of the account's record: for a caller that took the copy under a lock and
  * runs the slow key derivation outside it (the session hands the key service such a copy at login).
  */
 fl_result_t fl_user_db_open_key_record(const fl_user_record_t *account, const char *password,
                                       unsigned char *secret);
-/** Opens the box key from a record copy, as fl_user_db_open_key_record does for the signing key. */
 fl_result_t fl_user_db_open_box_record(const fl_user_record_t *account, const char *password,
                                       unsigned char *secret);
+/**
+ * Opens the signing key of the account named name with its password into secret
+ * (FL_USER_SIGNING_SECRET_LEN bytes). ACCES for a wrong password, NOENT when the
+ * account has no key. The caller wipes secret; once the open was attempted, every non-OK return
+ * leaves it securely zeroed.
+ */
 fl_result_t fl_user_db_open_key(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);
 /** The signing public key of key_id, or NULL when the account has none. */
@@ -314,6 +267,7 @@ const unsigned char *fl_user_db_signing_public(const fl_user_db_t *db, const cha
  * account has no box key. The caller wipes secret; once the open was attempted, every non-OK return
  * leaves it securely zeroed.
  */
+/* Caller wipes secret. */
 fl_result_t fl_user_db_open_box(const fl_user_db_t *db, const char *name, const char *password,
                                 unsigned char *secret);
 /** The box public key of key_id, or NULL when the account has none. */
@@ -330,18 +284,9 @@ typedef enum { FL_USER_SECRET_SIGNING, FL_USER_SECRET_BOX } fl_user_secret_kind_
 int fl_user_db_secret_matches(const fl_user_db_t *db, const char *key_id,
                               fl_user_secret_kind_t kind, const unsigned char *secret);
 
-/*
- * Parent-key assembly records (account_assembly): the opaque KQAS bytes for a parent key id, with
- * their generation and threshold. Every share inside is sealed to one child's box key.
- */
 #define FL_USER_ASSEMBLY_MAX 16384u
-/** Replaces parent_label's record. Returns INVAL for a bad label or empty or oversized bytes. */
 fl_result_t fl_user_db_assembly_put(const fl_user_db_t *db, const char *parent_label, unsigned generation,
                                     unsigned threshold, const unsigned char *bytes, size_t len);
-/**
- * Reads parent_label's record into out and sets *len, *generation and *threshold.
- * Returns NOENT when there is none, NOMEM when cap is too small, ERR for a malformed row.
- */
 fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_label, unsigned char *out,
                                     size_t cap, size_t *len, unsigned *generation, unsigned *threshold);
 

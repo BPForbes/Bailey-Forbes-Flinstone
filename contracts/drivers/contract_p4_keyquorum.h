@@ -34,8 +34,8 @@
 #include "contract_extend.h"
 
 #define FL_CONTRACT_P4_9_KEYQUORUM_CONTRACT_DEFINED 1
+/* KeyQuorum driver contract: ABI version and result codes, copies of KeyQuorum's. */
 
-/** KeyQuorum files ABI this driver is built against (`KQ_FILE_ABI_VERSION`). */
 #define FL_KQ_ABI_VERSION 7
 /** Valid signatures the host needs before it releases a letter: author and recipient. */
 #define FL_KQ_HOST_THRESHOLD 2u
@@ -52,7 +52,6 @@
 /** Delivery id length (`KQ_FILE_DELIVERY_ID_LEN`). */
 #define FL_KQ_DELIVERY_ID_LEN 16u
 
-
 /* Account keys (`keyquorum_identity.h`): lengths, roles and statuses the driver's account ops
  * pass through unchanged. Copies, checked against KeyQuorum's by _Static_assert in kq_driver.c. */
 #define FL_KQ_ACCOUNT_SECRET_LEN 32u
@@ -66,25 +65,20 @@
 #define FL_KQ_ACCOUNT_INVALID (-1)
 #define FL_KQ_ACCOUNT_NO_ROOM (-3)
 #define FL_KQ_ACCOUNT_WRONG_PASSWORD (-4)
-/* Co-signed sudo roles, longest action and KQST size for a key id of n bytes (ABI 7). Copies of
- * KeyQuorum's values, checked by _Static_assert in kq_driver.c. */
+/* Append only; never renumber. Checked by _Static_assert in kq_driver.c. */
 #define FL_KQ_SUDO_INVOKER 1
 #define FL_KQ_SUDO_AUTHORITY 2
 #define FL_KQ_SUDO_ACTION_MAX 4096u
 #define FL_KQ_SLOT_TOKEN_LEN(n) ((size_t)(4 + 1 + 16 + 12 + 16 + 2 + 16 + 32 + 32) + (size_t)(n))
 
-/* Access factors (ABI 4) and bridge-proof statuses, separate namespaces. Copies of KeyQuorum's
- * values, checked by _Static_assert in kq_driver.c. Append only; never renumber. */
 #define FL_KQ_ACCESS_NONE 0
 #define FL_KQ_ACCESS_PASSWORD 1
 #define FL_KQ_ACCESS_KQST_PASSWORD 2
 #define FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST 3
 #define FL_KQ_ACCESS_REFUSED 4
 #define FL_KQ_ACCESS_INVALID (-1)
-/** At most this many live bridges and members per bridge in one access or verify call. */
 #define FL_KQ_ACCESS_MAX_BRIDGES 64u
 #define FL_KQ_BRIDGE_MAX_MEMBERS 256u
-/** A private bridge's salt and its member's wrap salt (`crypto::SALT_LEN`). */
 #define FL_KQ_BRIDGE_SALT_LEN 16u
 #define FL_KQ_BRIDGE_OK 0
 #define FL_KQ_BRIDGE_INVALID (-1)

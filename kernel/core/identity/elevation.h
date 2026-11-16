@@ -9,10 +9,7 @@
 fl_result_t fl_elevation_grant(const char *principal, const char *reason, fl_elevation_token_t *out);
 int         fl_elevation_active(fl_elevation_token_t token);
 void        fl_elevation_revoke(fl_elevation_token_t token);
-/** Restarts an active token's window from now. expires_ns_out (monotonic) may be NULL.
- *  Returns NOENT when the token is not active. */
 fl_result_t fl_elevation_refresh(fl_elevation_token_t token, int64_t *expires_ns_out);
-/** Reads when an active token's window ends (monotonic ns). Returns NOENT when the token is not active. */
 fl_result_t fl_elevation_expires(fl_elevation_token_t token, int64_t *expires_ns_out);
 void        fl_elevation_revoke_all(void);
 

@@ -26,6 +26,7 @@
 #include "fl/driver/keyquorum.h"
 #include "kq_keydir.h"
 #include "kq_storage.h"
+/* KeyQuorum security checkpoints: the orchestrator for co-signed delivery. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -52,9 +53,11 @@ const char *fl_kq_cp_reason(fl_kq_cp_result_t r);
 fl_result_t fl_kq_cp_to_result(fl_kq_cp_result_t r);
 
 /**
- * Returns nonzero when name is a plain file name a delivery may use: fl_fs_name_is_plain and not a
- * reserved sidecar suffix (fl_server_shared_name_is_reserved). Every name from the wire is checked
- * with it before it is stored, printed or joined to a directory.
+ * True when name is a plain file name a delivery may use: fl_fs_name_is_plain, and not ending
+ * in one of the suffixes the delivery keeps beside a file (.part, .meta, .kqtf, .kqseen,
+ * .kqbak; the list is fl_server_shared_name_is_reserved).
+ * Every name that arrives over the wire (offer, announcement) is checked before it is stored,
+ * printed or joined to a directory.
  */
 int fl_kq_cp_safe_name(const char *name);
 
@@ -117,33 +120,17 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines);
 /** The file's current head revision (its container beside path). FORKED with two heads. */
 fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
 
-/**
- * Writes the author label of the file's single head revision to out ("" on every result but OK).
- * Returns FORKED with two heads, IO when the container cannot be read, INVALID for no revision, a
- * label longer than cap - 1 or a malformed container.
- */
+/* FORKED with two heads; INVALID for no revision or a label over cap - 1. */
 fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
 
-/**
- * Sets *sec_out to the newest successful signature or countersignature event (history types 3, 4)
- * in epoch seconds, 0 when there is none. Returns IO when the container cannot be read.
- */
 fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out);
 
-/**
- * Builds a history bundle's letters, signed by host_key and sealed to requester_key: l15 the head
- * revision (kind 15), l17 the history snapshot (kind 17). Who may ask is the caller's gate; caller
- * frees both. Returns NO_KEY (unknown host or requester), FORKED, IO (no container).
- */
+/* Writes nothing; caller frees l15 and l17 (fl_kq_buf_free). */
 fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, const char *host_key,
                                                 const uint8_t host_signing_secret[32], const char *requester_key,
                                                 const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17);
 
-/**
- * Checks the file's current bytes in as a new revision by author_key on the container's head and
- * writes the container back. Caller wipes signing_secret. Returns FORKED with two heads, IO when the
- * file or container cannot be read, INVALID for a damaged container or a refused check-in.
- */
+/* Caller wipes signing_secret. */
 fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
                                           const uint8_t signing_secret[32], const char *created_at_utc);
 
@@ -207,64 +194,38 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
                                           const uint8_t my_sig[64], const fl_kq_dir_t *dir,
                                           const char *leaf);
 
-/* ---- refusal reports (KQER, keyquorum_error.h) ------------------------------------- */
-
-/** Sidecar suffix of a KQER refusal report, stored as <dir>/<64 lower-case hex of the ref>.kqer. */
 #define FL_KQ_REPORT_SUFFIX ".kqer"
 
-/** Encodes the offer's wire bytes, exactly as net_kq_delivery.c sends them (u64 big-endian). */
 void fl_kq_cp_offer_encode(const kq_file_offer_t *o, uint8_t out[FL_KQ_OFFER_WIRE_LEN]);
-/** Decodes an offer from its wire bytes. */
 void fl_kq_cp_offer_decode(const uint8_t in[FL_KQ_OFFER_WIRE_LEN], kq_file_offer_t *o);
 
-/** Largest KQER KeyQuorum encodes (the read bound). */
 #define FL_KQ_REPORT_MAX 1024u
 
-/** Most reports one landing directory keeps, and the ledger that lists their refs. */
 #define FL_KQ_REPORT_CAP 64u
 #define FL_KQ_REPORT_LEDGER "reports" FL_KQ_REPORT_SUFFIX
 
-/** Writes dir/<hex ref>.kqer to out. Returns 0, or -1 when it does not fit or an argument is missing. */
 int fl_kq_cp_report_path(const char *dir, const uint8_t ref[32], char *out, size_t cap);
 
-/**
- * Signs a KQER about ref as actor and writes it, with the ledger, inside the held directory dir.
- * Caller wipes secret. Returns OK, EXISTS (nothing rewritten), TOO_LARGE (FL_KQ_REPORT_CAP reached,
- * nothing written), INVALID (fields refused), IO (directory unreadable or unwritable).
- */
+/* Caller wipes secret. Returns OK, EXISTS, TOO_LARGE, INVALID or IO. */
 fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, uint8_t step,
                                            const uint8_t ref[32], const char *actor,
                                            const char *occurred_at, const uint8_t secret[32],
                                            const fl_kq_dir_t *dir);
 
-/**
- * Reads the report for ref through the held directory and returns it only when it verifies as a
- * report about ref signed by reporter_public. Caller frees out (fl_kq_buf_free).
- * Returns OK, IO (no such report), BAD_SIGNATURE (not that report; out is empty).
- */
+/* BAD_SIGNATURE leaves out empty; caller frees out. */
 fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t ref[32],
                                           const uint8_t reporter_public[32], fl_kq_buf_t *out);
 
-/**
- * Verifies kqer under reporter_public and that it names ref, then appends one ErrorReported event
- * (history type 48) to the container beside path. A report decides no trust.
- * Returns BAD_SIGNATURE for a refused report (nothing written), IO without a container.
- */
 fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32], const uint8_t *kqer,
                                                size_t kqer_len, const uint8_t ref[32], const char *path);
 
-/**
- * As fl_kq_cp_inject_report_bytes, for the KQER file at report_path under reporter_key's key in keys.
- * Returns NO_KEY when keys has no signing key for reporter_key, IO when a file cannot be read or written.
- */
 fl_kq_cp_result_t fl_kq_cp_inject_report_with(const fl_kq_keydir_t *keys, const char *reporter_key,
                                               const char *report_path, const uint8_t ref[32],
                                               const char *path);
 
-/* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
-
-/** Computes the SHA-256 of the offer's wire bytes, the artifact a refusal report names. OK or ERR. */
 fl_result_t fl_kq_cp_offer_ref(const kq_file_offer_t *o, uint8_t ref[32]);
+
+/* ---- the native shell's account store (kq_checkpoint_users.c) --------------------- */
 
 /* user_db.h is native-only; its type is named here so the lab can use this header. */
 typedef struct fl_user_db fl_user_db_t;

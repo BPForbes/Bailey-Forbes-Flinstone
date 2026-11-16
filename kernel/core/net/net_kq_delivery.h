@@ -25,6 +25,7 @@
 #include "net_server.h"
 
 #include <stdint.h>
+/* Network transport for KeyQuorum deliveries, history and reports. */
 
 /**
  * The host's key authority (kq_keydir.h): every signature is checked against it and KEYS is
@@ -121,7 +122,6 @@ fl_result_t fl_net_kq_take_letter(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], unsig
 /** Forget a request after it was decoded or refused. */
 void fl_net_kq_inbox_drop(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]);
 
-
 /**
  * A member asks the host for a delivery's history: REQ [request id 16][delivery id 16], answered
  * with DATA chunks of the history bundle (kq_history_bundle.h: the kind-15 letter then the
@@ -146,32 +146,19 @@ fl_result_t fl_net_kq_request_history(fl_net_server_t *srv, fl_net_client_t *cli
 fl_result_t fl_net_kq_history_take(const uint8_t request_id[16], unsigned wait_ms,
                                    fl_kq_buf_t *letter_file, fl_kq_buf_t *letter_snapshot);
 void fl_net_kq_history_drop(const uint8_t request_id[16]);
-/** fl_net_kq_history_open result: the letters open but are the history of another file. */
-#define FL_NET_KQ_HISTORY_OTHER_FILE ((fl_result_t)-74) /* EBADMSG shape; outside the shared codes on purpose */
-/**
- * Member side: waits up to wait_ms for request_id's history and opens it; expected_file_id may be
- * NULL (no file check). Caller frees lines and wipes box_secret. Returns TIMEDOUT (request stays
- * pending; every other result drops it), NOENT, ACCES, FL_NET_KQ_HISTORY_OTHER_FILE, ERR or NOSYS.
- */
+#define FL_NET_KQ_HISTORY_OTHER_FILE ((fl_result_t)-74)
+/* Caller frees lines and wipes box_secret; TIMEDOUT leaves the request pending. */
 fl_result_t fl_net_kq_history_open(const uint8_t request_id[16], unsigned wait_ms, const uint8_t box_secret[32],
                                    const char *sender, const char *me, const uint8_t sender_public[32],
                                    const uint8_t expected_file_id[16], fl_kq_buf_t *lines,
                                    uint32_t *snapshot_events);
 
-/* ---- refusal report ------------------------------------------------------------------------ */
-
-/**
- * Recipient side: sends the signed KQER for a refused delivery to the host, after the refusing ack.
- * The host forwards it once, and only from that delivery's recipient for a refused delivery.
- * Returns INVAL for an empty or oversized report.
- */
+/* INVAL for an empty or oversized report. */
 fl_result_t fl_net_kq_send_report(fl_net_server_t *srv, fl_net_client_t *client, int hosting,
                                   const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const uint8_t *kqer, size_t len);
 
-/** Copies out and removes the report held for id. Returns NOENT when none, NOMEM (nothing removed)
- *  when cap is too small. Unverified: apply it with fl_kq_cp_inject_report_bytes. */
+/* Unverified: apply with fl_kq_cp_inject_report_bytes. */
 fl_result_t fl_net_kq_report_take(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], uint8_t *out, size_t cap, size_t *len);
-/** Returns how many reports are held (at most four; a fifth replaces the oldest). */
 size_t fl_net_kq_reports_pending(void);
 
 /* ---- tests ------------------------------------------------------------------ */
