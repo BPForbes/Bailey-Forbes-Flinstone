@@ -82,12 +82,15 @@ fl_server_history_args_t fl_server_history_args(int argc, char **argv, fl_server
     *hex = NULL;
     *bad = NULL;
     memset(out, 0, sizeof *out);
-    for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-from") && i + 1 < argc && !from)
-            from = argv[++i];
-        else if (argv[i][0] != '-' && !h)
+    i = 1;
+    while (i < argc) {
+        if (!strcmp(argv[i], "-from") && i + 1 < argc && !from) {
+            from = argv[i + 1];
+            i += 2;
+        } else if (argv[i][0] != '-' && !h) {
             h = argv[i];
-        else {
+            i += 1;
+        } else {
             *bad = argv[i];
             return FL_SERVER_HISTORY_ARGS_USAGE;
         }
