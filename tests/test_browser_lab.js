@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -332,5 +332,68 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
   await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
+  // coder-44c9be (CR 4587909868): a password exchange owns the guest from its command until its
+  // password is sent. A fake guest takes the next line after Password: as that prompt's answer,
+  // so two exchanges that cross would hand one account's password to the other's prompt.
+  {
+    const fakeGuest = () => {
+      const guest = { out: "", prompt: null, answers: {}, commands: [], waiters: [] };
+      guest.flush = () => guest.waiters.splice(0).forEach(w => w());
+      guest.send = async line => {
+        await new Promise(r => setImmediate(r));
+        if (guest.prompt) {
+          guest.answers[guest.prompt] = line;
+          guest.out += `SWITCHUSER user=${guest.prompt}\n`;
+          guest.prompt = null;
+        } else {
+          guest.commands.push(line);
+          const m = /^switchuser (\S+)$/.exec(line);
+          if (m) { guest.prompt = m[1]; guest.out += "Password:"; }
+        }
+        guest.flush();
+      };
+      guest.wait = (re, from) => new Promise(resolve => {
+        const check = () => re.test(guest.out.slice(from)) ? resolve(true) : guest.waiters.push(check);
+        check();
+      });
+      return guest;
+    };
+    // The page's exchange: the command, then the password only once Password: has appeared.
+    const exchange = async (guest, name, password) => {
+      const from = guest.out.length;
+      await guest.send(`switchuser ${name}`);
+      await guest.wait(/Password:/, from);
+      await guest.send(password);
+    };
+    const drawPw = () => require("crypto").randomBytes(9).toString("hex");
+    const pwA = drawPw(), pwB = drawPw();
+    const guest = fakeGuest();
+    const lock = createExclusiveQueue();
+    await Promise.all([
+      lock.run(() => exchange(guest, "Ada", pwA)),
+      lock.run(() => exchange(guest, "Root", pwB)),
+    ]);
+    assert.deepStrictEqual(guest.answers, { Ada: pwA, Root: pwB }, "each password answers its own prompt");
+    assert.deepStrictEqual(guest.commands, ["switchuser Ada", "switchuser Root"], "no password is typed as a command");
+    // Control: without the queue the same two exchanges cross (the test can see the bug).
+    const loose = fakeGuest();
+    void exchange(loose, "Ada", pwA);
+    void exchange(loose, "Root", pwB);
+    await new Promise(r => setTimeout(r, 20));
+    assert.strictEqual(loose.answers.Ada, "switchuser Root", "unserialized exchanges cross");
+    // A turn that throws releases the guest for the next one.
+    const order = [];
+    await assert.rejects(lock.run(async () => { order.push(1); throw new Error("guest gone"); }), /guest gone/);
+    await lock.run(async () => { order.push(2); });
+    assert.deepStrictEqual(order, [1, 2]);
+    // lab.js routes every person-sent input through the exchange owner.
+    assert(/function sendGuestLines\(script, patterns\) \{\s*return guestExchange\.run\(\(\) => driveGuestLines\(script, patterns\)\);/.test(labJs),
+      "sendGuestLines must hold the exchange for the whole script");
+    assert(labJs.includes("guestExchange.run(() => enqueueGuest(() => emulator.typeChar(ch)))"), "keystrokes wait for the exchange");
+    assert(labJs.includes("guestExchange.run(() => enqueueGuest(() => emulator.sendKey(codes)))"), "send-key waits for the exchange");
+    const accountJs = labJs.slice(labJs.indexOf('const form = document.getElementById("switch-user")'));
+    assert.strictEqual((accountJs.match(/await guestExchange\.run\(/g) || []).length, 3, "Switch, New session and Register each take one exchange turn");
+    assert(!/[^.]sendGuestLines\(/.test(accountJs), "account actions drive their steps inside their own turn");
+  }
   console.log("test_browser_lab: PASS");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

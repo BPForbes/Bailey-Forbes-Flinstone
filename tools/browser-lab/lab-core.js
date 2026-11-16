@@ -219,11 +219,25 @@
     if (!guestUserNameOk(name)) return [];
     return switchSteps(name, password, currentUser);
   }
+  // One owner at a time: work passed to run() starts only after every earlier run() has settled,
+  // whether it resolved or threw. The lab holds one for guest keystrokes and one for whole guest
+  // exchanges (a command, the guest's reply and the password that answers its Password: prompt),
+  // so two exchanges can never cross and send a password to the other's prompt.
+  function createExclusiveQueue() {
+    let tail = Promise.resolve();
+    return {
+      run(work) {
+        const turn = tail.then(() => work());
+        tail = turn.then(() => {}, () => {});
+        return turn;
+      },
+    };
+  }
   function guestNewSessionLines(name, password) {
     // A new session starts as Flinstone.
     const user = guestUserNameOk(name) ? name : "Flinstone";
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
 });
