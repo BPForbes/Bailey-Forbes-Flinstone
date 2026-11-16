@@ -4,6 +4,7 @@
 #include "kq_history_bundle.h"
 
 #include "cmd_authutil.h"
+#include "cmd_server_history.h"
 #include "cmd_util.h"
 #include "common.h"
 #include "fl/mem_asm.h"
@@ -690,61 +691,6 @@ static int kq_sent_get(unsigned i, kq_sent_t *out)
     return ok;
 }
 
-/* FL-04: the co-signed deliveries this shell decoded, so `server file history <delivery>` knows whose letters to
- * expect: the sender (the host account that signs the history letters) and the file name. Session-lifetime only;
- * the newest 16. Same locking as the sent ring: readers copy a record under the lock. */
-#define KQ_GOT_MAX 16u
-typedef struct {
-    int used;
-    uint8_t id[FL_KQ_DELIVERY_ID_LEN];
-    char sender[FL_HERITAGE_KEY_ID_MAX];
-    char file_name[128];
-} kq_got_t;
-static kq_got_t s_got[KQ_GOT_MAX];
-static unsigned s_got_next;
-static pthread_mutex_t s_got_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void kq_got_remember(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], const char *sender, const char *file_name)
-{
-    kq_got_t fresh;
-    unsigned slot;
-
-    memset(&fresh, 0, sizeof fresh);
-    if (!sender || !file_name || !sender[0] || strlen(sender) >= sizeof fresh.sender ||
-        strlen(file_name) >= sizeof fresh.file_name)
-        return; /* not remembered: `server file history` then needs -from */
-    memcpy(fresh.id, id, FL_KQ_DELIVERY_ID_LEN);
-    snprintf(fresh.sender, sizeof fresh.sender, "%s", sender);
-    snprintf(fresh.file_name, sizeof fresh.file_name, "%s", file_name);
-    fresh.used = 1;
-    pthread_mutex_lock(&s_got_mu);
-    /* A delivery decoded again replaces its own record; anything else takes the oldest slot. */
-    for (slot = 0; slot < KQ_GOT_MAX; slot++)
-        if (s_got[slot].used && memcmp(s_got[slot].id, id, FL_KQ_DELIVERY_ID_LEN) == 0)
-            break;
-    if (slot == KQ_GOT_MAX) {
-        slot = s_got_next;
-        s_got_next = (s_got_next + 1u) % KQ_GOT_MAX;
-    }
-    s_got[slot] = fresh;
-    pthread_mutex_unlock(&s_got_mu);
-}
-
-/* A copy of the record for id, or 0 when this shell has not decoded that delivery. */
-static int kq_got_find(const uint8_t id[FL_KQ_DELIVERY_ID_LEN], kq_got_t *out)
-{
-    int found = 0;
-
-    pthread_mutex_lock(&s_got_mu);
-    for (unsigned i = 0; i < KQ_GOT_MAX && !found; i++)
-        if (s_got[i].used && memcmp(s_got[i].id, id, FL_KQ_DELIVERY_ID_LEN) == 0) {
-            *out = s_got[i];
-            found = 1;
-        }
-    pthread_mutex_unlock(&s_got_mu);
-    return found;
-}
-
 static int verb_kq_send(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     int hosting = 0;
@@ -933,7 +879,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
         return 1;
     }
     fl_kq_buf_free(&report);
-    kq_got_remember(in->id, in->sender, in->file_name);
+    fl_server_history_remember(in->id, in->sender, in->file_name, in->offer.file_id);
     printf("%s from %s decoded and verified; saved to %s\n", in->file_name, in->sender, dest);
     fl_net_kq_inbox_drop(in->id);
     return 0;
@@ -1200,57 +1146,43 @@ void cmd_server_file_install_history(void)
     fl_net_kq_set_history(kq_history_gate, kq_history_source);
 }
 
-/* The member's side of `server file history <delivery-id> [-from <account-key>]`: the arguments, then the sender
- * whose letters to expect (the delivery this shell decoded, else -from). Returns 0 with id and sender filled. */
-static int kq_history_member_args(int argc, char **argv, uint8_t id[FL_KQ_DELIVERY_ID_LEN], kq_got_t *got)
+/* The arguments of `server file history <delivery-id> [-from <account-key>]` on a member, with their messages.
+ * Returns 0 with got filled (the sender whose letters to expect, and the file id when this shell decoded it). */
+static int kq_history_member_args(int argc, char **argv, fl_server_history_got_t *got)
 {
     const char *hex = NULL;
-    const char *from = NULL;
+    const char *bad = NULL;
 
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-from") && i + 1 < argc && !from)
-            from = argv[++i];
-        else if (argv[i][0] != '-' && !hex)
-            hex = argv[i];
-        else {
-            fl_color_error("server file history: unexpected argument '%s'", argv[i]);
-            return -1;
-        }
-    }
-    if (!hex) {
-        fl_color_error("usage: server file history <delivery-id> [-from <account-key>]");
-        return -1;
-    }
-    if (fl_kq_delivery_id_parse(hex, id) != 0) {
+    switch (fl_server_history_args(argc, argv, got, &hex, &bad)) {
+    case FL_SERVER_HISTORY_ARGS_OK:
+        return 0;
+    case FL_SERVER_HISTORY_ARGS_NOT_DELIVERY:
         /* Not a delivery id: a share id, whose history only the host keeps. */
         fl_color_warn("server file history: the host keeps the share history; run it on the host");
         return -1;
-    }
-    if (kq_got_find(id, got)) {
-        if (from && strcmp(from, got->sender) != 0) {
-            fl_color_error("server file history: %s came from %s, not %s", hex, got->sender, from);
-            return -1;
-        }
-        return 0;
-    }
-    if (!from) {
+    case FL_SERVER_HISTORY_ARGS_FROM_MISMATCH:
+        fl_color_error("server file history: %s came from %s; -from names someone else", hex, got->sender);
+        return -1;
+    case FL_SERVER_HISTORY_ARGS_NO_SENDER:
         fl_color_error("server file history: this shell did not decode %s; name its sender: "
                        "server file history %s -from <account-key>", hex, hex);
         return -1;
-    }
-    if (strlen(from) >= sizeof got->sender) {
-        fl_color_error("server file history: '%s' is not an account key", from);
+    case FL_SERVER_HISTORY_ARGS_BAD_FROM:
+        fl_color_error("server file history: -from needs an account key");
+        return -1;
+    case FL_SERVER_HISTORY_ARGS_USAGE:
+    default:
+        if (bad)
+            fl_color_error("server file history: unexpected argument '%s'", bad);
+        else
+            fl_color_error("usage: server file history <delivery-id> [-from <account-key>]");
         return -1;
     }
-    memset(got, 0, sizeof *got);
-    memcpy(got->id, id, FL_KQ_DELIVERY_ID_LEN);
-    snprintf(got->sender, sizeof got->sender, "%s", from);
-    snprintf(got->file_name, sizeof got->file_name, "%s", hex);
-    return 0;
 }
 
-/* Prints what fl_net_kq_history_open gave: the history, or why there is none. */
-static int kq_history_member_print(fl_result_t rc, const kq_got_t *got, fl_kq_buf_t *lines, uint32_t events)
+/* Prints what fl_server_history_fetch gave: the history, or why there is none. */
+static int kq_history_member_print(fl_result_t rc, const fl_server_history_got_t *got, fl_kq_buf_t *lines,
+                                   uint32_t events)
 {
     char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
 
@@ -1262,10 +1194,17 @@ static int kq_history_member_print(fl_result_t rc, const kq_got_t *got, fl_kq_bu
             printf("(no events)\n");
         printf("%u event(s) in %s's signed snapshot; it covers the history above\n", (unsigned)events,
                got->sender);
+        if (!got->has_file_id)
+            fl_color_warn("server file history: this shell did not decode %s, so the history was not checked "
+                          "against that delivery's file; it is the file %s sent you", hex, got->sender);
         return 0;
     case FL_RESULT_TIMEDOUT:
         fl_color_warn("server file history: no history for %s; the host refused or did not answer "
                       "(a refusal is shown above)", hex);
+        return 1;
+    case FL_NET_KQ_HISTORY_OTHER_FILE:
+        fl_color_warn("server file history: the host answered %s with the history of another file; nothing shown",
+                      hex);
         return 1;
     case FL_RESULT_ACCES:
         fl_color_warn("server file history: the history for %s does not open: not signed by %s or not "
@@ -1274,6 +1213,9 @@ static int kq_history_member_print(fl_result_t rc, const kq_got_t *got, fl_kq_bu
     case FL_RESULT_ERR:
         fl_color_warn("server file history: %s's snapshot does not cover the history of %s; nothing shown",
                       got->sender, hex);
+        return 1;
+    case FL_RESULT_BUSY:
+        fl_color_warn("server file history: two history requests are already waiting; try again shortly");
         return 1;
     case FL_RESULT_NOSYS:
         fl_color_error("server file history: KeyQuorum is not available in this shell");
@@ -1290,16 +1232,15 @@ static int kq_history_member_print(fl_result_t rc, const kq_got_t *got, fl_kq_bu
 static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
 {
     const char *me = fl_session_current_key_id();
-    uint8_t id[FL_KQ_DELIVERY_ID_LEN], req[16];
     unsigned char box[32];
     fl_net_kq_keys_t sender;
     fl_kq_buf_t lines = {0};
     uint32_t events = 0;
-    kq_got_t got;
+    fl_server_history_got_t got;
     fl_result_t rc;
     int out;
 
-    if (kq_history_member_args(argc, argv, id, &got) != 0)
+    if (kq_history_member_args(argc, argv, &got) != 0)
         return 1;
     if (!me || !me[0]) {
         fl_color_error("server file history: sign in first");
@@ -1307,27 +1248,16 @@ static int kq_history_member(const cmd_server_ctx_t *ctx, int argc, char **argv)
     }
     /* The letters are signed by the sender's account: its key comes from the host registry, by its exact id. */
     rc = fl_net_kq_lookup(ctx->server, ctx->client, 0, got.sender, KQ_WAIT_KEYS_MS, &sender);
-    if (rc != FL_RESULT_OK || strcmp(sender.key_id, got.sender) != 0) {
+    if (rc != FL_RESULT_OK || !fl_server_history_sender_matches(&sender, got.sender)) {
         fl_color_warn("keyquorum: cannot get %s's key from the host", got.sender);
         return 1;
     }
     /* Only the box key opens the letters; the signing key is never opened here. */
     if (kq_open_keys("opens the delivery's history", NULL, box) != 0)
         return 1;
-    pthread_mutex_lock(ctx->mutex);
-    rc = fl_net_kq_request_history(ctx->server, ctx->client, 0, id, req);
-    pthread_mutex_unlock(ctx->mutex);
-    if (rc != FL_RESULT_OK) {
-        mem_domain_secure_zero(box, sizeof box);
-        fl_color_warn("server file history: the request could not be sent%s",
-                      rc == FL_RESULT_BUSY ? ": two history requests are already waiting" : "");
-        return 1;
-    }
-    rc = fl_net_kq_history_open(req, KQ_WAIT_RELEASE_MS, box, got.sender, me, sender.signing_public, &lines,
-                                &events);
+    rc = fl_server_history_fetch(ctx->mutex, ctx->server, ctx->client, &got, box, me, sender.signing_public,
+                                 KQ_WAIT_RELEASE_MS, &lines, &events);
     mem_domain_secure_zero(box, sizeof box);
-    if (rc == FL_RESULT_TIMEDOUT)
-        fl_net_kq_history_drop(req); /* given up: free the slot (an answer arriving later is ignored) */
     out = kq_history_member_print(rc, &got, &lines, events);
     fl_kq_buf_free(&lines);
     return out;
@@ -1350,7 +1280,8 @@ int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv)
     char **sub_argv;
 
     if (argc < 3) {
-        fl_color_error("usage: server file <send [-t]|inbox|public|sent|history|accept|decline|revoke|fetch|cosign|open|reports> ...");
+        fl_color_error("usage: server file <send [-t] [--permitted]|inbox|public|sent|history|log|permit|accept|decline|revoke|fetch|cosign|open|reports> ...");
+        fl_color_error("       server file history <share_id> (host) | <delivery-id> [-from <account-key>] (member)");
         return 1;
     }
     kq_use_storage();
