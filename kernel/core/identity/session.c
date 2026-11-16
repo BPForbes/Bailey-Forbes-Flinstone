@@ -469,14 +469,13 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
             break;
         case FL_KQ_ACCESS_KQST_PASSWORD:
             /*
-             * Owner decision (FL-12): a password-only holder has no token to open, and the default
-             * image has no KQST for Root, so enforcing the token would lock every account out of
-             * sudo -i and of su to Root or across branches. Such a holder keeps the rule from before
-             * KeyQuorum's: its password, and no prompt for sudo -i by an elevated account. Audited,
-             * never silent.
+             * Owner decision (FL-12, #403): sudo -i always opens Root's token. A password-only Root
+             * has none, so it is refused before any password is checked, whoever asks. For su, a
+             * password-only holder keeps the rule from before KeyQuorum's (its password), audited
+             * below as "su-kqst-legacy", never silent.
              */
-            if (!holder_kqst && req->sudo && cur_elevated)
-                check_password = 0;
+            if (!holder_kqst && req->sudo)
+                why = "no-root-kqst";
             break;
         default:
             why = "policy";
@@ -491,8 +490,8 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
             if (fl_kq_open_account(holder_name, pw, NULL) != FL_KQ_ACCOUNT_OK)
                 why = "kqst";
         } else {
-            session_audit(cur_key, req->sudo ? "sudo-kqst-legacy" : "su-kqst-legacy", tgt_key,
-                          "password-only account");
+            /* Only su gets here: sudo with a password-only Root was refused above. */
+            session_audit(cur_key, "su-kqst-legacy", tgt_key, "password-only account");
         }
     }
     if (!why && need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST) {
@@ -685,16 +684,12 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         why = "parent-grant";
     else if (need.factor != FL_KQ_ACCESS_KQST_PASSWORD)
         why = "policy";
-    else if (root_kqst) {
-        if (!fl_session_verify_account_password(root_name, password))
-            why = "password";
-        else if (fl_kq_open_account(root_name, password, NULL) != FL_KQ_ACCOUNT_OK)
-            why = "kqst";
-    } else if (!fl_session_verify_account_password(cur_name, password)) {
-        why = "password"; /* password-only Root: the caller's own password, as before (owner decision) */
-    } else {
-        session_audit(cur_key, "sudo-kqst-legacy", FL_HERITAGE_ROOT_KEY, "password-only account");
-    }
+    else if (!root_kqst)
+        why = "no-root-kqst"; /* owner decision (FL-12, #403): no password-only fallback for sudo */
+    else if (!fl_session_verify_account_password(root_name, password))
+        why = "password";
+    else if (fl_kq_open_account(root_name, password, NULL) != FL_KQ_ACCOUNT_OK)
+        why = "kqst";
     if (why) {
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, why);
         return FL_RESULT_ACCES;
@@ -719,7 +714,7 @@ fl_result_t fl_session_sudo_authenticate(const char *password) {
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "mode");
         return FL_RESULT_ACCES;
     }
-    if (!session_verify_password_locked(root_kqst ? root_name : cur_name, password)) {
+    if (!session_verify_password_locked(root_name, password)) {
         pthread_mutex_unlock(&s_session_mu);
         session_audit(cur_key, "sudo-refused", FL_HERITAGE_ROOT_KEY, "password");
         return FL_RESULT_ACCES;

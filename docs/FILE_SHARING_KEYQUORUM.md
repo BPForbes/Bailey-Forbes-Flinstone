@@ -834,18 +834,23 @@ The rule is KeyQuorum's (`keyquorum_access.h`); Flinstone asks it and collects t
   the session asks again and refuses (`bridge-changed`) unless the factor and the bridge are still the same. The
   command asks for the bridge member only once the target's password (Root's for `sudo -i`) is verified, and
   refuses an over-long member name. `sudo` without a switch (`fl_session_sudo_authenticate`) asks for Root's
-  password and token when Root is a KQST account. Every refusal is audited through the session's audit hook
+  password and token, and is refused when Root has no token. Every refusal is audited through the session's audit hook
   (`su-refused` / `sudo-refused` and a reason word; never a password, key or token byte); the terminal shows the
-  same `authentication failed` whatever the reason. `fl_session_set_user` stays an unchecked set for tests; the
+  same `authentication failed` whatever the reason, except the `sudo` refusal for a Root with no token (below). `fl_session_set_user` stays an unchecked set for tests; the
   end of `su -c` uses `fl_session_restore_user`, which takes the old identity back only while the login it was
   asked in is still current (otherwise the session is left as it is, audited as `su-restore-refused`).
-- **Password-only accounts (owner decision).** The default image has no KQST for any account, Root included, and
-  KeyQuorum asks for Root's token on every `sudo`. Where the factor names a token its holder does not have (a
-  `FL_USER_AUTH_PASSWORD` account), the behaviour before KeyQuorum's rule is kept (the password; nothing for
-  `sudo -i` by an elevated account; the caller's own password for `sudo`) and audited as `su-kqst-legacy` /
-  `sudo-kqst-legacy`. Where the factor names a token, a KQST-mode account never switches on a password alone;
-  where KeyQuorum names the password factor (the same branch, above or below), the target's password is the
-  whole factor for a KQST-mode account too, because that is KeyQuorum's rule.
+- **Password-only accounts (owner decision, FL-12 #403).** The default image has no KQST for any account, Root
+  included, and KeyQuorum asks for Root's token on every `sudo`. `sudo` and `sudo -i` always need Root's password
+  and Root's token: with a password-only Root (a `FL_USER_AUTH_PASSWORD` account) both are refused before any
+  password is checked, for every caller (an account that is already elevated needs no `sudo` elevation, as
+  before, but its `sudo -i` is refused too), and audited as `sudo-refused` with the
+  reason `no-root-kqst`. The terminal says why (`Root has no KeyQuorum token (KQST)`), since the `sudo` prompt
+  already shows whether Root has a token. There is no fallback to the caller's own password. For `su`, where the
+  factor names a token the target does not have, the behaviour before KeyQuorum's rule is kept (the target's
+  password) and audited as `su-kqst-legacy`. Where the factor names a token, a KQST-mode account never switches
+  on a password alone; where KeyQuorum names the password factor (the same branch, above or below), the target's
+  password is the whole factor for a KQST-mode account too, because that is KeyQuorum's rule. No shell command
+  enrols Root in KQST mode yet, so on the default image `sudo` and `sudo -i` are refused until one does.
 - **Bridges.** A live bridge is a row of the account store's `account_bridges` with `destroyed = 0` and well-formed
   facts (generation 1..2^32-1, 16-byte salt, 32-byte public key, at least two members with valid labels and 32-byte
   signing keys). The list is never partial: a row with `destroyed = 0` that is malformed or cannot be read, any

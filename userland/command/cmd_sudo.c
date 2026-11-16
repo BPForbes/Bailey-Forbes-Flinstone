@@ -36,9 +36,9 @@ static int sudo_grant_token(const char *reason) {
 
 /*
  * sudo -i becomes Root, the master of the whole heritage tree. KeyQuorum's rule asks for Root's own
- * key: Root's password and slot token for a KQST-mode Root. A password-only Root keeps the rule from
- * before: Root's password, and no second prompt for an elevated account (owner decision; the session
- * audits it). cmd_switch_user collects the factor; fl_session_switch_user checks and commits.
+ * key: Root's password and slot token. A password-only Root has no token, so sudo -i is refused for
+ * every account (owner decision, FL-12 #403; the session audits it). cmd_switch_user collects the
+ * factor; fl_session_switch_user checks and commits.
  */
 int cmd_sudo_interactive_login(void) {
     const fl_user_db_t *db;

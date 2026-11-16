@@ -1532,22 +1532,18 @@ static fl_result_t switch_to(const char *target, int sudo, const char *pw, const
     return fl_session_switch_user(&req);
 }
 
-/* The in-memory elevation mark, for the sudo -i waiver recheck. Root's uid stays 0. */
-static void drop_root_elevation(void) { (void)fl_session_set_elevated("Root", 0); }
-
-static fl_result_t restore_root_elevation(void) { return fl_session_set_elevated("Root", 1); }
-
 static void sudo_logout_during(void) { (void)fl_session_logout(); }
 
-static void sudo_root_kqst_during(void) {
-    (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST);
+static void sudo_root_password_only_during(void) {
+    (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD);
 }
 
-static void sudo_caller_password_during(void) { (void)fl_session_set_password("Flinstone", "other"); }
+static void sudo_root_password_during(void) { (void)fl_session_set_password("Root", "other"); }
 
 /* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
- * factor itself. Password-only accounts keep their behaviour where the rule asks for a token they do
- * not have (owner decision, audited); a KQST-mode account never switches on a password alone. */
+ * factor itself. For su, a password-only target keeps its password where the rule asks for a token
+ * it does not have (audited su-kqst-legacy); sudo and sudo -i always need Root's token (owner
+ * decision, #403). A KQST-mode account never switches on a password alone. */
 static int test_session_switch(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     fl_user_bridge_t b;
@@ -1586,57 +1582,39 @@ static int test_session_switch(void) {
     ASSERT(!strcmp(s_audit, "su-refused:password"));
     b.destroyed = 1;
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
-    /* sudo -i to a password-only Root: Root's password; an elevated account is not asked. */
-    ASSERT(switch_to("root", 1, "alternative", NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
-    ASSERT(switch_to("root", 1, "root", NULL, NULL) == FL_RESULT_OK);
-    ASSERT(!strcmp(fl_session_current_user(), "Root"));
-    /* The waiver is the elevation seen before the reservation. If that mark is gone by the
-     * recheck, the password-less sudo -i fails closed and the session stays put. */
-    fl_session_test_set_switch_pre_lock(drop_root_elevation);
-    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:changed"));
-    ASSERT(!strcmp(fl_session_current_user(), "Root"));
-    fl_session_test_set_switch_pre_lock(NULL);
-    ASSERT(restore_root_elevation() == FL_RESULT_OK);
-    ASSERT(fl_session_is_elevated_account());
-    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_OK);
-    /* sudo (elevation): the caller's password for a password-only Root, Root's key once it has one. */
-    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    /* sudo and sudo -i need Root's token (owner decision, FL-12 #403). A password-only Root has
+     * none: refused before any password is checked, for every caller, elevated or not, and never
+     * through the caller's own password. */
     ASSERT(!fl_session_sudo_needs_root());
-    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_OK);
-    ASSERT(fl_session_has_elevation());
-    fl_session_drop_elevation();
-    /* Logout during the check moves the login generation. The password was Flinstone's,
-     * and that must not become an elevation token for the session that follows. */
-    fl_session_test_set_switch_pre_lock(sudo_logout_during);
-    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_BUSY);
-    ASSERT(!strcmp(s_audit, "sudo-refused:superseded"));
-    ASSERT(!fl_session_has_elevation());
-    fl_session_test_set_switch_pre_lock(NULL);
-    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
-    /* set_auth_mode does not move the login generation. A password-only check must
-     * not grant elevation if Root is KQST by the time the lock is taken again. */
-    fl_session_test_set_switch_pre_lock(sudo_root_kqst_during);
+    ASSERT(switch_to("root", 1, "alternative", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(switch_to("root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account());
+    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:mode"));
-    ASSERT(!fl_session_has_elevation());
-    fl_session_test_set_switch_pre_lock(NULL);
-    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
-    /* The password that passed is checked again. A change in that window is not a grant. */
-    fl_session_test_set_switch_pre_lock(sudo_caller_password_during);
-    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
-    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
-    ASSERT(!fl_session_has_elevation());
-    fl_session_test_set_switch_pre_lock(NULL);
-    ASSERT(fl_session_set_password("Flinstone", "flinstone") == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
     ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(fl_session_sudo_authenticate(NULL) == FL_RESULT_ACCES);
+    ASSERT(!fl_session_has_elevation());
+    /* No legacy audit is written for sudo any more. */
+    ASSERT(strcmp(s_audit, "sudo-kqst-legacy:password-only account") != 0);
+    /* KQST-mode Root without a token that opens: Root's password alone is refused. */
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
     ASSERT(fl_session_sudo_needs_root());
     ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
     ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES); /* Root has no token here */
     ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
     ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:kqst"));
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
     ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
     fl_session_set_audit_hook(NULL);
@@ -1789,6 +1767,119 @@ static int test_switch_refusals(void) {
     ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root.Flinstone.Bob';") == 0);
     unlink(kqst);
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* A slot_open stand-in: Root's token "opens" with Root's password "root" and nothing else. The real
+ * open is covered by test_kq_real_token; this lets the sudo windows below be reached. */
+static int stub_slot_open_root(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                               const uint8_t dev[16], const uint8_t spub[32], const uint8_t epub[32],
+                               uint8_t signing_out[32], uint8_t encryption_out[32]) {
+    (void)kqst, (void)klen, (void)dev, (void)spub, (void)epub;
+    memset(signing_out, 0, 32);
+    memset(encryption_out, 0, 32);
+    return (label && passphrase && !strcmp(label, "Root") && !strcmp(passphrase, "root")) ? FL_KQ_ACCOUNT_OK
+                                                                                         : FL_KQ_ACCOUNT_INVALID;
+}
+
+static void patch_root_slot(fl_kq_driver_t *d) { d->slot_open = stub_slot_open_root; }
+
+/*
+ * FL-12 owner decision (#403): with a KQST-mode Root, sudo takes Root's password and token, never the
+ * caller's own password, and grants only while the login, Root's mode and Root's password that were
+ * checked are still the same when the lock is taken again. sudo -i switches on the same factor.
+ */
+static int test_sudo_root_token(void) {
+    char kqst[300], stmt[700];
+    FILE *fp;
+
+    fl_session_set_audit_hook(capture_audit);
+    snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
+    fp = fopen(kqst, "wb");
+    ASSERT(fp && fputs("stub slot token", fp) >= 0 && fclose(fp) == 0);
+    snprintf(stmt, sizeof stmt,
+             "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+             "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash) VALUES"
+             " ('Root','own',1,'Root',1,1,'%s',zeroblob(16),zeroblob(32),zeroblob(32),0,zeroblob(32));",
+             kqst);
+    ASSERT(exec_on_session_db(stmt) == 0);
+    s_patch = patch_root_slot;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+
+    /* The caller's own password is not Root's: refused, no fallback. */
+    ASSERT(fl_session_sudo_authenticate("flinstone") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(!fl_session_has_elevation());
+    /* Root's password and token: granted. */
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_OK);
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+
+    /* Logout during the check moves the login generation: nothing is granted to what follows. */
+    fl_session_test_set_switch_pre_lock(sudo_logout_during);
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "sudo-refused:superseded"));
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    /* Root back to password-only in the window: no grant on a token check for a mode now gone. */
+    fl_session_test_set_switch_pre_lock(sudo_root_password_only_during);
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:mode"));
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    /* Root's password changed in the window: the password that passed is checked again. */
+    fl_session_test_set_switch_pre_lock(sudo_root_password_during);
+    ASSERT(fl_session_sudo_authenticate("root") == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_password("Root", "root") == FL_RESULT_OK);
+
+    /* sudo -i: the same factor. The caller's password is refused, Root's opens the token. */
+    ASSERT(switch_to("Root", 1, "flinstone", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(switch_to("Root", 1, "root", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    /* An elevated account is asked too: no password-less sudo -i. */
+    ASSERT(switch_to("Root", 1, NULL, NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+
+    s_patch = NULL;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* The commands: a password-only Root refuses sudo and sudo -i with a message that says why, audited
+ * in the session, whatever password is supplied. */
+static int test_sudo_commands_need_root_token(void) {
+    char *sudo_i_argv[] = {"sudo", "-i", NULL};
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(!fl_session_sudo_needs_root());
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!fl_session_has_elevation());
+    ASSERT(setenv("FL_CMD_PASSWORD", "flinstone", 1) == 0);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_run(2, sudo_i_argv) != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    unsetenv("FL_CMD_PASSWORD");
     fl_session_set_audit_hook(NULL);
     return 0;
 }
@@ -2127,6 +2218,8 @@ int main(void) {
     RUN(test_unlock_requirement);
     RUN(test_session_switch);
     RUN(test_switch_refusals);
+    RUN(test_sudo_root_token);
+    RUN(test_sudo_commands_need_root_token);
     RUN(test_restore_user);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);

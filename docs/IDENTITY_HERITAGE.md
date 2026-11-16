@@ -80,10 +80,13 @@ the logged-in account may use it only when it is that owner, an ancestor of it, 
 to it by an active bridge. Paths are judged after resolving `..` and symlinks, and a file
 about to be created is judged by where it would land. Paths outside `<jail>/home` keep the
 existing jail rules. `sudo` still lifts the outer jail as before, but never heritage: an
-elevated session cannot reach another branch's home without a bridge. `sudo -i`, which
-becomes Root, asks for what KeyQuorum's access rule names (Root's password, and Root's slot
-token once Root is a KQST account; see `FILE_SHARING_KEYQUORUM.md`, "Login, `su` and `sudo`"),
-and is recorded as a `type=identity event=sudo-i` audit line. Homes are created
+elevated session cannot reach another branch's home without a bridge. `sudo` and `sudo -i`
+(which becomes Root) ask for what KeyQuorum's access rule names: Root's password and Root's
+slot token, never the caller's own password. A password-only Root has no token, so both are
+refused (an already elevated account needs no `sudo` elevation, as before, but its `sudo -i`
+is refused too) until Root is a KQST account (owner decision, FL-12 #403; see
+`FILE_SHARING_KEYQUORUM.md`, "Login, `su` and `sudo`"). `sudo -i` is recorded as a
+`type=identity event=sudo-i` audit line. Homes are created
 owner-only on `useradd`, `profile` and `su -`, which now starts in the account's home.
 
 When the jail is inactive (a plain hosted shell) there is no home tree to enforce, as

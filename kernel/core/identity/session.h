@@ -44,9 +44,10 @@ int         fl_session_verify_account_password(const char *name, const char *pas
  *   NONE                 nothing more (the same account, without sudo).
  *   PASSWORD             password is the target's.
  *   KQST_PASSWORD        password is the token holder's (Root's for sudo, else the target's) and opens
- *                        its slot token. A password-only (legacy) holder keeps the rule from before
- *                        KeyQuorum's (the password; nothing for sudo -i by an elevated account), and
- *                        that is audited as "su-kqst-legacy" / "sudo-kqst-legacy" (owner decision).
+ *                        its slot token. For sudo -i, a password-only Root is refused ("no-root-kqst"),
+ *                        whoever asks (owner decision, FL-12 #403). For su, a password-only (legacy)
+ *                        target keeps the rule from before KeyQuorum's (its password), audited as
+ *                        "su-kqst-legacy".
  *   PASSWORD_BRIDGE_KQST the target's password, plus bridge_member opening their token with
  *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
  *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
@@ -73,14 +74,15 @@ typedef struct fl_session_switch_request {
 fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
 
 /**
- * sudo without a switch (an elevation token): KeyQuorum asks for Root's key. With a KQST-mode Root,
- * password must be Root's and open Root's token; with a password-only Root, it is the caller's own
- * password, as before (owner decision, audited as "sudo-kqst-legacy"). OK also binds the elevation
- * token to that same login: a login or logout during the check returns BUSY and grants nothing.
- * Any other refusal is ACCES.
+ * sudo without a switch (an elevation token): KeyQuorum asks for Root's key, so password must be
+ * Root's and open Root's token. A password-only Root has no token: sudo is refused ("no-root-kqst")
+ * before any password is checked, and there is no fallback to the caller's own password (owner
+ * decision, FL-12 #403). OK also binds the elevation token to that same login: a login or logout
+ * during the check returns BUSY and grants nothing. Any other refusal is ACCES.
  */
 fl_result_t fl_session_sudo_authenticate(const char *password);
-/** 1 when sudo asks for Root's password and token (Root is a KQST-mode account), else 0. */
+/** 1 when Root is a KQST-mode account, so sudo can ask for Root's password and token; 0 when Root
+ *  is password-only, and sudo and sudo -i are refused. */
 int         fl_session_sudo_needs_root(void);
 
 /** Where the session reports identity events (the shell installs fl_audit_identity_event). */

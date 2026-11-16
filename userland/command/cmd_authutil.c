@@ -131,16 +131,24 @@ int cmd_sudo_require_auth_reason(const char *reason) {
     if (fl_session_has_elevation())
         return 0;
 
-    /* KeyQuorum's sudo factor is Root's key: Root's password and token for a KQST-mode Root; the
-     * caller's own password for a password-only Root, as before (fl_session_sudo_authenticate). */
-    if (cmd_read_password(fl_session_sudo_needs_root() ? "[sudo] Root password: " : "[sudo] password: ",
-                          pw, sizeof(pw)) != 0) {
+    /* KeyQuorum's sudo factor is Root's key: Root's password and token. A password-only Root has no
+     * token, so there is nothing to ask for: the session refuses and audits it (owner decision,
+     * FL-12 #403; no fallback to the caller's own password). */
+    if (!fl_session_sudo_needs_root()) {
+        rc = fl_session_sudo_authenticate(NULL);
+        if (rc != FL_RESULT_OK) {
+            fprintf(stderr, "sudo: Root has no KeyQuorum token (KQST); sudo needs Root's password and token\n");
+            return 1;
+        }
+    } else {
+        if (cmd_read_password("[sudo] Root password: ", pw, sizeof(pw)) != 0) {
+            cmd_wipe_password(pw, sizeof(pw));
+            fprintf(stderr, "sudo: password read failed\n");
+            return 1;
+        }
+        rc = fl_session_sudo_authenticate(pw);
         cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "sudo: password read failed\n");
-        return 1;
     }
-    rc = fl_session_sudo_authenticate(pw);
-    cmd_wipe_password(pw, sizeof(pw));
     if (rc != FL_RESULT_OK) {
         fprintf(stderr, rc == FL_RESULT_BUSY ? "sudo: elevation failed (%d)\n" : "sudo: incorrect password\n",
                 (int)rc);
@@ -178,6 +186,7 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     const fl_user_record_t *root;
     fl_result_t rc;
     int ask_password = 1;
+    int no_root_token;
 
     fl_session_init();
     db = fl_session_user_db();
@@ -194,8 +203,11 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
     if (need.factor == FL_KQ_ACCESS_NONE)
         ask_password = 0;
-    /* A password-only Root keeps the old sudo -i: no prompt for an elevated account. */
-    if (sudo && fl_session_is_elevated_account() && root && root->auth_mode != FL_USER_AUTH_PASSWORD_KQST)
+    /* sudo -i needs Root's token (owner decision, FL-12 #403). A password-only Root has none, so
+     * nothing is asked: the session refuses it and audits it, and the reason is shown, because
+     * plain sudo already shows whether Root has a token. */
+    no_root_token = sudo && !(root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+    if (no_root_token)
         ask_password = 0;
     /* A refused switch asks for the password too: whether it is refused, and why, is not shown first. */
     if (ask_password) {
@@ -250,8 +262,12 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     cmd_wipe_password(pw, sizeof pw);
     cmd_wipe_password(member_pw, sizeof member_pw);
     if (rc != FL_RESULT_OK) {
-        /* One message for every refusal; the reason is in the audit only. */
-        fprintf(stderr, "%s: authentication failed\n", cmd);
+        /* One message for every other refusal; the reason is in the audit only. */
+        if (no_root_token)
+            fprintf(stderr, "%s: Root has no KeyQuorum token (KQST); sudo -i needs Root's password and token\n",
+                    cmd);
+        else
+            fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;
     }
     return 0;
