@@ -2,10 +2,9 @@
 #define FL_CMD_JOURNAL_H
 
 /*
- * Signed command log (FL-04), hosted only: a separate, versioned, append-only journal of what the
- * shell was asked to run. Every record is signed through a signer interface (KeyQuorum later) and
- * carries the SHA-256 of the record before it, so a reader can check order and integrity. See
- * docs/COMMAND_LOG.md.
+ * Signed command log, hosted only: a separate, versioned, append-only journal of what the shell was
+ * asked to run. Every record is signed through a signer interface (KeyQuorum later) and carries the
+ * SHA-256 of the record before it, so a reader can check order and integrity.
  *
  * What is recorded: a CATEGORY of the command, never its arguments. The category is the first word
  * of the line when it names a known shell command (the command registry, fl_shell_cmd_lookup, plus
@@ -37,46 +36,16 @@
  *                              u8 len + second signature (room for the sudo co-signature)
  *   u8   sig_len, signature
  *
- * Storage: bounded segment replacement over fl_kq_storage_t (kernel/core/vfs/kq_storage.h). The
- * table has no append, rename or durability call, so each append rewrites the active segment
- * "<dir>/cmdlog-NNNNNN.seg" whole with write_atomic. On the placement layer (fl_kq_storage_default)
- * that is a staged write, fsync of the staged file, then rename over the old segment; on the
- * in-memory table the old bytes are replaced only once the new ones are held. Crash recovery: a
- * crash leaves either the old or the new segment, and fl_cmdlog_open re-reads every segment,
- * verifies it and continues the chain; a torn last record (a backend that is not atomic, or a
- * failed write) is reported as an incomplete tail and dropped from the active segment on the next
- * append (or rewritten before the next segment starts). A partial record anywhere but the end of
- * the last segment, a missing segment before a later one, or a segment past the retention bound
- * is FL_CMDLOG_V_GAP / MALFORMED, never a tail. THIS IS NOT PROVEN POWER-LOSS DURABLE: no backend
- * in the tree fsyncs the directory after the rename (write_atomic_at in server_shared_fs.c fsyncs
- * the file only, and the facade uses the same call), and nothing here has been tested against a
- * real power cut.
+ * Failure policy (fail closed): when the ATTEMPT record cannot be written, fl_cmdlog_attempt returns
+ * FL_CMDLOG_REFUSE and a short reason; the caller prints it with fl_cmdlog_print_refusal and does not
+ * run the command. A COMPLETION write failure cannot undo a command that already ran:
+ * fl_cmdlog_complete returns -1 and a reason, the caller warns with fl_cmdlog_print_completion_gap,
+ * and recovery reports that attempt as "outcome unknown".
  *
- * Retention: segments are never pruned, because the table has no remove call and dropping the
- * oldest segment would cut the chain without a signed anchor. When a bound (record, segment count,
- * total bytes) would be passed the append fails, and the failure policy below applies (fail
- * closed). Operator recovery (docs/COMMAND_LOG.md): move the journal directory aside as evidence and
- * start a new journal; a signed rotation anchor is future work.
+ * Storage, crash recovery, retention, device/key binding, concurrency (no cross-process lock: one
+ * directory per process) and lockout are in docs/COMMAND_LOG.md. NOT PROVEN POWER-LOSS DURABLE.
  *
- * Failure policy. Owner decision (Nov 16): refuse with a red error giving the reason. When the
- * ATTEMPT record cannot be written, fl_cmdlog_attempt returns FL_CMDLOG_REFUSE and a short reason;
- * the caller prints it with fl_cmdlog_print_refusal (fl_color_error) and does not run the command.
- * A COMPLETION write failure cannot undo a command that already ran: fl_cmdlog_complete returns -1
- * and a reason, the caller warns with fl_cmdlog_print_completion_gap, and recovery reports that
- * attempt as "outcome unknown".
- *
- * Binding: a journal belongs to one device id and one signer key id. Open and verify check every
- * record against both (and the first record's journal id); anything else is FL_CMDLOG_V_FOREIGN and
- * the journal is not opened, so a second key the verifier knows cannot extend it.
- *
- * Concurrency: writers through one handle are serialized by its mutex, so threads sharing it keep
- * one chain. A second fl_cmdlog_open of the same (storage table, directory) in this process is
- * refused (FL_CMDLOG_OPEN_BUSY). There is NO cross-process lock (the table has no lock call): each
- * process or session must use its own directory. Close a handle only after every caller is done.
- * Lockout: a journal that does not verify is never reopened, so with the refuse policy every command
- * is refused until an operator moves the directory aside (docs/COMMAND_LOG.md).
- *
- * Not wired in yet: the interpreter hook (userland/shell/interpreter.c) is added later.
+ * Not wired in yet: nothing outside the tests calls fl_cmdlog_attempt.
  */
 
 #include "kq_storage.h"
@@ -114,10 +83,9 @@ enum { FL_CMDLOG_TIME_LOCAL = 0, FL_CMDLOG_TIME_TRUSTED = 1 };
 
 /*
  * Who signs. KeyQuorum has no generic, domain-separated single-signer C API yet.
- * TODO(FL-04): add a KeyQuorum call that signs and verifies (domain, message) with an account's key
- * (e.g. kq_sign_domain / kq_verify_domain in keyquorum_identity.h) and its driver wrapper in
- * kernel/drivers/keyquorum/kq_driver.c (two ops appended to the keyquorum driver table), then
- * provide a signer over them. Until then tests use a test-only signer.
+ * TODO: add a KeyQuorum call that signs and verifies (domain, message) with an account's key and its
+ * driver wrapper in kernel/drivers/keyquorum/kq_driver.c, then provide a signer over them. Until then
+ * tests use a test-only signer.
  *
  * sign: writes the signature of msg under domain into sig_out (cap FL_CMDLOG_SIG_MAX) and its
  * length into *sig_len; 0 on success. verify: 1 when sig is key_id's valid signature of msg under

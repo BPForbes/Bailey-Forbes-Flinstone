@@ -85,7 +85,7 @@ print(str(info["bootSuccessMarkerImplemented"]).lower())
 print(info["qemuBootMode"] or "none")
 print(info["sha256"])
 print(str(info.get("bootableCandidate", False)).lower())
-# FL-02: an image that declares a low-memory failure marker is also booted with too little RAM.
+# An image that declares a low-memory failure marker is also booted with too little RAM.
 probe = info.get("lowMemoryProbe")
 if probe is not None:
     assert isinstance(probe, dict) and type(probe.get("ramBytes")) is int and probe["ramBytes"] > 0

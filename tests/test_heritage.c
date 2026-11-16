@@ -1284,7 +1284,7 @@ static void make_bridge(fl_user_bridge_t *b, const char *uid, const char *a, con
     memset(b->members[1].signing_public, 0x04, 32);
 }
 
-/* Private bridges in the account store (FL-12): a store from before wrap_salt gains the column, the
+/* Private bridges in the account store: a store from before wrap_salt gains the column, the
  * sealed key and its wrap salt are stored and read only together, and only rows the store holds as
  * live (destroyed = 0, well formed) are live. */
 static int test_private_bridge_store(void) {
@@ -1476,8 +1476,8 @@ static int test_private_bridge_store(void) {
     return 0;
 }
 
-/* FL-12: the switch factor is KeyQuorum's (kq_access_requirement), asked with heritage key ids and
- * the bridges the session's store holds as live. Any error is REFUSED. */
+/* The switch factor is KeyQuorum's (kq_access_requirement), asked with heritage key ids and the
+ * bridges the session's store holds as live. Any error is REFUSED. */
 static int test_unlock_requirement(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     fl_user_bridge_t b;
@@ -1558,10 +1558,10 @@ static void sudo_flinstone_kqst_during(void) {
     (void)fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST);
 }
 
-/* FL-12: su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the
- * factor itself. For su, a password-only target keeps its password where the rule asks for a token
- * it does not have (audited su-kqst-legacy); sudo and sudo -i always need Root's token (owner
- * decision, #403). A KQST-mode account never switches on a password alone. */
+/* su and sudo -i commit only through fl_session_switch_user, which asks KeyQuorum for the factor
+ * itself. For su, a password-only target keeps its password where the rule asks for a token it does
+ * not have (audited su-kqst-legacy); sudo and sudo -i always need Root's token. A KQST-mode account
+ * never switches on a password alone. */
 static int test_session_switch(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     fl_user_bridge_t b;
@@ -1600,9 +1600,8 @@ static int test_session_switch(void) {
     ASSERT(!strcmp(s_audit, "su-refused:password"));
     b.destroyed = 1;
     ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
-    /* sudo and sudo -i need Root's token (owner decision, FL-12 #403). A password-only Root has
-     * none: refused before any password is checked, for every caller, elevated or not, and never
-     * through the caller's own password. */
+    /* sudo and sudo -i need Root's token. A password-only Root has none: refused before any password
+     * is checked, for every caller, elevated or not, and never through the caller's own password. */
     ASSERT(!fl_session_sudo_needs_root());
     ASSERT(switch_to("root", 1, "alternative", NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
@@ -1622,7 +1621,7 @@ static int test_session_switch(void) {
     ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
     ASSERT(fl_session_sudo_authenticate(NULL, NULL) == FL_RESULT_ACCES);
     ASSERT(!fl_session_has_elevation());
-    /* No legacy audit is written for sudo any more. */
+    /* sudo writes no legacy audit. */
     ASSERT(strcmp(s_audit, "sudo-kqst-legacy:password-only account") != 0);
     /* KQST-mode Root without a token that opens: Root's password alone is refused. */
     ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
@@ -1672,11 +1671,7 @@ static int exec_on_session_db(const char *stmt) {
     return rc == SQLITE_OK ? 0 : -1;
 }
 
-/*
- * FL-12 refusals with no other test: a driver without an op, a parent's grant, more live bridges than
- * the session holds, a store it cannot read, and a KQST-mode account whose token or pairing cannot be
- * read. Each refuses; none falls to the password-only (legacy) branch.
- */
+/* Each refusal below refuses outright; none falls to the password-only (legacy) branch. */
 static int test_switch_refusals(void) {
     fl_user_db_t *db = fl_session_user_db_mut();
     fl_user_bridge_t b;
@@ -1889,7 +1884,7 @@ static int audit_is_cosign(const char *action, const char *invoker_factor) {
 }
 
 /*
- * FL-12 owner decision (#403): with a KQST-mode Root, sudo takes Root's password and token, never the
+ * With a KQST-mode Root, sudo takes Root's password and token, never the
  * caller's own password, and grants only while the login, Root's mode and Root's password that were
  * checked are still the same when the lock is taken again. sudo -i switches on the same factor.
  */
@@ -2106,10 +2101,9 @@ static int saved_auth_mode(const char *name) {
 }
 
 /*
- * Giving Root its token (owner decision on PR 416): the logged-in account pairs itself with a KQST
- * that opens with its own password and matches the facts given; nothing else is written. Then sudo is
- * co-authorised by Root's token and the invoker's: Flinstone, once it has a token, gives its password
- * and token too, and `kqst enroll` is the command that does it.
+ * The logged-in account pairs itself with a KQST that opens with its own password and matches the
+ * facts given; nothing else is written. Then sudo is co-authorised by Root's token and the invoker's:
+ * Flinstone, once it has a token, gives its password and token too (`kqst enroll`).
  */
 static int test_kqst_enroll(void) {
     unsigned char d_root[16], s_root[32], e_root[32], d_fl[16], s_fl[32], e_fl[32];
@@ -2249,20 +2243,8 @@ static int file_mode_is(const char *path, mode_t want) {
     return stat(path, &st) == 0 && (st.st_mode & 0777) == want;
 }
 
-/*
- * The kernel makes and pairs each account's token itself (owner decision on PR 416), with the real
- * KeyQuorum driver: the account's own keys sealed under its password to a fresh device id, in an
- * owner-only file beside the account store. Then a password change re-seals it, an ancestor's reset
- * puts the account back to password sign-in, a sign-in makes the token, and sudo is co-signed by
- * Root's and the invoker's real keys.
- */
-/*
- * CodeQL cpp/path-injection on PR 416: the token directory comes from FL_USERS_DB_PATH, so the
- * write refuses a "kqst" that is a symlink or that someone else could write to, and a file name
- * that is not a safe key id. Nothing is written in any of those places.
- */
-/* The sudo window's clock (owner decision, FL-20 #399): 15 minutes from the grant, and a refresh
- * starts it again from now; a revoked token has no window to refresh or read. */
+/* The sudo window's clock: 15 minutes from the grant, and a refresh starts it again from now; a
+ * revoked token has no window to refresh or read. */
 static int test_elevation_window_refresh(void) {
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     int64_t first = 0, again = 0, now = 0;
@@ -2282,6 +2264,9 @@ static int test_elevation_window_refresh(void) {
     return 0;
 }
 
+/* The token directory comes from FL_USERS_DB_PATH, so the write refuses a "kqst" that is a symlink or
+ * that someone else could write to, and a file name that is not a safe key id. Nothing is written in
+ * any of those places. */
 static int test_token_write_refuses_unsafe_places(void) {
     char base[] = "/tmp/fl-kqst-safe-XXXXXX";
     char real[600], link[600], path[700], pw[33];
@@ -2340,6 +2325,9 @@ static int test_token_write_refuses_unsafe_places(void) {
     return 0;
 }
 
+/* The kernel makes and pairs each account's token itself, with the real KeyQuorum driver: the
+ * account's own keys sealed under its password to a fresh device id, in an owner-only file beside the
+ * account store. */
 static int test_kqst_made_by_kernel(void) {
     char fl_tok[600], root_tok[600], bob_tok[600], db_path[512], junk[600];
     char *make_argv[] = {"kqst", "enroll", NULL};
@@ -2749,12 +2737,6 @@ static int test_identity_switch_denied_before_prompt(void) {
     return 0;
 }
 
-/*
- * coder-f80a95, CodeRabbit 4587909887: a sudo whose window ended before it could renew it is not
- * reported as renewed. sudo asks for the full co-signature again: refused when Root has no token
- * (nothing granted), and with Root's token and both passwords a new window is granted and the line
- * is signed under it. The window's end is its slot going while the session still holds its token.
- */
 static int sudo_sign_with_answers(const char *line, const char *answers) {
     char path[] = "/tmp/fl-sudo-renew-XXXXXX";
     int fd = mkstemp(path), saved = dup(STDIN_FILENO), rc;
@@ -2786,6 +2768,8 @@ static void audit_end_window_on_coauth(const char *actor, const char *event, con
         fl_elevation_revoke_all();
 }
 
+/* A sudo whose window ended before it could renew it is not reported as renewed: sudo asks for the
+ * full co-signature again. The window's end is its slot going while the session still holds its token. */
 static int test_sudo_renew_after_window_ended(void) {
     fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
     static const char action_want[] = "sudo-action:sudo; nonce=";
@@ -2852,7 +2836,7 @@ static int test_sudo_renew_after_window_ended(void) {
     return 0;
 }
 
-/* coder-3712dc (CR 4587909942): su -c's restore point is one capture, the account and its login together.
+/* su -c's restore point is one capture, the account and its login together.
  * A login between the capture and the restore is refused (generation mismatch), and a capture taken after
  * that login names the new login's account with its own generation, never the account of the login before. */
 static int test_restore_point_captured_together(void) {
@@ -2919,7 +2903,6 @@ int main(void) {
     RUN(test_signed_bridges);
     RUN(test_box_keys);
     RUN(test_share_gate);
-    /* authmode RUN block. bridgeproof appends race RUNs at the end of main; leave those alone. */
     RUN(test_auth_mode_reject_malformed);
     RUN(test_auth_mode_startup_fail_closed);
     RUN(test_jail_homes, jail_parent);
@@ -2934,12 +2917,12 @@ int main(void) {
     RUN(test_token_write_refuses_unsafe_places);
     RUN(test_elevation_window_refresh);
     RUN(test_restore_user);
-    RUN(test_restore_point_captured_together); /* coder-3712dc */
+    RUN(test_restore_point_captured_together);
     RUN(test_switch_bridge_recheck);
     RUN(test_switch_mutation_barriers);
     RUN(test_account_command_reload_fails_closed);
     RUN(test_identity_switch_denied_before_prompt);
-    RUN(test_sudo_renew_after_window_ended); /* coder-f80a95 */
+    RUN(test_sudo_renew_after_window_ended);
 
     if (chdir("/tmp") != 0)
         rc = 1;

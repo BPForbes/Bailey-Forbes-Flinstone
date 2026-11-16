@@ -1,6 +1,6 @@
 #ifndef FL_FREESTANDING_KQ_HEAP_H
 #define FL_FREESTANDING_KQ_HEAP_H
-/* The KeyQuorum embedder's heap (kq_heap.c), FL-02: fl_kernel_main hands it the arena it picked
+/* The KeyQuorum embedder's heap (kq_heap.c): fl_kernel_main hands it the arena it picked
  * from the boot memory map. Until then, and after a refused arena, every allocation fails. */
 #include <stddef.h>
 #include <stdint.h>

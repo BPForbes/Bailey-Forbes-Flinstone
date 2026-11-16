@@ -1,10 +1,5 @@
-; Stage 2 (FL-02): loaded by stage 1 (boot.asm) at FL_STAGE2_ADDR with the BIOS drive number in dl.
-; In real mode it
-;   1. collects the BIOS E820 map into the bounded low buffer (flagging a map that did not fit),
-;   2. enables A20 and verifies it, failing the boot if it stays off,
-;   3. loads the kernel image (sectors after stage 2) to FL_KERNEL_LOAD_ADDR, checking every read,
-;   4. fills the versioned boot-info struct (bootinfo.inc / bootinfo.h),
-; then builds the identity map, enters long mode and jumps to the kernel with rdi pointing at the
+; Stage 2: loaded by stage 1 (boot.asm) at FL_STAGE2_ADDR with the BIOS drive number in dl. Runs the
+; four real-mode steps below, then enters long mode and jumps to the kernel with rdi pointing at the
 ; boot info. Every failure prints a FLINTSTONE_BOOT_FAIL marker (bootfail.inc) and halts.
 %include "bootinfo.inc"
 BITS 16

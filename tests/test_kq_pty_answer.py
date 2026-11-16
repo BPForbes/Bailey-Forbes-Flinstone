@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/kq_pty_answer.py never echoes the passphrase it types (CodeRabbit 4587909784).
+"""scripts/kq_pty_answer.py never echoes the passphrase it types.
 
 The program here prompts and reads its answer with the terminal's echo left as it found it, as a
 program that has not turned echo off yet would. The answer must reach the program and must not

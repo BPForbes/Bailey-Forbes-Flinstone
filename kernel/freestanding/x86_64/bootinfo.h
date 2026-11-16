@@ -1,7 +1,7 @@
 #ifndef FL_FREESTANDING_BOOTINFO_H
 #define FL_FREESTANDING_BOOTINFO_H
 /*
- * Boot-info handoff (FL-02): stage 2 (stage2.asm) fills this struct in low memory, outside the
+ * Boot-info handoff: stage 2 (stage2.asm) fills this struct in low memory, outside the
  * kernel's bss, and enters the kernel with its address in rdi. fl_kernel_main validates it with
  * fl_bootinfo_validate before anything else starts. The layout is shared with bootinfo.inc,
  * which tests/test_fs_bootmap.c checks against this header.

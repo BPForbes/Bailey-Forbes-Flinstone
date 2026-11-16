@@ -12,14 +12,14 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size);
 void cmd_wipe_password(char *buf, size_t buf_size);
 
 /**
- * Non-elevated users must verify their own password before sudo elevation.
+ * Non-elevated users give Root's password and their own (the sudo co-signature) before elevation.
  * Elevated accounts succeed immediately. Returns 0 on success.
  */
 int cmd_sudo_require_auth(void);
 
 /** Like cmd_sudo_require_auth; uses reason for elevation grant and audit. */
 int cmd_sudo_require_auth_reason(const char *reason);
-/** Sign a sudo command line inside the window and start its clock again (FL-20 #399). When Root's key is
+/** Sign a sudo command line inside the window and start its clock again. When Root's key is
  *  not available, or the window ended before this sudo could renew it, nothing is renewed: sudo asks for
  *  the full co-signature again and signs the line under the new window. 0 when signed, 1 when sudo cannot
  *  go on. */

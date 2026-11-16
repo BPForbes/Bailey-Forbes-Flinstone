@@ -395,8 +395,7 @@ static void run_command(int session, char *line)
             emit("unknown user\r\n");
             return;
         }
-        /* The session's own account is free; another one asks for its password, as su does
-         * (owner decision, FL-14 #406). */
+        /* The session's own account is free; another one asks for its password. */
         if (switchuser_to(session, name))
             return;
         str_copy(s_pending[session], name, sizeof(s_pending[session]));

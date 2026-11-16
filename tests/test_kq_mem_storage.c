@@ -1,8 +1,6 @@
 /**
- * test_kq_mem_storage.c - the in-memory fl_kq_storage_t (kernel/core/vfs/kq_mem_storage.c; FL-02 stage 2).
- * The table's own rules first, then the real KeyQuorum checkpoints run on top of it with no file system: a
- * delivery is encoded, co-signed and decoded into a held directory, a failed commit installs nothing, and a
- * tracked file is signed again.
+ * test_kq_mem_storage.c - the in-memory fl_kq_storage_t (kernel/core/vfs/kq_mem_storage.c).
+ * The table's own rules first, then the real KeyQuorum checkpoints run on top of it with no file system.
  */
 #include "kq_checkpoint.h"
 #include "kq_mem_storage.h"

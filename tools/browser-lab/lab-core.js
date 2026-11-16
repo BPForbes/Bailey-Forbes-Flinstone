@@ -200,9 +200,9 @@
   function guestUserNameOk(name) {
     return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,14}$/.test(name);
   }
-  // switchuser follows su (owner decision, FL-14 #406): the session's own account is free, another
-  // account asks for its password. Each helper returns steps: { line, secret }. A secret step answers
-  // the guest's Password: prompt, and the page sends it only once that prompt has appeared.
+  // The session's own account is free; another account asks for its password (the su rule). Each
+  // helper returns steps: { line, secret }. A secret step answers the guest's Password: prompt, and
+  // the page sends it only once that prompt has appeared.
   const sameUser = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
   function switchSteps(name, password, currentUser) {
     const steps = [{ line: `switchuser ${name}`, secret: false }];

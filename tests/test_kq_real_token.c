@@ -1,13 +1,10 @@
 /*
- * test_kq_real_token.c - real slot tokens and a real private bridge (Flinstone #407; KeyQuorum
- * KQ-11 #167, KQ-17 #165, KQ-19 #171).
+ * test_kq_real_token.c - real slot tokens and a real private bridge.
  *
  * Run by scripts/kq_real_token_fixture.sh (make test_kq_real_token), which mints the material
  * with the keyquorum CLI: two KQSTs on two devices under passphrases drawn at run time, a third
- * device id that holds neither, and a KeyQuorum private bridge between the two slots. This test
- * registers the pairing facts in Flinstone's account store, opens the tokens with kq_slot_open
- * (through the driver), signs with the opened key, logs in, and crosses the bridge at su with a
- * real prove and verify. No secret is a literal: the passphrases are read from the fixture's files.
+ * device id that holds neither, and a KeyQuorum private bridge between the two slots.
+ * No secret is a literal: the passphrases are read from the fixture's files.
  */
 #include "fl/kq.h"
 #include "fl/driver/keyquorum.h"
@@ -188,7 +185,7 @@ static fl_result_t box_hook(const fl_user_record_t *account, const uint8_t box_s
     return FL_RESULT_OK;
 }
 
-/* A KQST login commits only while its generation is current (#407: needs a token that opens). */
+/* A KQST login commits only while its generation is current. */
 static int test_login_generation(void) {
     uint64_t before, after;
 
@@ -210,9 +207,6 @@ static int test_login_generation(void) {
     return 0;
 }
 
-/* Imports the KeyQuorum store's bridge (made by bridge private create) with the production importer, then
- * reads it back. tamper_roster: the roster key of Root.Flinstone.Bob then disagrees with the member's own
- * (the same fault the old in-test copy injected before its write). */
 static int tamper_roster_signing(const char *uid);
 
 /* Drops this store's copy of the bridge, so an import starts from the source's state: an import keeps a
@@ -233,6 +227,8 @@ static int forget_bridge(const char *uid) {
     return ok ? 0 : -1;
 }
 
+/* Imports the KeyQuorum store's bridge (made by bridge private create) with the production importer, then
+ * reads it back. tamper_roster: the roster key of Root.Flinstone.Bob then disagrees with the member's own. */
 static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
     const fl_user_db_t *db = fl_session_user_db();
 
@@ -247,8 +243,6 @@ static int import_fixture_bridge(fl_user_bridge_t *b, int tamper_roster) {
     return 0;
 }
 
-/* su across branches over a live private bridge: the target's password, plus a member opening their
- * token and proving membership against the store's current facts. */
 /*
  * Test-only seam: linked with -Wl,--wrap=fl_kq_driver_get_or_register (Makefile, test_kq_real_token).
  * With s_destroy_after_verify set, bridge_verify runs for real and then the bridge is marked destroyed
@@ -597,7 +591,7 @@ out:
     return rc;
 }
 
-/* KQ-19 import: the production importer against a store the real CLI made. */
+/* The production importer against a store the real CLI made. */
 static int test_bridge_import(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     const fl_user_db_t *db = fl_session_user_db();
@@ -665,6 +659,8 @@ out:
     return rc;
 }
 
+/* su across branches over a live private bridge: the target's password, plus a member opening their
+ * token and proving membership against the store's current facts. */
 static int test_bridge_su(void) {
     fl_user_bridge_t *b = calloc(1, sizeof *b);
     fl_kq_requirement_t need;
@@ -745,11 +741,10 @@ out:
     return rc;
 }
 
-/* KQ-16 with the real material: a parent's signing seed is dealt to the box keys of two real slot tokens (Bob and
- * Ann, on two real devices), assembled back through the driver from the secrets those tokens open, and the
- * assembled key signs a revision the parent's own key would: the history verifies and the revision is trusted under the parent's
- * registered public key, and not under another's. One device twice is no
- * quorum, and a record checked against another parent's public key is refused. */
+/* A parent's signing seed is dealt to the box keys of two real slot tokens (Bob and Ann, on two real
+ * devices), assembled back through the driver from the secrets those tokens open, and the assembled key
+ * signs as the parent's own key would. One device twice is no quorum, and a record checked against
+ * another parent's public key is refused. */
 static int test_parent_key_assembly(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get_or_register();
     const char *labels[2] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
@@ -830,7 +825,7 @@ static int test_parent_key_assembly(void) {
 }
 
 /*
- * Root's own real KQST, paired through the store's enrolment path (owner decision on PR 416), then
+ * Root's own real KQST, paired through the store's enrolment path, then
  * sudo co-signed by two real tokens: Root's (Root's passphrase) and the invoker Bob's (Bob's).
  */
 static int test_root_enrol_and_sudo(void) {
@@ -878,7 +873,7 @@ static int test_root_enrol_and_sudo(void) {
     }
     ASSERT(fl_session_has_elevation());
     {
-        /* The sudo window (owner decision, FL-20 #399): Bob's and Root's real keys are kept for it and
+        /* The sudo window: Bob's and Root's real keys are kept for it and
          * sign every elevated action together; a sudo in it starts the clock again; when Root's key is
          * not available the elevation is taken away and Bob goes on with his own key alone. */
         static const char act_want[] = "sudo-action:elevated; nonce=", sudo_want[] = "sudo-action:sudo; nonce=";

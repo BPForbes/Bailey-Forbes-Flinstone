@@ -22,7 +22,7 @@
 #include <pthread.h>
 
 /*
- * The sudo window's signing gate (FL-20 #399): inside the window every command is an elevated action,
+ * The sudo window's signing gate: inside the window every command is an elevated action,
  * signed by Root's key and the account's, so it runs before any builtin handles the line (help, history,
  * make and the other early handlers included). A sudo is left to its own path, which signs it through
  * cmd_sudo_sign_action and is the only thing that starts the window's clock again. The first word is

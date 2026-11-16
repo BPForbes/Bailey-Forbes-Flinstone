@@ -1,4 +1,4 @@
-; Boot layout and boot-info handoff (FL-02), shared by boot.asm (stage 1) and stage2.asm.
+; Boot layout and boot-info handoff, shared by boot.asm (stage 1) and stage2.asm.
 ; Every value here must match bootinfo.h: tests/test_fs_bootmap.c reads this file and checks.
 ;
 ; Low memory while the loader runs (the %if checks at the end keep this order):

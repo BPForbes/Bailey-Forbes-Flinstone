@@ -65,12 +65,10 @@ static int store_path_char(int c) {
 }
 
 /*
- * Where the account store is, from FL_USERS_DB_PATH (the operator's to set; tests use it for a temporary
- * store). Every file the kernel keeps beside the store (its tokens, its kqst directory) is under the same
- * directory, so the value is checked once, here, before anything opens it (CodeQL cpp/path-injection on
- * PR 416): only the characters store_path_char takes, no ".." part, and it fits. The store is opened at
- * the copy built from the checked characters, never at the environment's string. 0 when it is unset,
- * 1 when out holds the checked path, -1 when it is refused.
+ * The account store's path from FL_USERS_DB_PATH (the operator's to set; tests use a temporary store).
+ * The kernel's tokens and kqst directory live beside the store, so the value is checked once, here:
+ * only store_path_char characters, no ".." part, and it fits. The store is opened at the checked copy,
+ * never at the environment's string. 0 when unset, 1 when out holds the checked path, -1 when refused.
  */
 static int store_path_from_env(char *out, size_t cap) {
     const char *v = getenv("FL_USERS_DB_PATH");
@@ -228,7 +226,7 @@ int fl_session_has_elevation(void) {
     return has;
 }
 
-/* An account marked password-plus-KQST must open its slot token (FL-15). Called with s_session_mu held
+/* An account marked password-plus-KQST must open its slot token. Called with s_session_mu held
  * only to read the mode; the open itself runs after the lock is released. Wrong password already failed
  * before this path, so a missing token does not teach the mode to a stranger. */
 static int kqst_mode(const char *name) {
@@ -491,16 +489,6 @@ int fl_session_verify_account_password(const char *name, const char *password) {
     return ok;
 }
 
-/*
- * sudo is co-signed (owner decision on PR 416): Root's token, opened with Root's password, and the
- * invoking account's own key, opened with the invoker's password (its token for a KQST account,
- * else its sealed signing key), each sign the action under KeyQuorum's kq_sudo_sign with one fresh
- * nonce, and both signatures must verify under the public keys the account store holds before the
- * sudo is granted. Root invoking for itself needs no second signature. label is the audit's name for
- * the action ("sudo" or "sudo -i"); action is what is signed. NULL when co-signed (the audit detail
- * is written to detail: label, which invoker key signed, the nonce), else the reason word for the
- * audit. Called without s_session_mu.
- */
 /* When a sudo window opened now would end (monotonic ns): the elevation token's own length. */
 static int64_t window_end(void) {
     int64_t now = 0;
@@ -510,6 +498,14 @@ static int64_t window_end(void) {
     return now + (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
 }
 
+/*
+ * The sudo co-signature: Root's token (Root's password) and the invoker's own key (its token for a
+ * KQST account, else its sealed signing key) each sign action under kq_sudo_sign with one fresh nonce,
+ * and both must verify under the account store's public keys. label is the audit's name for the
+ * action. hold_until > 0 keeps the two keys for the sudo window. NULL when co-signed (detail gets
+ * label, which invoker key signed, and the nonce), else the audit's reason word. Called without
+ * s_session_mu.
+ */
 static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
                                const char *invoker_password, const char *root_name,
                                const char *root_password, const char *label, const char *action,
@@ -520,7 +516,6 @@ static const char *cosign_sudo(const char *invoker_name, int invoker_kqst,
 
     if (!invoker_password || !fl_session_verify_account_password(invoker_name, invoker_password))
         return "invoker-password";
-    /* hold_until > 0: the two keys are kept for the sudo window (FL-20 #399). */
     st = fl_kq_sudo_hold_open(invoker_name, invoker_password, invoker_kqst, root_name, root_password,
                               action, hold_until, nonce, inv_sig, root_sig);
     if (st == FL_KQ_COSIGN_AUTHORITY)
@@ -611,12 +606,9 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req) {
         case FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST:
             break;
         case FL_KQ_ACCESS_KQST_PASSWORD:
-            /*
-             * Owner decision (FL-12, #403): sudo -i always opens Root's token. A password-only Root
-             * has none, so it is refused before any password is checked, whoever asks. For su, a
-             * password-only holder keeps the rule from before KeyQuorum's (its password), audited
-             * below as "su-kqst-legacy", never silent.
-             */
+            /* sudo -i always opens Root's token: a password-only Root has none and is refused before
+             * any password is checked. For su, a password-only holder is accepted on its password,
+             * audited below as "su-kqst-legacy", never silent. */
             if (!holder_kqst && req->sudo)
                 why = "no-root-kqst";
             break;
@@ -851,7 +843,7 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     else if (need.factor != FL_KQ_ACCESS_KQST_PASSWORD)
         why = "policy";
     else if (!root_kqst)
-        why = "no-root-kqst"; /* owner decision (FL-12, #403): no password-only fallback for sudo */
+        why = "no-root-kqst"; /* no password-only fallback for sudo */
     else if (!fl_session_verify_account_password(root_name, root_password))
         why = "password";
     else if (!coauth && fl_kq_open_account(root_name, root_password, NULL) != FL_KQ_ACCOUNT_OK)
@@ -910,13 +902,8 @@ fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *
     return rc;
 }
 
-/*
- * Pair the logged-in account with its slot token (KQST). The token must open with the account's
- * password and match the device id and public keys given (the ones keyquorum-device provision
- * printed); an account that already has a token must also open the one it has, so a password alone
- * never replaces a token. The row is written first and the mode saved after it; a failed save puts
- * the row and the mode back. Audited as "kqst-enrol" or "kqst-enrol-refused" with a reason word.
- */
+/* fl_session_enroll_kqst with s_kqst_mu held. The row is written first and the mode saved after it;
+ * a failed save puts the row and the mode back. */
 static fl_result_t enroll_kqst_serialized(const char *password, const char *kqst_path,
                                           const unsigned char device_id[16],
                                           const unsigned char signing_public[32],
@@ -1017,15 +1004,9 @@ fl_result_t fl_session_enroll_kqst(const char *password, const char *kqst_path,
     return rc;
 }
 
-/*
- * The kernel gives an account its token itself (owner decision on PR 416: no token path, device id
- * or keys typed by anyone). The account's own signing key and box key, opened with its password
- * from the account store, are sealed with that password to a fresh random device id into a KQST
- * kept beside the store (fl_kq_account_token_path), owner-only; the account keeps its keys. Then
- * the store's pairing row is written and the account switches to token sign-in, as kqst enroll
- * does, with the same rollback. Called without s_session_mu. Audited as "kqst-made" or
- * "kqst-make-refused" with a reason word.
- */
+/* fl_session_make_kqst with s_kqst_mu held; called without s_session_mu. Nobody types a token path,
+ * device id or key: the token is written owner-only at fl_kq_account_token_path, then paired with
+ * enrol's rollback. */
 static fl_result_t make_kqst_serialized(const char *name, const char *password, int64_t minted_at,
                                         int64_t *generation_out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
@@ -1260,8 +1241,8 @@ fl_result_t fl_session_elevated_action(const char *action, int renew, int *deele
         mem_domain_zero(root_sig, sizeof root_sig);
         return FL_RESULT_OK;
     }
-    /* Root's key is not available (owner decision, FL-20 #399): the elevation sudo gave is taken
-     * away, and the account goes on with its own key alone. */
+    /* Root's key is not available: the elevation sudo gave is taken away, and the account goes on
+     * with its own key alone. */
     pthread_mutex_lock(&s_session_mu);
     active = s_active_elev == tok && s_login_gen == gen;
     if (active) {

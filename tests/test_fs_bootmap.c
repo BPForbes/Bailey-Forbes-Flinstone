@@ -1,10 +1,8 @@
 /*
- * Freestanding boot memory map (FL-02): fl_bootmap_select_arena picks the KeyQuorum heap arena
- * from an E820 map. Covers QEMU's map, unsorted and overlapping entries, reservations that split
- * a usable region, overflowing, zero-length and disabled entries, truncated maps, alignment and
- * the identity-map limit, the 40 MiB boundary, a full buffer and ties. Then fl_bootinfo_validate,
- * the kernel's check of stage 2's handoff; that bootinfo.inc (the loader's copy of the layout) agrees
- * with bootinfo.h; and the KeyQuorum heap (kq_heap.c) over an arena of its own.
+ * Freestanding boot memory map: fl_bootmap_select_arena picks the KeyQuorum heap arena from an E820
+ * map. Then fl_bootinfo_validate, the kernel's check of stage 2's handoff; that bootinfo.inc (the
+ * loader's copy of the layout) agrees with bootinfo.h; and the KeyQuorum heap (kq_heap.c) over an
+ * arena of its own.
  */
 #include "bootinfo.h"
 #include "bootmap.h"

@@ -162,8 +162,8 @@ int cmd_sudo_require_auth_reason(const char *reason) {
         return 0;
 
     /* KeyQuorum's sudo factor is Root's key: Root's password and token. A password-only Root has no
-     * token, so there is nothing to ask for: the session refuses and audits it (owner decision,
-     * FL-12 #403; no fallback to the caller's own password). */
+     * token, so nothing is asked: the session refuses and audits it (no fallback to the caller's own
+     * password). */
     if (!fl_session_sudo_needs_root()) {
         rc = fl_session_sudo_authenticate(NULL, NULL);
         if (rc != FL_RESULT_OK) {
@@ -176,7 +176,7 @@ int cmd_sudo_require_auth_reason(const char *reason) {
             fprintf(stderr, "sudo: password read failed\n");
             return 1;
         }
-        /* Co-signature (owner decision on PR 416): the invoker's key signs the action beside Root's. */
+        /* Co-signature: the invoker's key signs the action beside Root's. */
         if (cmd_read_invoker_password("sudo", mine, sizeof(mine), &asked) != 0) {
             cmd_wipe_password(pw, sizeof(pw));
             fprintf(stderr, "sudo: password read failed\n");
@@ -277,9 +277,9 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
     root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
     if (need.factor == FL_KQ_ACCESS_NONE)
         ask_password = 0;
-    /* sudo -i needs Root's token (owner decision, FL-12 #403). A password-only Root has none, so
-     * nothing is asked: the session refuses it and audits it, and the reason is shown, because
-     * plain sudo already shows whether Root has a token. */
+    /* sudo -i needs Root's token. A password-only Root has none, so nothing is asked: the session
+     * refuses and audits it, and the reason is shown, because plain sudo already shows whether Root
+     * has a token. */
     no_root_token = sudo && !(root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     if (no_root_token)
         ask_password = 0;
@@ -295,7 +295,7 @@ int cmd_switch_user(const char *cmd, const char *target, int sudo) {
             return 1;
         }
         req.password = pw;
-        /* sudo -i is co-authorised by the invoker too (owner decision on PR 416). */
+        /* sudo -i is co-authorised by the invoker too. */
         if (sudo && cmd_read_invoker_password("sudo -i", mine, sizeof mine, &asked_mine) != 0) {
             cmd_wipe_password(pw, sizeof pw);
             fprintf(stderr, "%s: password read failed\n", cmd);

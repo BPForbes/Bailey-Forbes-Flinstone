@@ -106,10 +106,9 @@ static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *pare
         return 1;
     }
     if (reissue) {
-        /* A reissue rotates the parent's signing key first, then deals the new seed at generation + 1 (re-dealing
-         * the old seed would leave a removed child's share valid). The account store has no function that rotates
-         * a signing key on its own: the only existing rotation (passwd by an ancestor) also replaces the password.
-         * Inventing a second rotation path here would split the key rules, so this stops. */
+        /* A reissue must rotate the parent's signing key first (re-dealing the old seed would leave a removed
+         * child's share valid), and the only rotation the account store has (passwd by an ancestor) also
+         * replaces the password. A second rotation path here would split the key rules, so this stops. */
         fprintf(stderr, "bridge: assembly --reissue is not available: there is no signing-key rotation that keeps the "
                         "password (see docs/IDENTITY_HERITAGE.md)\n");
         return 1;

@@ -12,7 +12,7 @@ HOST = ROOT / "dist" / "flintstone_wasm_host"
 def main():
     if not HOST.is_file():
         raise SystemExit(f"missing {HOST}; run ./scripts/build_wasm_lab.sh")
-    # switchuser to another account asks for its password, as su does (FL-14 #406). Root's is the
+    # switchuser to another account asks for its password, as su does. Root's is the
     # public demo seed; demo's is drawn at run time.
     demo_pw = secrets.token_hex(9)
     commands = [

@@ -13,7 +13,7 @@ fi
 dist="${root}/dist"
 mkdir -p "${build}" "${dist}"
 for tool in nasm gcc ld objcopy python3 sha256sum git; do command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }; done
-# FL-02: stage 1 (the MBR) loads the bounded stage 2, which collects E820, enables A20 and loads
+# Stage 1 (the MBR) loads the bounded stage 2, which collects E820, enables A20 and loads
 # the kernel. Both take their layout from bootinfo.inc.
 fsdir="${root}/kernel/freestanding/x86_64"
 nasm -f bin -I"${fsdir}/" "${fsdir}/boot.asm" -o "${build}/boot.bin"
@@ -49,7 +49,7 @@ fi
 objects=("${build}/entry.o")
 kq_srcs=()
 [ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c")
-# FL-14: sealed account keys. Not in the SECFEAT image: its bss has no room (measured, see docs).
+# Sealed account keys. Not in the SECFEAT image: its bss has no room (measured, see docs).
 [ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c")
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
@@ -98,11 +98,11 @@ objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 (( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
 # The payload is followed by bss (the queues, the KeyQuorum library's statics; the stack is below the
-# image since FL-02) in the same conventional memory: its end must stay below FL_LOW_BUDGET, 0x9f000
+# image) in the same conventional memory: its end must stay below FL_LOW_BUDGET, 0x9f000
 # (the EBDA starts at 0x9fc00, VGA at 0xa0000).
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
 payload_bytes=$(stat -c%s "${build}/kernel.bin")
-# FL-02 image layout: the entry is the first loaded byte at the link address the loader jumps to,
+# Image layout: the entry is the first loaded byte at the link address the loader jumps to,
 # everything the loader reads (whole sectors) lies below the budget, nothing loaded overlaps the bss
 # that entry.asm clears, and the bss ends inside the budget. Python integers: no wraparound.
 nm "${build}/kernel.elf" | python3 -c '
@@ -136,7 +136,7 @@ if not 0 < bss_end < budget:
 if problems:
     sys.exit("image layout: " + "; ".join(problems))
 ' "${payload_bytes}" "${sectors}" "${load_addr}" "${low_budget}"
-# FL-22 acceptance evidence: payload size and bss end (already gated above) are recorded for CI logs.
+# Payload size and bss end (already gated above) are recorded for CI logs.
 # Stage 2 learns the payload's sector count and the bss end from its tagged patch block.
 python3 - "${build}/stage2.bin" "$sectors" "$bss_end" <<'PY'
 import pathlib, struct, sys

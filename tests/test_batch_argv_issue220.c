@@ -123,7 +123,7 @@ static int test_issue204_batch_clamp_login_sudo_su(void) {
     return 0;
 }
 
-/* bridge: list, request/accept/revoke take one argument, and kq-import (KQ-19) takes a store, a uid and an
+/* bridge: list, request/accept/revoke take one argument, and kq-import takes a store, a uid and an
  * optional --roster-only, never reading into the next shell command. */
 static int test_bridge_batch_tokens(void) {
     char *only[] = {"p", "bridge"};
@@ -148,7 +148,7 @@ static int test_bridge_batch_tokens(void) {
     char *kq_next2[] = {"p", "bridge", "kq-import", "store.sqlite", "whoami"};
     ASSERT(cmd_bridge_batch_tokens_count(5, kq_next2, 1) == 3);
 
-    /* assembly (KQ-16) takes a parent and an optional --reissue, never reading into the next shell command. */
+    /* assembly takes a parent and an optional --reissue, never reading into the next shell command. */
     char *as[] = {"p", "bridge", "assembly", "Mgr", "whoami"};
     ASSERT(cmd_bridge_batch_tokens_count(5, as, 1) == 3);
     char *as_re[] = {"p", "bridge", "assembly", "Mgr", "--reissue", "whoami"};

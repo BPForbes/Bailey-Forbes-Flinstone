@@ -1097,7 +1097,7 @@ test_fs_identity:
 	  -o tests/test_fs_identity tests/test_fs_identity.c kernel/freestanding/x86_64/identity.c
 	./tests/test_fs_identity
 
-# FL-02: the freestanding image's E820 arena selection and KeyQuorum heap, run on the host.
+# The freestanding image's E820 arena selection and KeyQuorum heap, run on the host.
 .PHONY: test_fs_bootmap
 test_fs_bootmap: $(MEM_ASM_OBJ)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -Ikernel/freestanding/x86_64 \
@@ -1173,10 +1173,8 @@ test_kq_service: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_
 	  $(FS_JAIL_TEST_LIBS) -Wl,-z,noexecstack
 	./tests/test_kq_service
 
-# Real-token fixture (Flinstone #407): a KQST and a private bridge minted by the keyquorum CLI built
-# from the submodule (cargo build --release --locked in third_party/keyquorum; never part of the
-# default make). The test always compiles; scripts/kq_real_token_fixture.sh skips the run, and
-# says so, when the CLI (KQ_CLI_DIR) or python3 is missing.
+# Real-token fixture (the keyquorum CLI is never built by the default make). The test always compiles;
+# scripts/kq_real_token_fixture.sh skips the run, and says so, when the CLI (KQ_CLI_DIR) or python3 is missing.
 .PHONY: test_kq_real_token
 test_kq_real_token: userland/shell/common.o $(UTIL_SHELL_LINK_OBJS) $(FS_JAIL_CORE_OBJS) $(FS_JAIL_SUPPORT_OBJS) kernel/core/mm/mem_domain.o $(MEM_ASM_OBJ) $(HISTORY_ASM_OBJ) $(UTIL_HISTORY_HOST_OBJS)
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -c -o tests/test_kq_real_token.o tests/test_kq_real_token.c
@@ -1413,7 +1411,7 @@ tests/test_shell_tokenize: userland/shell/shell_tokenize.c
 test_shell_tokenize: tests/test_shell_tokenize
 	@./tests/test_shell_tokenize
 
-# Signed command log (FL-04): userland/shell/cmd_journal.c over the in-memory storage table.
+# Signed command log: userland/shell/cmd_journal.c over the in-memory storage table.
 CMD_JOURNAL_TEST_OBJS = userland/shell/cmd_journal.o userland/shell/shell_tokenize.o userland/shell/fl_colors.o \
   userland/command/cmd_registry.o kernel/core/vfs/kq_mem_storage.o kernel/core/mm/mem_domain.o \
   kernel/core/time/timekeeping.o $(MEM_ASM_OBJ) $(NET_ASM_OBJ)
@@ -1477,7 +1475,7 @@ test_all-quiet:
 run_cunit_tests: BPForbes_Flinstone_Tests
 	@./BPForbes_Flinstone_Tests
 
-# The sudo window's signing gate runs before every builtin (CodeRabbit 4587909959): the shell's
+# The sudo window's signing gate runs before every builtin: the shell's
 # interpreter and builtins, linked with the gate wrapped so the test counts its calls.
 TEST_INTERP_GATE_OBJS = $(filter-out BPForbes_Flinstone_Tests.o,$(TEST_OBJS)) $(TEST_ASMOBJS) $(TEST_EXTRA_LINK_OBJS)
 .PHONY: test_interpreter_sudo_gate

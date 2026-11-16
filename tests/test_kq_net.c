@@ -181,7 +181,6 @@ static int test_keys_come_from_the_host_registry(void) {
     return 0;
 }
 
-/* 1 when the host still has this delivery's letter on disk. */
 static int letter_on_disk(const uint8_t id[FL_KQ_DELIVERY_ID_LEN]) {
     char hex[2 * FL_KQ_DELIVERY_ID_LEN + 1];
     char path[PATH_MAX];
@@ -323,7 +322,7 @@ static int test_a_refused_ack_is_recorded_as_refused_over_the_wire(void) {
     return 0;
 }
 
-/* KQ-12: the refusing recipient's KQER reaches the delivery's sender through the host, and applies there. */
+/* The refusing recipient's KQER reaches the delivery's sender through the host, and applies there. */
 static int test_a_refusal_report_reaches_the_sender(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     fl_kq_encoded_t enc;
@@ -778,7 +777,7 @@ static int test_history_download_over_the_wire(void) {
     return 0;
 }
 
-/* FL-04: the production builder (fl_kq_cp_history_letters_with) gives the requester a bundle that opens. */
+/* The production builder (fl_kq_cp_history_letters_with) gives the requester a bundle that opens. */
 static int test_the_production_history_letters_open_for_the_requester(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     fl_user_db_keydir_t dir;

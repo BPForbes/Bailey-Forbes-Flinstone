@@ -1,17 +1,12 @@
 /**
- * test_kq_history_member.c - FL-04, end to end in process: a session member downloads a co-signed
- * delivery's history from the host and opens it (fl_net_kq_request_history, then fl_net_kq_history_open).
+ * test_kq_history_member.c - end to end in process: a session member downloads a co-signed delivery's
+ * history from the host and opens it (fl_net_kq_request_history, then fl_net_kq_history_open).
  *
  * The host's gate and source in the native shell (kq_history_gate, kq_history_source) are static in
  * userland/command/cmd_server_file.c, which links the whole shell. So this test installs a gate and a
- * source that do what those do, over the real producer: the gate lets only the delivery's recipient have
- * it, and the source builds the letters with fl_kq_cp_history_letters_with, signed by the host account
- * (Mya, the sender), and packs them with fl_history_bundle_pack. The policy check the native gate adds
- * (fl_authz_subsystem_check) is not part of this test.
- *
- * The member side is the verb's own code (userland/command/cmd_server_history.c): the ring of decoded
- * deliveries, the argument and sender resolution, the exact key-id match and the fetch (request, open bound to
- * the delivery's file id, drop on timeout). Only the password prompt and the printing stay in the verb.
+ * source that do what those do, over the real producer; the policy check the native gate adds
+ * (fl_authz_subsystem_check) is not part of this test. The member side is the verb's own code
+ * (userland/command/cmd_server_history.c).
  *
  * A recording transport stands in for sockets, as in test_kq_net.c: frames a member sends go to the host
  * handler as that member, and frames the host sends to a member go to the client handler.
@@ -583,7 +578,7 @@ static int test_a_snapshot_that_does_not_cover_the_history_is_refused(void) {
     return 0;
 }
 
-/* M1: the host answers plan.txt's delivery with both letters of other.txt. They open and the snapshot covers
+/* The host answers plan.txt's delivery with both letters of other.txt. They open and the snapshot covers
  * them, but they are not the delivery's file: refused when the member knows the file id (it decoded the
  * delivery), and only the unbound -from path, which says so in the verb, takes them. */
 static int test_both_letters_of_another_file_are_refused(void) {

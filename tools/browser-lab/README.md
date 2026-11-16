@@ -80,7 +80,7 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
 - Switch user / Register user / Guest commands send one shell line at a time
   and wait for serial (`SWITCHUSER`, `Password:`, `ok`) so `useradd` can prompt.
   A connected relay seat reconnects as the new principal after `switchuser`.
-- `switchuser` follows `su` on the hosted shell (owner decision, FL-14 #406): the
+- `switchuser` follows `su` on the hosted shell: the
   session's own account is free, and another account asks for that account's
   password. Register user asks for Root's password (the "Root password" field),
   and Switch user and New session send the Password field. The page sends a

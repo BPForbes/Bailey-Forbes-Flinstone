@@ -128,7 +128,6 @@ static void teardown(world_t *w) {
     asm_mem_secure_zero(w->flinstone_sign, sizeof w->flinstone_sign);
 }
 
-/* How many times needle occurs in the buffer. */
 static size_t count(const fl_kq_buf_t *b, const char *needle) {
     size_t n = strlen(needle), k = 0;
     for (size_t i = 0; i + n <= b->len; i++)
@@ -1204,7 +1203,7 @@ static int make_forked(world_t *w, const char *path) {
     return rc;
 }
 
-/* KQ-20: the author of the single head is named; a fork, an empty container and a missing one
+/* The author of the single head is named; a fork, an empty container and a missing one
  * name nobody, and only the fork says FORKED. */
 static int test_head_author_names_the_single_head(void) {
     const fl_kq_driver_t *drv;
@@ -1241,7 +1240,7 @@ static int test_head_author_names_the_single_head(void) {
     return 0;
 }
 
-/* KQ-12: a refused receive's KQER, signed by the recipient, is named by the offer's SHA-256;
+/* A refused receive's KQER, signed by the recipient, is named by the offer's SHA-256;
  * KeyQuorum verifies it only for that artifact and that reporter, and injecting it adds exactly
  * one ErrorReported event to the sender's copy. */
 static int test_refusal_report_is_verified_and_injected(void) {

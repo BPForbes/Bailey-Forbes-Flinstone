@@ -1,8 +1,6 @@
 /**
- * test_cmd_journal.c - the signed command log (userland/shell/cmd_journal.c; FL-04), over the in-memory
- * fl_kq_storage_t. Chain verification on good data; a tampered, a reordered and a truncated record each
- * detected; an ATTEMPT with no COMPLETION reported; secret-bearing arguments never stored; bounds; the
- * refuse policy through a failing storage; and concurrent writers keeping one chain.
+ * test_cmd_journal.c - the signed command log (userland/shell/cmd_journal.c), over the in-memory
+ * fl_kq_storage_t.
  *
  * No literal secrets: every secret-like value is drawn at run time (fl_random_bytes) and hex-encoded.
  */

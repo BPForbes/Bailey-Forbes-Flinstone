@@ -1757,7 +1757,7 @@ fl_result_t fl_user_db_assembly_get(const fl_user_db_t *db, const char *parent_l
     return rc;
 }
 
-/* ---- import from a KeyQuorum store (KQ-19) ------------------------------------------------------
+/* ---- import from a KeyQuorum store --------------------------------------------------------------
  * KeyQuorum makes and receives bridges (keyquorum private-bridge import / inbox open, then
  * private_bridge::import_package) into its own SQLite store. This copies one bridge from that store,
  * read-only, into the account store: nothing here validates a package or unseals a key. The org

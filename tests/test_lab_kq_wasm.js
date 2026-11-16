@@ -135,7 +135,7 @@ function makeRelay() {
   return relay;
 }
 
-// switchuser to another account asks for its password, as su does (FL-14 #406). Root's is the
+// switchuser to another account asks for its password, as su does. Root's is the
 // public demo seed; each lab account's password is drawn at run time.
 const ROOT_DEMO = "root";
 const passwords = {};

@@ -1,8 +1,7 @@
 /*
- * Freestanding identity (FL-14): with no KeyQuorum ops the demo password is checked as before.
- * With ops installed, login, su and sudo ask unlock, passwd re-seals, userdel forgets, and the
- * password the test drew is not what a later unlock sees after passwd. switch_allowed is optional:
- * left NULL, switchuser to another account still needs that account's password (FL-14 #406, as su);
+ * Freestanding identity: with no KeyQuorum ops the account's own password check is used. With ops
+ * installed, login, su and sudo ask unlock, passwd re-seals and userdel forgets. switch_allowed is
+ * optional: left NULL, switchuser to another account still needs that account's password (as su);
  * when it refuses, sudo -i still enters Root.
  * Passwords are drawn at run time.
  */

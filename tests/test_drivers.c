@@ -311,7 +311,7 @@ static int test_keyquorum_account(void) {
     return 0;
 }
 
-/* head_author (ABI 5) is one-to-one over kq_file_head_author: nobody for an empty container, the
+/* head_author is one-to-one over kq_file_head_author: nobody for an empty container, the
  * author of a single head, FORKED for two heads, NO_ROOM for a buffer the label does not fit. */
 static int test_keyquorum_head_author(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get();
@@ -357,7 +357,7 @@ out:
     return rc;
 }
 
-/* Access policy and bridge proof (ABI 4): one-to-one over kq_access_requirement, kq_bridge_prove,
+/* Access policy and bridge proof: one-to-one over kq_access_requirement, kq_bridge_prove,
  * kq_bridge_verify and kq_bridge_connects. The factor comes back unchanged; a junk proof is refused,
  * never accepted. */
 static int test_keyquorum_access_and_bridge_ops(void) {

@@ -1,7 +1,7 @@
 #ifndef FL_FREESTANDING_BOOTMAP_H
 #define FL_FREESTANDING_BOOTMAP_H
 /*
- * Boot memory map (FL-02): picks the heap arena from the firmware's E820 map. Pure C with no
+ * Boot memory map: picks the heap arena from the firmware's E820 map. Pure C with no
  * hardware access, so the same code runs in the image and in tests/test_fs_bootmap.c.
  *
  * Rules (fl_bootmap_select_arena):

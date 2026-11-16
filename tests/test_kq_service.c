@@ -211,7 +211,7 @@ static int test_kqst_login_commits_only_after_token_open(void) {
     return 0;
 }
 
-/* FL-15: the box secret of a session. A password login publishes none; one a KQST login opened is kept next to the
+/* The box secret of a session. A password login publishes none; one a KQST login opened is kept next to the
  * signing secret, only for that session's own account and generation, and goes with it at logout. */
 static int test_box_key_residency(void) {
     const fl_user_record_t *flin = account("Flinstone"), *root = account("Root");
@@ -262,7 +262,7 @@ static int test_a_kqst_account_cannot_log_in_by_password_alone(void) {
     return 0;
 }
 
-/* FL-15: open refuses when the store has no pairing/path, or the token file is junk. There is no C
+/* Open refuses when the store has no pairing/path, or the token file is junk. There is no C
  * seal export: the success-path open is tests/test_kq_real_token.c (make test_kq_real_token), whose
  * KQST is minted by the keyquorum CLI. */
 static int test_kqst_open_refusal_matrix(void) {
@@ -506,7 +506,7 @@ static int test_the_periodic_sweep(void) {
     return 0;
 }
 
-/* FL-20 autosign lifetime: an object removed while its signature is being made finishes that one
+/* Autosign lifetime: an object removed while its signature is being made finishes that one
  * signature (the run works on a copy) and is never signed again; the author's key copy is wiped either way. */
 static _Atomic int s_gate_in, s_gate_open;
 static fl_result_t gated_sign(void *c, const char *author, const uint8_t key[32], kq_signing_mode_t m) {
@@ -550,7 +550,7 @@ static int test_autosign_removed_mid_run(void) {
     return 0;
 }
 
-/* FL-20 autosign lifetime: the table holds FL_KQ_AUTOSIGN_MAX objects. One more is refused with NOMEM and
+/* Autosign lifetime: the table holds FL_KQ_AUTOSIGN_MAX objects. One more is refused with NOMEM and
  * nothing is queued for it, and the service stays up. A removed object keeps its slot (its periodic item
  * cannot be cancelled and still points at it), so removal does not make room. */
 static int test_autosign_table_full(void) {
@@ -680,7 +680,7 @@ static void real_init(real_obj_t *o, const char *name) {
     o->file.path = o->path;
 }
 
-/* KQ-20: the production head-author callback asks KeyQuorum. The single head's author is signed for;
+/* The production head-author callback asks KeyQuorum. The single head's author is signed for;
  * a forked file is audited kq-autosign-forked and never signed; an empty or missing container names
  * nobody. */
 static int test_autosign_asks_keyquorum_for_the_head_author(void) {
@@ -728,7 +728,7 @@ static int test_autosign_asks_keyquorum_for_the_head_author(void) {
     return 0;
 }
 
-/* FL-20: the production callbacks sign a tracked file with KeyQuorum. Containers hold the history; the file
+/* The production callbacks sign a tracked file with KeyQuorum. Containers hold the history; the file
  * beside each holds the bytes a check-in signs. */
 static int put_plain(const char *name, const char *text) {
     char path[512];
@@ -833,9 +833,6 @@ static int test_autosign_signs_a_tracked_file(void) {
     return 0;
 }
 
-/* KQ-12: a refused receive leaves a KQER signed by the account that is online, named by the offer's
- * SHA-256, inside the held landing directory; it verifies only for that artifact, and nothing is
- * written when nobody is online or no directory is held. */
 static void audit_clear(void) {
     pthread_mutex_lock(&s_audit_mu);
     s_audit[0] = '\0';
@@ -859,6 +856,9 @@ static int report_code_class(const char *path, unsigned *code, unsigned *class_c
     return 0;
 }
 
+/* A refused receive leaves a KQER signed by the account that is online, named by the offer's
+ * SHA-256, inside the held landing directory; it verifies only for that artifact, and nothing is
+ * written when nobody is online or no directory is held. */
 static int test_a_refusal_is_reported_as_the_online_account(void) {
     static const struct {
         fl_result_t why;
@@ -1028,7 +1028,7 @@ static int test_a_keyless_account_comes_online_at_its_first_login(void) {
 
 
 /* A login that replaces another without a logout in between ends the first account's slot: its signing
- * secret and its box secret are wiped, not left to be obtained by key id (CodeRabbit on FL-15). A key brought
+ * secret and its box secret are wiped, not left to be obtained by key id. A key brought
  * online without a session (the Root fallback path, generation 0) is not touched by a later login. */
 static int test_a_replacing_login_wipes_the_previous_box_key(void) {
     uint8_t box[32], got[32], key[32];
@@ -1061,11 +1061,6 @@ static int test_a_replacing_login_wipes_the_previous_box_key(void) {
     return 0;
 }
 
-/* KQ-16: a parent who is not signed in is assembled from the children who are (the driver's assembly ops, the
- * record in the account store, each child's box secret from FL-15 and its device id from the account registry).
- * The cases: never split, too few children, two children on one device, enough on separate devices (the seed is the
- * parent's own, mode ASSEMBLED, audited), a record that deals another seed (refused), a child offline again, and
- * the periodic sweep signing a tracked file as the parent while only the children are online. */
 static int register_device(const char *label, unsigned char dev) {
     sqlite3 *sql = NULL;
     sqlite3_stmt *st = NULL;
@@ -1130,6 +1125,8 @@ out:
     return ok;
 }
 
+/* A parent who is not signed in is assembled from the children who are (the driver's assembly ops, the
+ * record in the account store, each child's box secret and its device id from the account registry). */
 static int test_a_parent_is_assembled_from_the_children_online(void) {
     const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
     const char *kids[] = {"AsmKid1", "AsmKid2", "AsmKid3"};
@@ -1239,7 +1236,7 @@ static int test_a_parent_is_assembled_from_the_children_online(void) {
 }
 
 /* A reload that fails ends the signed-in account's session and takes its key offline: the records it would be
- * looked up by are gone, so the key id is taken before the load (CodeRabbit on session.c). The store is put back. */
+ * looked up by are gone, so the key id is taken before the load. The store is put back. */
 static int test_a_failed_reload_takes_the_signed_in_key_offline(void) {
     const char *path = getenv("FL_USERS_DB_PATH");
     char a_key[FL_HERITAGE_KEY_ID_MAX], junk[64];

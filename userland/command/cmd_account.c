@@ -109,11 +109,8 @@ int cmd_useradd_run(int argc, char **argv) {
         fprintf(stderr, "useradd: could not save %s\n", FL_SESSION_USERS_PATH);
         return 1;
     }
-    /*
-     * The kernel gives the new account its KeyQuorum token itself, sealed under the password just
-     * set (owner decision on PR 416). Without one the account still signs in with its password, and
-     * its first sign-in tries again.
-     */
+    /* The kernel gives the new account its KeyQuorum token itself, sealed under the password just
+     * set. Without one the account still signs in with its password, and its first sign-in tries again. */
     token_rc = fl_session_make_kqst(name, pass, now, NULL);
     cmd_wipe_password(pw, sizeof(pw));
     if (fl_session_snapshot_account(name, &added) == FL_RESULT_OK)

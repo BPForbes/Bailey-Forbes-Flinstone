@@ -10,9 +10,8 @@
  * fl_fs_identity_init: enroll seals a signing key and a box key under the password through the
  * driver, and identity then stores no password. unlock is 1 when that seal opens. switch_allowed
  * is consulted only when it is non-NULL, as an extra refusal before the password; switchuser to
- * another account always needs that account's password, as su does on the hosted shell
- * (FL-14 #406). change_password re-seals (0 on
- * success). forget drops the sealed keys at userdel.
+ * another account always needs that account's password, as su does on the hosted shell.
+ * change_password re-seals (0 on success). forget drops the sealed keys at userdel.
  */
 typedef struct fl_fs_identity_kq_ops {
     int (*enroll)(const char *creator, const char *name, const char *password);

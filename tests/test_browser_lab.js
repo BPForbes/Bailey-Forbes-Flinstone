@@ -79,7 +79,7 @@ assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
 {
-  // switchuser follows su (FL-14 #406): own account free, another account asks its password.
+  // switchuser follows su: own account free, another account asks its password.
   // Passwords are drawn at run time; a secret step is only ever the answer to Password:.
   const draw = () => require("crypto").randomBytes(9).toString("hex");
   const pw = draw(), rootPw = draw();
@@ -333,7 +333,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
   await controller.powerOff(); assert.strictEqual(states.at(-1), STATES.OFF);
   const failing = createController({ marker: "x", setState: (s) => states.push(s), postReady() {}, createEmulator: async () => { throw new Error("corrupt image"); } });
   await assert.rejects(() => failing.boot({}), /corrupt image/); assert.strictEqual(states.at(-1), STATES.FAILED);
-  // coder-44c9be (CR 4587909868): a password exchange owns the guest from its command until its
+  // A password exchange owns the guest from its command until its
   // password is sent. A fake guest takes the next line after Password: as that prompt's answer,
   // so two exchanges that cross would hand one account's password to the other's prompt.
   {
@@ -396,7 +396,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     assert.strictEqual((accountJs.match(/await guestExchange\.run\(/g) || []).length, 3, "Switch, New session and Register each take one exchange turn");
     assert(!/[^.]sendGuestLines\(/.test(accountJs), "account actions drive their steps inside their own turn");
   }
-  // coder-44c9be (review R1 on 1d0c768): a reply the guest asked for (dnsack, file lines) goes out
+  // A reply the guest asked for (dnsack, file lines) goes out
   // at once through the byte queue, so it can reach an exchange's Password: prompt first. The
   // password must then not be sent, or the shell would take it as a command (echoed, in history).
   // This fake guest echoes a command as typed and a password as *, like the shell, and prints the
@@ -472,7 +472,7 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
       assert(!g.commands.includes(pw), "the password must not be typed as a command");
       assert(/Other input reached the guest/.test(r.statuses.join("\n")));
     }
-    // Control, 1d0c768's wiring (secret sent whatever else went first): the password is typed as a command.
+    // Control (secret sent whatever else went first): the password is typed as a command.
     {
       const g = echoGuest({ Ada: pw });
       const input = createGuestInput();

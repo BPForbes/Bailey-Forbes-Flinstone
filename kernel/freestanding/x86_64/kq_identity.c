@@ -93,7 +93,7 @@ static int kqi_unlock(const char *name, const char *pw)
     if (!drv || !k || !pw)
         return 0;
     ok = drv->account_open(pw, k->sealed, FL_KQ_ACCOUNT_SEALED_LEN, sec) == FL_KQ_ACCOUNT_OK;
-    drv->wipe(sec, sizeof sec); /* nothing stays open: opening is the password check */
+    drv->wipe(sec, sizeof sec); /* nothing stays open */
     return ok;
 }
 
@@ -120,7 +120,7 @@ static void kqi_forget(const char *name)
 static const fl_fs_identity_kq_ops_t s_ops = {
     .enroll = kqi_enroll,
     .unlock = kqi_unlock,
-    .switch_allowed = NULL, /* no extra refusal: switchuser asks the target's password (FL-14 #406) */
+    .switch_allowed = NULL, /* no extra refusal: switchuser asks the target's password */
     .change_password = kqi_change_password,
     .forget = kqi_forget,
 };

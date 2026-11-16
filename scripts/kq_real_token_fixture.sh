@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
-# Real-token fixture (Flinstone #407; KeyQuorum KQ-17 #165, KQ-19 #171, KQ-11 #167).
-#
-# Makes real KeyQuorum material with the keyquorum CLI built from the submodule, in a temporary
-# directory, then runs the C test that consumes it:
-#   - two devices (keyquorum-device init) and one slot token (KQST) on each, for
-#     Root.Flinstone.Bob and Root.Alternative.Ann, each sealed under a passphrase drawn from
-#     /dev/urandom at run time (never a literal; kept only in owner-only files in the temp dir);
-#   - a third device whose id is a real device id that holds neither token (the wrong-device case);
-#   - a fourth device with a slot token for Root itself (the master identity), which the C test pairs
-#     through the account store's enrolment path and then uses for sudo;
-#   - a KeyQuorum private bridge between Bob and Ann (bridge private create, with Bob's sealed copy
-#     of the bridge secret kept in the KeyQuorum store), whose facts the C test copies into
-#     Flinstone's account store.
+# Real-token fixture: makes real KeyQuorum material (devices, KQST slot tokens for Bob, Ann and Root,
+# a wrong-device id, a private bridge between Bob and Ann) with the keyquorum CLI built from the
+# submodule, in a temporary directory, then runs the C test that consumes it. Passphrases are drawn
+# from /dev/urandom at run time (never a literal; kept only in owner-only files in the temp dir).
 #
 # Usage: kq_real_token_fixture.sh TEST_BINARY
 # KQ_CLI_DIR names the directory holding keyquorum and keyquorum-device (default: the submodule's
@@ -27,7 +18,6 @@ kq="${cli_dir}/keyquorum"
 kqd="${cli_dir}/keyquorum-device"
 answer="${root}/scripts/kq_pty_answer.py"
 
-# KQ_RT_REQUIRE=1 (CI, FL-15) makes a skip a failure: the test must run there.
 skip() {
     if [ "${KQ_RT_REQUIRE:-0}" = "1" ]; then
         echo "test_kq_real_token: FAILED: $* (KQ_RT_REQUIRE=1 does not allow a skip)" >&2

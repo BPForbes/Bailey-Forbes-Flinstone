@@ -13,7 +13,7 @@ assert len(boot)==512 and boot[510:]==b'\x55\xaa'
 assert boot[:2]==b'\xfa\xfc', 'boot entry must execute cli; cld'
 assert kernel[:2]==b'\xfa\xfc', '64-bit entry must execute cli; cld'
 assert image[:512]==boot and len(image)%512==0
-# FL-02: stage 2 follows the MBR, ends with its magic, and the kernel payload follows stage 2.
+# Stage 2 follows the MBR, ends with its magic, and the kernel payload follows stage 2.
 stage2=(root/'build/freestanding-x86_64/stage2.bin').read_bytes()
 assert len(stage2)%512==0 and len(stage2)//512==info['stage2Sectors'] and stage2[-4:]==b'FLS2'
 assert image[512:512+len(stage2)]==stage2 and image[512+len(stage2):512+len(stage2)+len(kernel)]==kernel

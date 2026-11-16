@@ -1,11 +1,10 @@
 /*
- * The sudo window's signing gate runs before every builtin (CodeRabbit 4587909959, FL-20 #399).
+ * The sudo window's signing gate runs before every builtin.
  *
  * Inside the window every command is an elevated action signed by Root's key and the account's
- * (cmd_sudo_sign_elevated). execute_command_str used to call that gate only after the early handlers
- * (help, history, make, ...), so those commands returned unsigned. The test links the shell's
- * interpreter with the gate wrapped (-Wl,--wrap=cmd_sudo_sign_elevated) and records each call:
- * every command, early handlers included, passes through the gate once; a sudo is left to its own
+ * (cmd_sudo_sign_elevated). The test links the shell's interpreter with the gate wrapped
+ * (-Wl,--wrap=cmd_sudo_sign_elevated) and records each call: every command, early handlers
+ * (help, history, make, ...) included, passes through the gate once; a sudo is left to its own
  * signing path (cmd_sudo_sign_action) and a blank line signs nothing.
  */
 #include "interpreter.h"
@@ -60,7 +59,7 @@ int main(void) {
     expect_gate("history", 1);
     expect_gate("make gate_made.txt", 1);
     expect_gate("clear", 1);
-    /* A command dispatched after tokenizing is signed once, as before. */
+    /* A command dispatched after tokenizing is signed once. */
     expect_gate("version -n", 1);
     /* A sudo signs through its own path, however its first word is written; a blank line signs nothing. */
     expect_gate("sudo -k", 0);

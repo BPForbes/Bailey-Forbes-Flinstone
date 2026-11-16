@@ -1,5 +1,5 @@
 /*
- * Boot memory map (FL-02): see bootmap.h for the rules. No sorting and no scratch memory: every
+ * Boot memory map: see bootmap.h for the rules. No sorting and no scratch memory: every
  * candidate start (min_base, each usable entry's base, each blocker's end) is grown through the
  * usable entries that touch it and then cut at the first blocker after it. With the buffer's
  * bounded entry count that is a few hundred thousand comparisons at most, once per boot.

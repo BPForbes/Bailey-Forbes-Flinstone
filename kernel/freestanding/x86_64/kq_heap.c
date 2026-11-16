@@ -1,9 +1,7 @@
 /*
- * The KeyQuorum embedder's heap (FL-02): a first-fit free list with coalescing over the one arena
- * fl_kernel_main picks from the boot memory map (bootmap.c) and hands to fl_kq_heap_init. Until then
- * every allocation fails. Every freed block is zeroed through the assembly layer
- * (asm_mem_secure_zero), as the library asks. No hardware access, so tests/test_fs_bootmap.c runs it
- * on the host over a buffer of its own.
+ * The KeyQuorum embedder's heap (see kq_heap.h): a first-fit free list with coalescing over one arena.
+ * Every freed block is zeroed, as the library asks. No hardware access, so tests/test_fs_bootmap.c
+ * runs it on the host over a buffer of its own.
  */
 #include "fl/mem_asm.h"
 #include "kq_heap.h"
@@ -85,7 +83,7 @@ void fl_kq_heap_free(void *ptr)
     b = ((kq_blk_t **)ptr)[-1];
     asm_mem_secure_zero((void *)((uintptr_t)b + HDR), b->size); /* freed memory is zeroed */
     b->used = 0;
-    for (b = s_head; b; b = b->next) /* coalesce neighbours */
+    for (b = s_head; b; b = b->next)
         while (!b->used && b->next && !b->next->used) {
             b->size += HDR + b->next->size;
             b->next = b->next->next;

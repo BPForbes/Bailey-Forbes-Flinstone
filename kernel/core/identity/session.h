@@ -56,9 +56,8 @@ int         fl_session_verify_account_password(const char *name, const char *pas
  *   PASSWORD             password is the target's.
  *   KQST_PASSWORD        password is the token holder's (Root's for sudo, else the target's) and opens
  *                        its slot token. For sudo -i, a password-only Root is refused ("no-root-kqst"),
- *                        whoever asks (owner decision, FL-12 #403). For su, a password-only (legacy)
- *                        target keeps the rule from before KeyQuorum's (its password), audited as
- *                        "su-kqst-legacy".
+ *                        whoever asks. For su, a password-only (legacy) target is accepted on its
+ *                        password, audited as "su-kqst-legacy".
  *   PASSWORD_BRIDGE_KQST the target's password, plus bridge_member opening their token with
  *                        bridge_member_password and proving membership (fl_kq_prove_bridge_member).
  *   REFUSED              refused. A switch that needs a parent's grant is refused too: there is no way
@@ -92,17 +91,17 @@ fl_result_t fl_session_switch_user(const fl_session_switch_request_t *req);
  * sudo without a switch (an elevation token), co-authorised by two identities. KeyQuorum asks for
  * Root's key, so root_password must be Root's and open Root's token. A password-only Root has no
  * token: sudo is refused ("no-root-kqst") before any password is checked, and there is no fallback
- * to the caller's own password (owner decision, FL-12 #403). Beside Root's factor, the invoking
- * account gives its own (owner decision on PR 416): invoker_password must be its password and, for
- * a KQST-mode invoker, open its token ("invoker-password" / "invoker-kqst" when not). Root invoking
- * for itself gives Root's factor once. OK also binds the elevation token to that same login: a
- * login or logout during the check returns BUSY and grants nothing; a change to either account's
- * mode ("mode") or password in that window is refused. A grant is audited as "sudo-coauth" naming
- * the invoker's factor. Any other refusal is ACCES.
+ * to the caller's own password. Beside Root's factor, the invoking account gives its own:
+ * invoker_password must be its password and, for a KQST-mode invoker, open its token
+ * ("invoker-password" / "invoker-kqst" when not). Root invoking for itself gives Root's factor once.
+ * OK also binds the elevation token to that same login: a login or logout during the check returns
+ * BUSY and grants nothing; a change to either account's mode ("mode") or password in that window is
+ * refused. A grant is audited as "sudo-coauth" naming the invoker's factor. Any other refusal is
+ * ACCES.
  */
 fl_result_t fl_session_sudo_authenticate(const char *root_password, const char *invoker_password);
 /**
- * Sign one elevated action (owner decision, FL-20 #399). While the sudo window is open the action is
+ * Sign one elevated action. While the sudo window is open the action is
  * signed by Root's key and the account's key together (audited "sudo-action" with the nonce); renew
  * non-zero (a sudo) also starts the window's clock again. When the window has ended it does nothing:
  * the account acts with its own key. When Root's key is not available the elevation is taken away,
@@ -170,10 +169,10 @@ typedef fl_result_t (*fl_session_online_opened_fn)(const fl_user_record_t *accou
                                                    const uint8_t secret[32], uint64_t login_generation);
 typedef void (*fl_session_offline_fn)(const char *account);
 /**
- * The box (X25519) secret a KQST login opened next to the signing secret (FL-15). Runs right after online_opened
+ * The box (X25519) secret a KQST login opened next to the signing secret. Runs right after online_opened
  * succeeded, for the same login generation; the service keeps it for the life of the session and wipes it at
- * logout. A refusal refuses the login like online_opened does. Optional: NULL keeps the old behaviour (the
- * box secret is wiped as soon as the token has opened).
+ * logout. A refusal refuses the login like online_opened does. Optional: with NULL the box secret is wiped
+ * as soon as the token has opened.
  */
 typedef fl_result_t (*fl_session_online_box_fn)(const fl_user_record_t *account, const uint8_t box_secret[32],
                                                 uint64_t login_generation);

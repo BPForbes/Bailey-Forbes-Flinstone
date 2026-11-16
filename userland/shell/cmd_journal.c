@@ -1,15 +1,4 @@
-/*
- * Signed command log (FL-04): see cmd_journal.h for the record format, the storage and recovery
- * semantics, the bounds and the failure policy. Hosted only.
- *
- * Reuse: storage is the KeyQuorum checkpoints' table (fl_kq_storage_t); the hash is OpenSSL SHA-256
- * as elsewhere in the tree; records are built and read with net_codec.h's bounded big-endian codec
- * (fl_bytes_sticky_writer_t, fl_bytes_reader_t, the str8 helpers); the category allowlist is the
- * shell's own command registry (fl_shell_cmd_lookup) and the first word is found with
- * fl_shell_tokenize_line; random ids come from fl_random_bytes; the wall clock from
- * fl_time_wall_sec; messages go through fl_color_error / fl_color_warn_local; every copy, zeroing and
- * equality goes through the ASM-backed mem_domain_* wrappers.
- */
+/* Signed command log, hosted only: record format, bounds and failure policy are in cmd_journal.h. */
 #include "cmd_journal.h"
 
 #include "cmd_decl.h"
@@ -53,9 +42,7 @@ struct fl_cmdlog {
 static pthread_mutex_t s_reg_mu = PTHREAD_MUTEX_INITIALIZER;
 static fl_cmdlog_t *s_reg_head;
 
-/* ---------------------------------------------------------------------------------------------
- * Limits, paths, reasons
- * -------------------------------------------------------------------------------------------*/
+/* ----- Limits, paths, reasons ----- */
 
 static fl_cmdlog_limits_t limits_or_default(const fl_cmdlog_limits_t *in) {
     fl_cmdlog_limits_t l = {0};
@@ -104,9 +91,7 @@ static int sha256(const uint8_t *p, size_t n, uint8_t out[FL_CMDLOG_HASH_LEN]) {
     return SHA256(p, n, out) ? 0 : -1;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Parsing (net_codec.h reader)
- * -------------------------------------------------------------------------------------------*/
+/* ----- Parsing (net_codec.h reader) ----- */
 
 typedef struct {
     size_t len;        /* whole record */
@@ -186,9 +171,7 @@ static int parse_record(const uint8_t *p, size_t avail, size_t record_max, rec_t
     return 0;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Verify / recover
- * -------------------------------------------------------------------------------------------*/
+/* ----- Verify / recover ----- */
 
 typedef struct {
     fl_cmdlog_corr_t *v;
@@ -380,9 +363,7 @@ int fl_cmdlog_verify(const fl_kq_storage_t *storage, const char *dir, const fl_c
     return walk(storage, dir, signer, &lim, expect_device, report, NULL, NULL);
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Open / close
- * -------------------------------------------------------------------------------------------*/
+/* ----- Open / close ----- */
 
 /* Adds j to the registry unless its (storage, dir) is already open. */
 static int reg_add(fl_cmdlog_t *j) {
@@ -498,14 +479,11 @@ void fl_cmdlog_close(fl_cmdlog_t *j) {
     destroy(j);
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Redaction
- * -------------------------------------------------------------------------------------------*/
+/* ----- Redaction ----- */
 
-/* The line-mode builtins the interpreter parses before argv (the cmd_decl.h *_maybe functions,
- * interpreter.c); every other known name comes from the command registry. TODO(FL-04): move these
- * names into the shared registry (userland/command/cmd_registry.c, another team's file today) so
- * there is one list. */
+/* The line-mode builtins the interpreter parses before argv (the cmd_decl.h *_maybe functions);
+ * every other known name comes from the command registry. TODO: move these names into the shared
+ * registry (userland/command/cmd_registry.c) so there is one list. */
 static const char *const k_line_builtins[] = {"exit", "clear", "help", "history", "cc", "bios", "make"};
 
 static int known_command(const char *word) {
@@ -540,9 +518,7 @@ const char *fl_cmdlog_category(const char *line, char *out, size_t cap) {
     return out;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Append
- * -------------------------------------------------------------------------------------------*/
+/* ----- Append ----- */
 
 /* Caller holds j->mu. Adds rec as the next record; 0, or -1 with a reason. */
 static int append_locked(fl_cmdlog_t *j, const uint8_t *rec, size_t len, char *reason, size_t cap) {
@@ -698,9 +674,7 @@ out:
     return ret;
 }
 
-/* ---------------------------------------------------------------------------------------------
- * Caller API
- * -------------------------------------------------------------------------------------------*/
+/* ----- Caller API ----- */
 
 fl_cmdlog_decision_t fl_cmdlog_attempt(fl_cmdlog_t *j, const char *principal, const char *line,
                                        fl_cmdlog_corr_t *corr, char *reason, size_t reason_cap) {
@@ -714,7 +688,7 @@ fl_cmdlog_decision_t fl_cmdlog_attempt(fl_cmdlog_t *j, const char *principal, co
         return FL_CMDLOG_REFUSE;
     }
     fl_cmdlog_category(line, category, sizeof category);
-    /* Owner decision (Nov 16): refuse with a red error giving the reason. */
+    /* Fail closed: an attempt that cannot be recorded is refused. */
     if (emit(j, FL_CMDLOG_EV_ATTEMPT, principal, category, 0, NULL, corr, reason, reason_cap) != 0)
         return FL_CMDLOG_REFUSE;
     return FL_CMDLOG_ALLOW;

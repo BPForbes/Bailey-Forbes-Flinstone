@@ -327,8 +327,7 @@ static void id_forget(const char *name) {
         mem_domain_secure_zero(k, sizeof *k);
 }
 
-/* switch_allowed is left NULL: switchuser to another account asks that account's password, as su
- * does on the hosted shell (owner decision, FL-14 #406); no extra refusal is added here. */
+/* switch_allowed is left NULL: no extra refusal before the target account's password. */
 static const fl_fs_identity_kq_ops_t s_id_ops = {
     .enroll = id_enroll,
     .unlock = id_unlock,

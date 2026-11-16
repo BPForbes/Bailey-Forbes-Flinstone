@@ -305,7 +305,7 @@ try:
     start = len(buf)
     send("whoami persp-mark-flinstone\n")
     wait_from("WHOAMI Flinstone", start)
-    # switchuser to another account asks for its password, as su does (FL-14 #406). These are the
+    # switchuser to another account asks for its password, as su does. These are the
     # public image's seeded demo accounts.
     start = len(buf)
     send("switchuser root\n")

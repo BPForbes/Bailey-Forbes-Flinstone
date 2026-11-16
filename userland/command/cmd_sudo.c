@@ -25,7 +25,7 @@ static int sudo_grant_token(const char *reason) {
     if (cmd_sudo_require_auth_reason(reason) != 0)
         return 1;
     if (had_elev) {
-        /* A sudo inside the window starts its clock again (owner decision, FL-20 #399). */
+        /* A sudo inside the window starts its clock again. */
         if (cmd_sudo_sign_action(reason) != 0)
             return 1;
         printf("sudo: elevation renewed (ttl<=%us)\n", (unsigned)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS);
@@ -37,12 +37,9 @@ static int sudo_grant_token(const char *reason) {
     return 0;
 }
 
-/*
- * sudo -i becomes Root, the master of the whole heritage tree. KeyQuorum's rule asks for Root's own
- * key: Root's password and slot token. A password-only Root has no token, so sudo -i is refused for
- * every account (owner decision, FL-12 #403; the session audits it). cmd_switch_user collects the
- * factor; fl_session_switch_user checks and commits.
- */
+/* sudo -i becomes Root. KeyQuorum's rule asks for Root's password and slot token; a password-only
+ * Root has none, so sudo -i is refused for every account (the session audits it). cmd_switch_user
+ * collects the factor; fl_session_switch_user checks and commits. */
 int cmd_sudo_interactive_login(void) {
     const fl_user_db_t *db;
     const fl_user_record_t *root;

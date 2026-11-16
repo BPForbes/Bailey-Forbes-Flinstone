@@ -184,9 +184,8 @@ int fl_fs_identity_has_user(const char *name)
     return find_user(name) >= 0;
 }
 
-/* switchuser follows su on the hosted shell (owner decision, FL-14 #406): the session's own
- * account is free, any other account needs that account's password. A switch_allowed op, when
- * installed, may refuse first; it never replaces the password. */
+/* The su rule (identity.h). A switch_allowed op, when installed, may refuse first; it never
+ * replaces the password. */
 int fl_fs_identity_switchuser(int session, const char *name, const char *password)
 {
     int idx;

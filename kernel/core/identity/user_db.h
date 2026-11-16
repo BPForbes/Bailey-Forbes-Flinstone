@@ -18,7 +18,7 @@ _Static_assert(FL_USER_NAME_MAX <= FL_CREDENTIAL_USERNAME_MAX_CHARS + 1u,
 #define FL_USER_SIGNING_PUBLIC_LEN  32u
 #define FL_USER_SIGNING_SEALED_LEN  81u
 
-/** How an account proves itself at login. Every account that exists today is PASSWORD. */
+/** How an account proves itself at login. */
 #define FL_USER_AUTH_PASSWORD      0 /* the password alone (legacy) */
 #define FL_USER_AUTH_PASSWORD_KQST 1 /* the password and the account's KQST slot token */
 
@@ -129,8 +129,7 @@ fl_result_t fl_user_db_kqst_row_restore(const fl_user_db_t *db, const char *key_
  * caller's own trusted record, read at call time like account_keys: a bridge is live when its row
  * says destroyed = 0 and its facts are well formed (generation 1..UINT32_MAX, a 16-byte salt, a
  * 32-byte public key, at least two members with valid heritage labels and 32-byte signing keys).
- * No import path writes these rows yet (bringing a KeyQuorum bridge into the kernel side is not
- * designed); fl_user_db_bridge_put / _put_sealed_key are the store's writers.
+ * fl_user_db_bridge_put, _put_with_key, _put_sealed_key and _import_from_kq are the store's writers.
  */
 #define FL_USER_BRIDGE_UID_MAX     65u /* KeyQuorum's uid (32 hex) and its NUL, with room */
 #define FL_USER_BRIDGE_MEMBERS_MAX 16u
