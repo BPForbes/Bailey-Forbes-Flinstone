@@ -4,3 +4,5 @@ RELEASE_VERSION=0
 PRERELEASE=1
 DEV_VERSION=13
 DESCRIPTION=KeyQuorum refusal reports name the real cause. A refused receive was reported to the sender only as Denied, whatever the checkpoint refused for. fl_kq_report_refusal_cp_in takes the checkpoint's own result and signs the KQER code and class it names: malformed delivery as Framing, an unknown key, an untrusted sender or a letter for someone else as Untrusted, a bad signature as Integrity, a replay as Replayed, an older revision as NotNewer, a fork as Forked, too few shares as BelowThreshold, an oversized letter and a missing editor permit as Denied; local problems (the destination exists, an I/O error, no driver) are still not reported. fl_kq_report_refusal_in keeps its fl_result_t mapping and shares one writer with it, and the receive path in server file uses the checkpoint form. test_kq_service covers every mapped cause and the unreported ones.
+
+RELEASE_DATE=2026-11-17
