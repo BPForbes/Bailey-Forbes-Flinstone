@@ -90,6 +90,8 @@ int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv,
         return cmd_profile_batch_tokens_count(argc, argv, i);
     case FL_SCMD_BRIDGE:
         return cmd_bridge_batch_tokens_count(argc, argv, i);
+    case FL_SCMD_KQST:
+        return cmd_kqst_batch_tokens_count(argc, argv, i);
     case FL_SCMD_PING:
         return cmd_ping_batch_tokens_count(argc, argv, i);
     case FL_SCMD_PING6:

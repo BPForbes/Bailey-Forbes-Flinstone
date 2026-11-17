@@ -1,6 +1,4 @@
-/**
- * Driver test suite: block, display, timer, PIC (host mode).
- */
+/* Driver test suite: block, display, timer, PIC (host mode). */
 #include "drivers/drivers.h"
 #include "drivers/block/block_driver.h"
 #include "drivers/fl_cstr.h"
@@ -25,7 +23,8 @@
 #include "common.h"
 #if defined(FL_WITH_KEYQUORUM)
 #include "fl/driver/keyquorum.h"
-/* The synthetic "keyquorum" device is enumerated and bound beside host_blk. */
+#define KQ_TEST_UTIL_KQ
+#include "tests/kq_test_util.h"
 #define EXPECTED_DEVICES 2
 #else
 #define EXPECTED_DEVICES 1
@@ -193,9 +192,7 @@ static int test_device_model(void) {
     return 0;
 }
 
-/* The KeyQuorum driver is registered by fl_driver_registry_register_all and bound by the
- * driver model to a synthetic device, only in a build that links it (FL_WITH_KEYQUORUM);
- * without it the device does not exist and nothing matches. */
+/* KeyQuorum driver is bound only in a build that links it (FL_WITH_KEYQUORUM). */
 static int test_keyquorum_registration(void) {
     fl_device_desc_t descs[4];
     fl_device_desc_t probe_desc;
@@ -221,16 +218,13 @@ static int test_keyquorum_registration(void) {
     ASSERT(descs[1].bus_type == FL_BUS_SYNTH);
     ASSERT(strcmp(descs[1].synth_id, "keyquorum") == 0);
     ASSERT(descs[1].resource_count == 0);
-    /* A caller that leaves room for only one descriptor still gets just host_blk. */
     ASSERT(fl_bus_enumerate(descs, 1) == 1);
 
-    /* The registry holds the KeyQuorum driver's base and matches the device to it. */
     ASSERT(fl_driver_registry_match(&probe_desc, &matched) == FL_RESULT_OK);
     ASSERT(matched == fl_kq_driver_desc());
     ASSERT(matched->class == FL_DRV_CLASS_SECURITY);
     ASSERT(strcmp(matched->name, "keyquorum") == 0);
 
-    /* The model bound the device: started, under that driver, with no resources. */
     ASSERT(bound == 1);
     dev = fl_device_find_synth("keyquorum");
     ASSERT(dev != NULL);
@@ -243,7 +237,6 @@ static int test_keyquorum_registration(void) {
             continue;
         ASSERT(info.driver_class == FL_DRV_CLASS_SECURITY);
         ASSERT(info.state == FL_DRV_STATE_STARTED);
-        /* matched is fl_kq_driver_desc(); the cast is only used after that pointer compare. */
         ASSERT(fl_kq_driver_from_desc(matched) == fl_kq_driver_get());
         ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 1);
         ASSERT(fl_kq_driver_get() != NULL);
@@ -261,7 +254,6 @@ static int test_keyquorum_registration(void) {
 }
 
 #if defined(FL_WITH_KEYQUORUM)
-/* The account ops are one-to-one over kq_account_*: keys, sealing, wrong password, bridge halves. */
 static int test_keyquorum_account(void) {
     const fl_kq_driver_t *kq = fl_kq_driver_get();
     uint8_t sec[FL_KQ_ACCOUNT_SECRET_LEN], pub[FL_KQ_ACCOUNT_PUBLIC_LEN], again[32], back[32];
@@ -275,14 +267,12 @@ static int test_keyquorum_account(void) {
     ASSERT(kq->account_keygen && kq->account_public && kq->account_box_keygen &&
            kq->account_box_public && kq->account_seal && kq->account_open &&
            kq->account_bridge_sign && kq->account_bridge_verify);
-    /* Signing and box keys: the public half derives from the secret. */
     ASSERT(kq->account_keygen(sec, pub) == FL_KQ_ACCOUNT_OK);
     ASSERT(kq->account_public(sec, again) == FL_KQ_ACCOUNT_OK);
     ASSERT(kq->equal(pub, again, sizeof pub) != 0);
     ASSERT(kq->account_box_keygen(bsec, bpub) == FL_KQ_ACCOUNT_OK);
     ASSERT(kq->account_box_public(bsec, again) == FL_KQ_ACCOUNT_OK);
     ASSERT(kq->equal(bpub, again, sizeof bpub) != 0);
-    /* Seal and open; a wrong password is reported unchanged and yields no secret. */
     ASSERT(kq->account_seal("pw-one", sec, sealed, sizeof sealed, &sealed_len) ==
            FL_KQ_ACCOUNT_OK);
     ASSERT(sealed_len == FL_KQ_ACCOUNT_SEALED_LEN);
@@ -291,7 +281,6 @@ static int test_keyquorum_account(void) {
     memset(back, 0, sizeof back);
     ASSERT(kq->account_open("pw-two", sealed, sealed_len, back) == FL_KQ_ACCOUNT_WRONG_PASSWORD);
     ASSERT(kq->account_seal("pw-one", sec, sealed, 4, &sealed_len) == FL_KQ_ACCOUNT_NO_ROOM);
-    /* Bridge halves: request by from, acceptance by to; a tampered signature is not valid. */
     memset(nonce, 7, sizeof nonce);
     ASSERT(kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, to, from, nonce, sec,
                                    sig) == FL_KQ_ACCOUNT_OK);
@@ -302,7 +291,6 @@ static int test_keyquorum_account(void) {
     sig[0] ^= 1u;
     ASSERT(kq->account_bridge_verify(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, to, from, nonce, pub,
                                      sig) == 0);
-    /* Same branch: refused. */
     ASSERT(kq->account_bridge_sign(FL_KQ_ACCOUNT_BRIDGE_REQUEST, from, from, from, nonce, sec,
                                    sig) == FL_KQ_ACCOUNT_INVALID);
     kq->wipe(sec, sizeof sec);
@@ -310,10 +298,99 @@ static int test_keyquorum_account(void) {
     kq->wipe(back, sizeof back);
     return 0;
 }
+
+/* head_author: FORKED for two heads, NO_ROOM for a buffer the label does not fit. */
+static int test_keyquorum_head_author(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *mya = "Root.Flinstone.Mya";
+    uint8_t sec[32], pub[32], id[16], rev[32];
+    fl_kq_buf_t empty = {0}, one = {0}, forked = {0};
+    char who[64], tiny[4];
+    int rc = 1;
+
+    ASSERT(kq && kq->head_author);
+    ASSERT(kq->account_keygen(sec, pub) == FL_KQ_ACCOUNT_OK);
+    memset(id, 0x4D, sizeof id);
+    if (kq->file_new(id, "plan.txt", mya, &empty) != KQ_FILE_OK)
+        goto out;
+    strcpy(who, "stale");
+    if (kq->head_author(&empty, who, sizeof who) != KQ_FILE_NO_REVISION || who[0] != '\0')
+        goto out;
+    if (kq->check_in(&empty, mya, "2026-11-10T09:00:00.000Z", (const uint8_t *)"v1\n", 3, sec, &one,
+                     rev) != KQ_FILE_OK ||
+        kq->head_author(&one, who, sizeof who) != KQ_FILE_OK || strcmp(who, mya) != 0)
+        goto out;
+    if (kq->head_author(&one, tiny, sizeof tiny) != KQ_FILE_NO_ROOM || tiny[0] != '\0')
+        goto out;
+    if (kq_test_fork(kq, &one, mya, sec, "2026-11-10T09:01:00.000Z", "2026-11-10T09:02:00.000Z",
+                     "2026-11-10T09:03:00.000Z", &forked) != 0)
+        goto out;
+    if (kq->head_author(&forked, who, sizeof who) != KQ_FILE_FORKED || who[0] != '\0')
+        goto out;
+    rc = 0;
+out:
+    kq->wipe(sec, sizeof sec);
+    fl_kq_buf_free(&empty);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&forked);
+    if (rc)
+        fprintf(stderr, "FAIL [%s]: head_author\n", __func__);
+    return rc;
+}
+
+static int test_keyquorum_access_and_bridge_ops(void) {
+    const fl_kq_driver_t *kq = fl_kq_driver_get();
+    const char *members[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    const kq_bridge_t live = {"0123456789abcdef0123456789abcdef", members, 2};
+    const char *labels[] = {"Root.Flinstone.Bob", "Root.Alternative.Ann"};
+    uint8_t salt[16], wrap[16], pub[32], sk[32], ek[32], pubs[64], challenge[32], art[512];
+    uint8_t sealed[96];
+    size_t alen = 0;
+    int idx = 7, grant = 7;
+
+    ASSERT(kq && kq->access_requirement && kq->bridge_prove && kq->bridge_verify && kq->bridge_connects);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Flinstone.Bob.Kid", "Root.Alternative.Ann") == 1);
+    ASSERT(kq->bridge_connects(members[0], members[1], "Root.Third.Eve", "Root.Alternative.Ann") == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_NONE);
+    ASSERT(idx == -1 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Flinstone.Bob", 1, NULL, 0, 0, NULL,
+                                  NULL) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone", "Root.Flinstone.Bob", 0, NULL, 0, 1, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD);
+    ASSERT(grant == 1); /* parent approval on: a same-branch switch needs the grant */
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, NULL, 0, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_KQST_PASSWORD);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root.Alternative.Ann", 0, &live, 1, 0, &idx,
+                                  &grant) == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
+    ASSERT(idx == 0 && grant == 0);
+    ASSERT(kq->access_requirement("Root.Flinstone.Bob", "Root..Bob", 0, NULL, 0, 0, NULL, NULL) ==
+           FL_KQ_ACCESS_REFUSED);
+    ASSERT(kq->access_requirement(NULL, "Root", 0, NULL, 0, 0, &idx, &grant) == FL_KQ_ACCESS_INVALID);
+    ASSERT(idx == -1 && grant == 0);
+
+    memset(salt, 0x11, sizeof salt);
+    memset(wrap, 0x22, sizeof wrap);
+    memset(sealed, 0x33, sizeof sealed);
+    memset(challenge, 0x44, sizeof challenge);
+    ASSERT(kq->account_keygen(sk, pub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->account_box_keygen(ek, pubs) == FL_KQ_ACCOUNT_OK);
+    ASSERT(kq->bridge_prove(live.uid, 1, salt, pub, members[0], sealed, sizeof sealed, wrap, ek, sk,
+                            challenge, sizeof challenge, art, sizeof art, &alen) < 0);
+    kq->wipe(sk, sizeof sk);
+    kq->wipe(ek, sizeof ek);
+    memcpy(pubs, pub, 32);
+    memcpy(pubs + 32, pub, 32);
+    memset(art, 0x55, 64);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, labels, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) != FL_KQ_BRIDGE_OK);
+    ASSERT(kq->bridge_verify(live.uid, 1, salt, pub, 0, NULL, pubs, 2, labels[1], challenge,
+                             sizeof challenge, art, 64) == FL_KQ_BRIDGE_INVALID);
+    return 0;
+}
 #endif
 
-/* A shutdown empties the registry and the device table; the next init registers and binds
- * again, so the device count is unchanged and exactly one "keyquorum" device is bound. */
+/* A shutdown empties the registry; re-init binds the device again, exactly once. */
 static int test_keyquorum_survives_reinit(const char *disk_path) {
     fl_device_desc_t probe_desc;
     const fl_driver_desc_t *matched = NULL;
@@ -327,12 +404,10 @@ static int test_keyquorum_survives_reinit(const char *disk_path) {
     drivers_shutdown();
     ASSERT(fl_device_count() == 0);
 #if defined(FL_WITH_KEYQUORUM)
-    /* Empty registry: the accessor does not answer. */
     ASSERT(fl_driver_registry_contains(NULL) == 0);
     ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 0);
     ASSERT(fl_kq_driver_get() == NULL);
     {
-        /* Same name as the real driver, different pointer: membership is not a name match. */
         static const fl_driver_ops_t foreign_ops;
         static const fl_driver_desc_t foreign = {
             FL_DRV_CLASS_SECURITY, "keyquorum", &foreign_ops, 0, 0, NULL, "keyquorum",
@@ -351,13 +426,11 @@ static int test_keyquorum_survives_reinit(const char *disk_path) {
     drivers_shutdown();
     ASSERT(fl_device_count() == 0);
     ASSERT(fl_kq_driver_get() == NULL);
-    /* After a shutdown nothing re-registers the driver behind the model's back. */
     ASSERT(fl_driver_registry_ensure(fl_kq_driver_desc()) == FL_RESULT_ERR);
     ASSERT(fl_kq_driver_get_or_register() == NULL);
     ASSERT(fl_driver_registry_contains(fl_kq_driver_desc()) == 0);
     ASSERT(fl_driver_registry_count() == 0);
-    /* The resolver matches the registered pointer: a byte-for-byte copy of the descriptor,
-     * same name and ops, never resolves. */
+/* A byte-for-byte copy of the descriptor never resolves: membership is by pointer. */
     {
         static fl_kq_driver_t forged;
 
@@ -368,8 +441,6 @@ static int test_keyquorum_survives_reinit(const char *disk_path) {
         drivers_shutdown();
         ASSERT(fl_driver_registry_count() == 0);
     }
-    /* Registered early (before drivers_init, as the session seed does), then by the model:
-     * it is in the table once, and a second register_all adds nothing. */
     fl_driver_registry_register_all();
     {
         int n = fl_driver_registry_count();
@@ -491,75 +562,54 @@ static int test_irq_and_dma(void) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* fl_cstr: new header-only string utilities                           */
-/* ------------------------------------------------------------------ */
 static int test_fl_cstr(void) {
-    /* --- fl_cstr_len --- */
     ASSERT(fl_cstr_len(NULL, 10) == 0);
     ASSERT(fl_cstr_len("", 10) == 0);
     ASSERT(fl_cstr_len("hello", 10) == 5);
-    /* max_len truncates: only 3 of 5 chars counted */
     ASSERT(fl_cstr_len("hello", 3) == 3);
-    /* max_len of 0: always returns 0 */
     ASSERT(fl_cstr_len("hello", 0) == 0);
-    /* exactly at boundary */
     ASSERT(fl_cstr_len("abc", 3) == 3);
     ASSERT(fl_cstr_len("abc", 4) == 3);
 
-    /* --- fl_cstr_eq --- */
     ASSERT(fl_cstr_eq(NULL, "foo") == 0);
     ASSERT(fl_cstr_eq("foo", NULL) == 0);
     ASSERT(fl_cstr_eq(NULL, NULL) == 0);
     ASSERT(fl_cstr_eq("", "") == 1);
     ASSERT(fl_cstr_eq("foo", "foo") == 1);
     ASSERT(fl_cstr_eq("foo", "bar") == 0);
-    /* prefix mismatch: "foo" vs "foo2" */
     ASSERT(fl_cstr_eq("foo", "foo2") == 0);
     ASSERT(fl_cstr_eq("foo2", "foo") == 0);
-    /* single char */
     ASSERT(fl_cstr_eq("a", "a") == 1);
     ASSERT(fl_cstr_eq("a", "b") == 0);
-    /* host_blk is the real synth ID used by the driver */
     ASSERT(fl_cstr_eq("host_blk", "host_blk") == 1);
     ASSERT(fl_cstr_eq("host_blk", "host_blk2") == 0);
 
-    /* --- fl_cstr_copy --- */
     char buf[16];
 
-    /* NULL dst: no-op, no crash */
     fl_cstr_copy(NULL, 5, "hello");
 
-    /* dst_len 0: no-op, no crash */
     fl_cstr_copy(buf, 0, "hello");
 
-    /* NULL src: dst gets empty string */
     memset(buf, 0xFF, sizeof(buf));
     fl_cstr_copy(buf, sizeof(buf), NULL);
     ASSERT(buf[0] == '\0');
 
-    /* Normal copy */
     fl_cstr_copy(buf, sizeof(buf), "hello");
     ASSERT(strcmp(buf, "hello") == 0);
 
-    /* Truncation: dst_len=5 allows only 4 chars + NUL */
     fl_cstr_copy(buf, 5, "hello world");
     ASSERT(buf[4] == '\0');
     ASSERT(strncmp(buf, "hell", 4) == 0);
 
-    /* Empty string copy */
     fl_cstr_copy(buf, sizeof(buf), "");
     ASSERT(buf[0] == '\0');
 
-    /* dst_len=1: only the NUL terminator fits */
     fl_cstr_copy(buf, 1, "hello");
     ASSERT(buf[0] == '\0');
 
-    /* Overlap: src and dst overlap (backward move case: dst > src) */
     static char overlap[16];
     memset(overlap, 0, sizeof(overlap));
     strcpy(overlap, "abcde");
-    /* Shift two bytes forward inside the same buffer */
     fl_cstr_copy(overlap + 2, sizeof(overlap) - 2, overlap);
     ASSERT(overlap[2] == 'a');
     ASSERT(overlap[3] == 'b');
@@ -571,9 +621,6 @@ static int test_fl_cstr(void) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* bus resource extraction: new functions in bus.c                    */
-/* ------------------------------------------------------------------ */
 static int test_bus_resource_extraction(void) {
     fl_device_desc_t descs[2];
     int irq_list[8];
@@ -582,54 +629,36 @@ static int test_bus_resource_extraction(void) {
 
     memset(descs, 0, sizeof(descs));
 
-    /* Get the real descriptor from bus enumeration */
     int n = fl_bus_enumerate(descs, 2);
     ASSERT(n == EXPECTED_DEVICES);
 
     const fl_device_desc_t *d = &descs[0];
     ASSERT(d->resource_count == 4);
 
-    /* ---- fl_device_desc_irq_list ---- */
-    /* NULL desc */
     ASSERT(fl_device_desc_irq_list(NULL, irq_list, 8) == 0);
-    /* NULL irq buffer */
     ASSERT(fl_device_desc_irq_list(d, NULL, 8) == 0);
-    /* max_irq <= 0 */
     ASSERT(fl_device_desc_irq_list(d, irq_list, 0) == 0);
-    /* host descriptor has exactly 1 IRQ resource at line 3 */
     memset(irq_list, 0, sizeof(irq_list));
     ASSERT(fl_device_desc_irq_list(d, irq_list, 8) == 1);
     ASSERT(irq_list[0] == 3);
-    /* max_irq=1 still gets one result */
     memset(irq_list, 0, sizeof(irq_list));
     ASSERT(fl_device_desc_irq_list(d, irq_list, 1) == 1);
     ASSERT(irq_list[0] == 3);
 
-    /* ---- fl_device_desc_mmio_list ---- */
-    /* NULL desc */
     ASSERT(fl_device_desc_mmio_list(NULL, mmio_list, 8) == 0);
-    /* NULL mmio buffer */
     ASSERT(fl_device_desc_mmio_list(d, NULL, 8) == 0);
-    /* max_mmio <= 0 */
     ASSERT(fl_device_desc_mmio_list(d, mmio_list, 0) == 0);
-    /* host descriptor has no MMIO resources */
     memset(mmio_list, 0, sizeof(mmio_list));
     ASSERT(fl_device_desc_mmio_list(d, mmio_list, 8) == 0);
 
-    /* ---- fl_device_desc_ioport_range ---- */
-    /* NULL desc */
     ASSERT(fl_device_desc_ioport_range(NULL, &ioport_base, &ioport_count) == -1);
-    /* NULL base */
     ASSERT(fl_device_desc_ioport_range(d, NULL, &ioport_count) == -1);
-    /* NULL count */
     ASSERT(fl_device_desc_ioport_range(d, &ioport_base, NULL) == -1);
-    /* host descriptor has 1 IOPORT resource at 0xF100, size 8 */
     ioport_base = 0; ioport_count = 0;
     ASSERT(fl_device_desc_ioport_range(d, &ioport_base, &ioport_count) == 0);
     ASSERT(ioport_base == 0xF100u);
     ASSERT(ioport_count == 8);
 
-    /* ---- descriptor with no resources (empty) ---- */
     fl_device_desc_t empty;
     memset(&empty, 0, sizeof(empty));
     empty.resource_count = 0;
@@ -640,9 +669,6 @@ static int test_bus_resource_extraction(void) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* devfs: error paths and flags enforcement                            */
-/* ------------------------------------------------------------------ */
 static int test_devfs_flags_and_errors(void) {
     fl_devfs_file_t file;
     uint8_t buf[512];
@@ -651,35 +677,27 @@ static int test_devfs_flags_and_errors(void) {
     memset(&file, 0, sizeof(file));
     memset(buf, 0, sizeof(buf));
 
-    /* Open non-existent path */
     ASSERT(fl_devfs_open("/dev/does_not_exist", FL_DEVFS_O_READ, &file) != 0);
 
-    /* NULL path */
     ASSERT(fl_devfs_open(NULL, FL_DEVFS_O_READ, &file) != 0);
 
-    /* NULL out-file */
     ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, NULL) != 0);
 
-    /* Open read-only and attempt write */
     memset(&file, 0, sizeof(file));
     ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ, &file) == 0);
-    /* write should fail: FL_DEVFS_O_WRITE flag not set */
     ASSERT(fl_devfs_write(&file, buf, sizeof(buf), &n) != 0);
     ASSERT(fl_devfs_close(&file) == 0);
 
-    /* Open write-only and attempt read */
     memset(&file, 0, sizeof(file));
     ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_WRITE, &file) == 0);
     ASSERT(fl_devfs_read(&file, buf, sizeof(buf), &n) != 0);
     ASSERT(fl_devfs_close(&file) == 0);
 
-    /* Operations on NULL file */
     ASSERT(fl_devfs_read(NULL, buf, sizeof(buf), &n) != 0);
     ASSERT(fl_devfs_write(NULL, buf, sizeof(buf), &n) != 0);
     ASSERT(fl_devfs_ioctl(NULL, FL_DEVFS_IOCTL_BLOCK_CAPS, buf) != 0);
     ASSERT(fl_devfs_close(NULL) != 0);
 
-    /* Close clears node pointer */
     memset(&file, 0, sizeof(file));
     ASSERT(fl_devfs_open("/dev/blk0", FL_DEVFS_O_READ | FL_DEVFS_O_WRITE, &file) == 0);
     ASSERT(file.node != NULL);
@@ -687,60 +705,46 @@ static int test_devfs_flags_and_errors(void) {
     ASSERT(file.node == NULL);
     ASSERT(file.pos == 0);
 
-    /* Register duplicate path must fail */
     fl_devfs_ops_t dummy_ops = {0};
     fl_device_t *blk = fl_device_find_synth("host_blk");
     ASSERT(blk != NULL);
     ASSERT(fl_devfs_register("/dev/blk0", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) != FL_RESULT_OK);
 
-    /* Unregister existing */
     ASSERT(fl_devfs_register("/dev/test_tmp", FL_DRV_CLASS_BLOCK, blk, &dummy_ops) == FL_RESULT_OK);
     fl_devfs_unregister("/dev/test_tmp");
-    /* After unregister, open should fail */
     ASSERT(fl_devfs_open("/dev/test_tmp", FL_DEVFS_O_READ, &file) != 0);
 
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* DMA: null / edge case handling                                      */
-/* ------------------------------------------------------------------ */
 static int test_dma_edge_cases(void) {
     fl_dma_info_t info;
 
-    /* Allocate zero size */
     void *p = fl_dma_alloc(0);
     ASSERT(p == NULL);
 
-    /* get_info on NULL */
     ASSERT(fl_dma_get_info(NULL, NULL) != 0);
     ASSERT(fl_dma_get_info(NULL, &info) != 0);
 
-    /* get_info on unknown pointer */
     int dummy = 42;
     ASSERT(fl_dma_get_info(&dummy, &info) != 0);
 
-    /* allocation count starts clean after shutdown/reinit */
     ASSERT(fl_dma_allocation_count() == 0);
 
-    /* Normal alloc then free */
     p = fl_dma_alloc(64);
     ASSERT(p != NULL);
     ASSERT(fl_dma_allocation_count() == 1);
     fl_dma_free(p);
     ASSERT(fl_dma_allocation_count() == 0);
 
-    /* Double-free of same pointer: must not crash (second free is ignored) */
     p = fl_dma_alloc(32);
     ASSERT(p != NULL);
     fl_dma_free(p);
     fl_dma_free(p); /* second free: pointer no longer tracked, should be no-op */
     ASSERT(fl_dma_allocation_count() == 0);
 
-    /* fl_dma_free(NULL) is a no-op */
     fl_dma_free(NULL);
 
-    /* fl_dma_zero/copy with NULL or zero size: no crash */
     fl_dma_zero(NULL, 8);
     fl_dma_zero(NULL, 0);
     p = fl_dma_alloc(16);
@@ -753,102 +757,74 @@ static int test_dma_edge_cases(void) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* IRQ: boundary / error cases                                         */
-/* ------------------------------------------------------------------ */
 static int test_irq_edge_cases(void) {
     fl_irq_info_t irq_info;
     /* Past end of s_irq[]; keep in sync with FL_MODEL_MAX_IRQ in driver_model.c */
     const int irq_past_max = 64;
 
-    /* fl_irq_get_info with out-of-range IRQ */
     ASSERT(fl_irq_get_info(-1, &irq_info) != 0);
     ASSERT(fl_irq_get_info(irq_past_max, &irq_info) != 0);
 
-    /* fl_irq_get_info with NULL out param */
     ASSERT(fl_irq_get_info(0, NULL) != 0);
 
-    /* fl_irq_register: out-of-range IRQ */
     void *ctx = NULL;
     ASSERT(fl_irq_register(-1, test_irq_handler, ctx) != 0);
     ASSERT(fl_irq_register(irq_past_max, test_irq_handler, ctx) != 0);
 
-    /* fl_irq_register: NULL handler */
     ASSERT(fl_irq_register(0, NULL, ctx) != 0);
 
-    /* fl_irq_dispatch on out-of-range */
     ASSERT(fl_irq_dispatch(-1) != 0);
     ASSERT(fl_irq_dispatch(irq_past_max) != 0);
 
-    /* fl_irq_dispatch_count on invalid IRQ returns 0 */
     ASSERT(fl_irq_dispatch_count(-1) == 0);
     ASSERT(fl_irq_dispatch_count(irq_past_max) == 0);
 
-    /* fl_irq_enable/disable on out-of-range: no crash */
     fl_irq_enable(-1);
     fl_irq_enable(irq_past_max);
     fl_irq_disable(-1);
     fl_irq_disable(irq_past_max);
 
-    /* fl_irq_unregister on out-of-range: no crash */
     fl_irq_unregister(-1);
     fl_irq_unregister(irq_past_max);
 
-    /* fl_irq_unregister_device(NULL): no crash */
     fl_irq_unregister_device(NULL);
 
-    /* fl_irq_eoi on out-of-range: no crash */
     fl_irq_eoi(-1);
     fl_irq_eoi(irq_past_max);
 
     return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Device model: null / boundary parameter handling                   */
-/* ------------------------------------------------------------------ */
 static int test_device_model_null_params(void) {
     fl_device_info_t info;
     fl_resource_t res;
 
-    /* fl_device_get_info: out-of-range index */
     ASSERT(fl_device_get_info(-1, &info) != 0);
     ASSERT(fl_device_get_info(9999, &info) != 0);
 
-    /* fl_device_get_info: NULL out param */
     ASSERT(fl_device_get_info(0, NULL) != 0);
 
-    /* fl_device_find_synth: NULL id */
     ASSERT(fl_device_find_synth(NULL) == NULL);
 
-    /* fl_device_find_synth: non-existent id */
     ASSERT(fl_device_find_synth("no_such_device_id") == NULL);
 
-    /* fl_device_get_desc: NULL device */
     ASSERT(fl_device_get_desc(NULL) == NULL);
 
-    /* fl_resource_count: NULL device (returns global count) */
     int total = fl_resource_count(NULL);
     ASSERT(total >= 0);
 
-    /* fl_resource_get: NULL out param */
     ASSERT(fl_resource_get(NULL, 0, NULL) != 0);
 
-    /* fl_resource_get: negative index */
     fl_device_t *dev = fl_device_find_synth("host_blk");
     ASSERT(dev != NULL);
     ASSERT(fl_resource_get(dev, -1, &res) != 0);
 
-    /* fl_resource_get: beyond last resource */
     ASSERT(fl_resource_get(dev, 9999, &res) != 0);
 
-    /* fl_resource_claim: NULL device */
     ASSERT(fl_resource_claim(NULL, FL_RESOURCE_IRQ, 0) != 0);
 
-    /* fl_resource_release_all: NULL device is no-op */
     fl_resource_release_all(NULL);
 
-    /* fl_driver_registry_match: NULL params */
     const fl_driver_desc_t *matched = NULL;
     ASSERT(fl_driver_registry_match(NULL, &matched) == FL_RESULT_INVAL);
     fl_device_desc_t desc;
@@ -1015,6 +991,12 @@ int main(void) {
 #if defined(FL_WITH_KEYQUORUM)
     printf("test_keyquorum_account... ");
     if (test_keyquorum_account() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_head_author... ");
+    if (test_keyquorum_head_author() != 0) { drivers_shutdown(); unlink(path); return 1; }
+    printf("OK\n");
+    printf("test_keyquorum_access_and_bridge_ops... ");
+    if (test_keyquorum_access_and_bridge_ops() != 0) { drivers_shutdown(); unlink(path); return 1; }
     printf("OK\n");
 #endif
 

@@ -1,11 +1,4 @@
-/**
- * test_kq_checkpoint.c - KeyQuorum security checkpoints for co-signed delivery
- * (kernel/core/vfs/kq_checkpoint.c over kernel/drivers/keyquorum/kq_driver.c;
- * contracts/drivers/contract_p4_keyquorum.h).
- *
- * Mya sends plan.txt to Steve: encode (Mya), admit (host), co-sign (Steve), decode
- * (Steve), with every refusal on the way.
- */
+/* Co-signed delivery checkpoints: encode, admit, co-sign, decode, with every refusal on the way. */
 #include "kq_checkpoint.h"
 #include "fs_events.h"
 #include "fs_facade.h"
@@ -15,6 +8,8 @@
 #include "mem_domain.h"
 #include "server_shared_fs.h"
 #include "user_db.h"
+#define KQ_TEST_UTIL_KQ
+#include "tests/kq_test_util.h"
 
 #include <dirent.h>
 #include <limits.h>
@@ -45,14 +40,6 @@ static void path_in(char *out, size_t cap, const char *name) {
     snprintf(out, cap, "%s/%s", s_dir, name);
 }
 
-static int write_text(const char *path, const char *text) {
-    FILE *f = fopen(path, "wb");
-    if (!f)
-        return -1;
-    fputs(text, f);
-    return fclose(f);
-}
-
 static int read_text(const char *path, char *out, size_t cap) {
     FILE *f = fopen(path, "rb");
     size_t n;
@@ -64,24 +51,6 @@ static int read_text(const char *path, char *out, size_t cap) {
     return 0;
 }
 
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        rmrf(sub);
-    }
-    closedir(d);
-    rmdir(path);
-}
-
 typedef struct {
     fl_user_db_t db;
     unsigned char mya_sign[FL_USER_SIGNING_SECRET_LEN];
@@ -91,8 +60,7 @@ typedef struct {
     unsigned char flinstone_sign[FL_USER_SIGNING_SECRET_LEN];
 } world_t;
 
-/* The checkpoint binary does not call drivers_init. Register the real descriptor
- * through the registry before any fl_kq_driver_get. */
+/* The checkpoint binary does not call drivers_init; the real descriptor is registered first. */
 static void register_kq_driver(void) {
     (void)fl_kq_driver_get_or_register();
 }
@@ -103,7 +71,6 @@ static int setup(world_t *w) {
     char db_path[PATH_MAX];
 
     register_kq_driver();
-    /* A fresh store per test; the lab defaults provide Root.Flinstone and Root.Alternative. */
     snprintf(name, sizeof name, "users-%d.db", ++n);
     path_in(db_path, sizeof db_path, name);
     if (fl_user_db_load(&w->db, db_path) != FL_RESULT_OK ||
@@ -128,19 +95,21 @@ static void teardown(world_t *w) {
     asm_mem_secure_zero(w->flinstone_sign, sizeof w->flinstone_sign);
 }
 
-static int contains(const fl_kq_buf_t *b, const char *needle) {
-    size_t n = strlen(needle);
+static size_t count(const fl_kq_buf_t *b, const char *needle) {
+    size_t n = strlen(needle), k = 0;
     for (size_t i = 0; i + n <= b->len; i++)
         if (memcmp(b->data + i, needle, n) == 0)
-            return 1;
-    return 0;
+            k++;
+    return k;
 }
 
-/* The KeyQuorum driver extends the generic driver: its base is a registrable descriptor
- * whose lifecycle probe gates the KeyQuorum ops. */
+static int contains(const fl_kq_buf_t *b, const char *needle) {
+    return count(b, needle) > 0;
+}
+
 static int prepare(world_t *w, const char *src, const char *text, const char *at,
                    fl_kq_encoded_t *enc, uint8_t sig[64]) {
-    if (write_text(src, text) != 0 ||
+    if (kq_test_write_text(src, text) != 0 ||
         fl_kq_cp_encode(&w->db, MYA, w->mya_sign, STEVE, fl_user_db_box_public(&w->db, STEVE),
                         src, at, enc) != FL_KQ_CP_OK)
         return -1;
@@ -151,8 +120,6 @@ static int prepare(world_t *w, const char *src, const char *text, const char *at
     return 0;
 }
 
-/* A newer revision, made permitted: encoded, countersigned by the supervisor in the container
- * beside src, then sealed again (the revision and its history are unchanged). */
 static int prepare_permitted(world_t *w, const char *src, const char *text, const char *at,
                              fl_kq_encoded_t *enc, uint8_t sig[64]) {
     fl_kq_encoded_t first;
@@ -182,7 +149,6 @@ static int test_driver_extends_the_base_driver(void) {
     ASSERT(strcmp(base->name, "keyquorum") == 0 && strcmp(base->synth_id, "keyquorum") == 0);
     ASSERT(base->ops && base->ops->probe && base->ops->probe(NULL) == FL_RESULT_OK);
     ASSERT(!base->ops->attach && !base->ops->start && !base->ops->stop && !base->ops->detach);
-    /* One object: the base is the driver's first member. */
     ASSERT(fl_kq_driver_from_desc(base) == drv && &drv->base == base);
     return 0;
 }
@@ -214,7 +180,6 @@ static int test_driver_output_may_alias_its_input(void) {
     ASSERT(drv->check_in(&c, MYA, T1, text, sizeof text - 1, w.mya_sign, &c, rev) == KQ_FILE_OK);
     ASSERT(drv->verify(&c, NULL) == KQ_FILE_OK);
     ASSERT(drv->head(&c, head) == KQ_FILE_OK && memcmp(head, rev, 32) == 0);
-    /* A failed call leaves the aliased buffer as it was. */
     ASSERT(drv->check_in(&c, "", T2, text, sizeof text - 1, w.mya_sign, &c, rev) != KQ_FILE_OK);
     ASSERT(c.data && drv->verify(&c, NULL) == KQ_FILE_OK);
     fl_kq_buf_free(&c);
@@ -233,20 +198,17 @@ static int test_co_signed_delivery(void) {
     mya_pub = fl_user_db_signing_public(&w.db, MYA);
     path_in(src, sizeof src, "plan.txt");
     path_in(dest, sizeof dest, "steve-plan.txt");
-    ASSERT(write_text(src, "quarterly plan v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "quarterly plan v1\n") == 0);
 
-    /* Encode (Mya): sealed to Steve, plaintext not in the letter. */
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(!contains(&enc.letter, "quarterly plan"));
     ASSERT(strcmp(enc.file_name, "plan.txt") == 0);
 
-    /* Latent (host): Mya's signature, not anyone else's. */
     ASSERT(fl_kq_cp_admit_offer(&w.db, MYA, &enc.offer) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_admit_offer(&w.db, STEVE, &enc.offer) == FL_KQ_CP_BAD_SIGNATURE);
     ASSERT(fl_kq_cp_admit_offer(&w.db, "Root.Nobody", &enc.offer) == FL_KQ_CP_NO_KEY);
 
-    /* Co-sign (Steve); Mya cannot co-sign her own revision. */
     ASSERT(fl_kq_cp_cosign(&enc.offer, MYA, w.mya_sign, sig) == FL_KQ_CP_NOT_RECIPIENT);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_admit_cosign(&w.db, STEVE, &enc.offer, sig) == FL_KQ_CP_OK);
@@ -261,7 +223,6 @@ static int test_co_signed_delivery(void) {
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, bad,
                            dest) == FL_KQ_CP_BELOW_THRESHOLD);
     ASSERT(access(dest, F_OK) != 0);
-    /* A letter claimed to come from someone else is refused. */
     ASSERT(fl_kq_cp_decode(&w.db, STEVE, fl_user_db_signing_public(&w.db, STEVE), STEVE, w.steve_box,
                            &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_BAD_SIGNATURE);
 
@@ -275,8 +236,7 @@ static int test_co_signed_delivery(void) {
                            dest) == FL_KQ_CP_REPLAYED);
     fl_kq_encoded_free(&enc);
 
-    /* Mya edits; the second revision arrives as NEWER and replaces Steve's copy. */
-    ASSERT(write_text(src, "quarterly plan v2\n") == 0);
+    ASSERT(kq_test_write_text(src, "quarterly plan v2\n") == 0);
     ASSERT(prepare_permitted(&w, src, "quarterly plan v2\n", T2, &enc, sig) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
@@ -297,8 +257,8 @@ static int test_untracked_destination_is_never_overwritten(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "notes.txt");
     path_in(dest, sizeof dest, "existing.txt");
-    ASSERT(write_text(src, "notes\n") == 0);
-    ASSERT(write_text(dest, "mine\n") == 0);
+    ASSERT(kq_test_write_text(src, "notes\n") == 0);
+    ASSERT(kq_test_write_text(dest, "mine\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -310,8 +270,7 @@ static int test_untracked_destination_is_never_overwritten(void) {
     return 0;
 }
 
-/* A failed write leaves nothing half-installed: the first delivery retries cleanly, and an
- * update keeps the earlier copy and its history. */
+/* A failed write leaves nothing half-installed; an update keeps the earlier copy and its history. */
 static int test_a_failed_write_installs_nothing(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -326,9 +285,8 @@ static int test_a_failed_write_installs_nothing(void) {
     path_in(dest, sizeof dest, "steve-atomic.txt");
     snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
     snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
-    /* A directory where the acceptance record's staging file must go makes that write fail. */
     snprintf(block, sizeof block, "%s.part", seen);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -348,7 +306,6 @@ static int test_a_failed_write_installs_nothing(void) {
                            dest) == FL_KQ_CP_IO);
     ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
     ASSERT(rmdir(block) == 0);
-    /* The update was not recorded, so it still arrives as newer. */
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
     ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v2\n") == 0);
@@ -357,8 +314,7 @@ static int test_a_failed_write_installs_nothing(void) {
     return 0;
 }
 
-/* Links planted at the landing names are refused or replaced, never followed, and nothing is
- * written outside the landing directory. */
+/* Links planted at the landing names are refused or replaced, never followed. */
 static int test_landing_names_that_are_links_are_not_followed(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -375,20 +331,18 @@ static int test_landing_names_that_are_links_are_not_followed(void) {
     snprintf(seen, sizeof seen, "%s%s", dest, FL_KQ_SEEN_SUFFIX);
     snprintf(side, sizeof side, "%s%s", dest, FL_KQ_CONTAINER_SUFFIX);
     snprintf(part, sizeof part, "%s.part", side);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
 
-    /* A dangling link at the file's own name: not a free name, and not created through. */
     ASSERT(symlink(out, dest) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_EXISTS);
     ASSERT(access(out, F_OK) != 0);
     ASSERT(unlink(dest) == 0);
 
-    /* A link at the acceptance record's name is refused, not read through. */
-    ASSERT(write_text(out, "outside\n") == 0);
+    ASSERT(kq_test_write_text(out, "outside\n") == 0);
     ASSERT(symlink(out, seen) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_IO);
@@ -396,7 +350,6 @@ static int test_landing_names_that_are_links_are_not_followed(void) {
     ASSERT(read_text(out, got, sizeof got) == 0 && strcmp(got, "outside\n") == 0);
     ASSERT(unlink(seen) == 0);
 
-    /* A link planted at a staging name is not written through, and the landing completes. */
     ASSERT(symlink(out, part) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
@@ -427,7 +380,7 @@ static int test_landing_into_the_quarantine_is_refused(void) {
     ASSERT(mkdir(base, 0700) == 0 && mkdir(dir, 0700) == 0);
     snprintf(dir, sizeof dir, "%s/server_shared/expired", base);
     ASSERT(mkdir(dir, 0700) == 0);
-    ASSERT(write_text(src, "v1\n") == 0);
+    ASSERT(kq_test_write_text(src, "v1\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -449,7 +402,8 @@ static int test_landing_into_the_quarantine_is_refused(void) {
 /* Both landing paths reserve the same suffixes. */
 static int test_reserved_suffixes_are_shared(void) {
     static const char *const bad[] = {"a.meta", "a.part", "a.kqtf", "a.kqseen", "a.kqbak",
-                                      "a.META", "a.Part", "a.KqTf", "a.KQSEEN", "a.kqBAK"};
+                                      "a.META", "a.Part", "a.KqTf", "a.KQSEEN", "a.kqBAK",
+                                      "a.kqer", "a.KQER"};
     size_t i;
 
     for (i = 0; i < sizeof bad / sizeof *bad; i++)
@@ -467,16 +421,15 @@ static int test_a_damaged_history_is_refused(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "damaged.txt");
     snprintf(side, sizeof side, "%s%s", src, FL_KQ_CONTAINER_SUFFIX);
-    ASSERT(write_text(src, "x\n") == 0);
-    ASSERT(write_text(side, "not a KQTF container") == 0);
+    ASSERT(kq_test_write_text(src, "x\n") == 0);
+    ASSERT(kq_test_write_text(side, "not a KQTF container") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_INVALID);
     teardown(&w);
     return 0;
 }
 
-/* More accepted revisions than the record keeps: it stays bounded, and neither an old letter
- * nor the newest container naming an old revision (a rollback) is accepted. */
+/* A bounded record of accepted revisions: an old letter or an old container (a rollback) is refused. */
 static int test_the_seen_record_stays_bounded(void) {
     enum { DELIVERIES = 70, KEEP = 64 };
     const fl_kq_driver_t *drv;
@@ -499,7 +452,6 @@ static int test_the_seen_record_stays_bounded(void) {
     for (int i = 0; i < DELIVERIES; i++) {
         snprintf(text, sizeof text, "v%d\n", i);
         snprintf(at, sizeof at, "2026-10-20T09:%02d:%02d.000Z", i / 60, i % 60);
-        /* The first revision is FIRST and needs no permit; each later one is NEWER. */
         ASSERT((i == 0 ? prepare(&w, src, text, at, &enc, sig)
                        : prepare_permitted(&w, src, text, at, &enc, sig)) == 0);
         ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer,
@@ -512,14 +464,11 @@ static int test_the_seen_record_stays_bounded(void) {
     ASSERT(stat(seen, &st) == 0 && st.st_size == KEEP * 64);
     ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v69\n") == 0);
 
-    /* The first letter again: its pair has been dropped, and it is still refused. */
     ASSERT(fl_kq_cp_cosign(&first.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &first.letter, &first.offer,
                            sig, dest) == FL_KQ_CP_NOT_NEWER);
 
-    /* A rollback: Mya's newest container, sealed for her first revision. Sealing carries only
-     * that revision and its ancestors, so the newest kept pairs already refuse it; decode's
-     * local_holds check also covers a crafted letter that keeps the newer revisions. */
+/* A rollback is refused: the newest kept pair refuses it, and local_holds covers crafted letters. */
     {
         FILE *f = fopen(side, "rb");
         fl_kq_buf_t c = {0}, letter = {0};
@@ -555,10 +504,7 @@ static int test_the_seen_record_stays_bounded(void) {
     return 0;
 }
 
-/* Encodes text as Mya's next revision of src, co-signed by Steve; decode into dest is left to
- * the caller. */
-/* The history is read from the local container alone, and it names what happened: a check-in and
- * the signature on it, then the permit on the revision; the head is the permitted revision. */
+/* The history names what happened: check-in, its signature, then the permit; the head is the permitted revision. */
 static int test_history_is_offline_and_named(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -584,61 +530,57 @@ static int test_history_is_offline_and_named(void) {
     return 0;
 }
 
-/* Pins the names KeyQuorum exports (kq_file_event_name / kq_file_outcome_name, through the driver)
- * to its wire codes (src/file_history/event.rs: HistoryEventType 1..=47 and HistoryOutcome 1..=4,
- * "never renumber, only append"). The literals below are an independent expected list: a renamed
- * or renumbered variant fails here, and a new variant is appended here. Flinstone keeps no table
- * of its own. */
+/* Pins the exported event names to the wire codes; a renamed or renumbered variant fails here. */
 static int test_event_and_outcome_names_pinned(void) {
     static const char *const events[] = {
-        /*  1 */ "TrackingStarted",
-        /*  2 */ "EditCheckedIn",
-        /*  3 */ "RevisionSigned",
-        /*  4 */ "CountersignatureAdded",
-        /*  5 */ "PolicyDecision",
-        /*  6 */ "ShareAttempted",
-        /*  7 */ "ShareDelivered",
-        /*  8 */ "FileExpired",
-        /*  9 */ "ContentDestroyed",
-        /* 10 */ "TamperDetected",
-        /* 11 */ "AutoMergeAttempted",
-        /* 12 */ "AutoMergeFastForward",
-        /* 13 */ "AutoMergeEquivalent",
-        /* 14 */ "AutoMergeClean",
-        /* 15 */ "AutoMergeBlocked",
-        /* 16 */ "AutoMergeRequiresHuman",
-        /* 17 */ "HistoryForkDetected",
-        /* 18 */ "ContentConflictDetected",
-        /* 19 */ "ConflictReviewAssigned",
-        /* 20 */ "ConflictReviewEscalated",
-        /* 21 */ "BridgeUsed",
-        /* 22 */ "ConflictUnresolved",
-        /* 23 */ "HistoryImported",
-        /* 24 */ "QuorumUnlockAttempted",
-        /* 25 */ "PasswordUnlockAttempted",
-        /* 26 */ "ExpiredAccessAttempt",
-        /* 27 */ "GateLinked",
-        /* 28 */ "ShareLinkCreated",
-        /* 29 */ "ShareLinkRedeemed",
-        /* 30 */ "ShareLinkRevoked",
-        /* 31 */ "ExpiryScheduled",
-        /* 32 */ "FileRenamed",
-        /* 33 */ "RevisionFinalized",
-        /* 34 */ "ConflictResolved",
-        /* 35 */ "MergeRejected",
-        /* 36 */ "RevisionCheckedOut",
-        /* 37 */ "VerificationRun",
-        /* 38 */ "HistoryExported",
-        /* 39 */ "FileRequested",
-        /* 40 */ "ChangeRequested",
-        /* 41 */ "RequestAnswered",
-        /* 42 */ "LetterQueued",
-        /* 43 */ "LetterSent",
-        /* 44 */ "LetterDropped",
-        /* 45 */ "LetterRefused",
-        /* 46 */ "LetterReceived",
-        /* 47 */ "LetterOpened",
-        /* 48 */ "ErrorReported", /* KQ-12, ABI 3 */
+        "TrackingStarted",
+        "EditCheckedIn",
+        "RevisionSigned",
+        "CountersignatureAdded",
+        "PolicyDecision",
+        "ShareAttempted",
+        "ShareDelivered",
+        "FileExpired",
+        "ContentDestroyed",
+        "TamperDetected",
+        "AutoMergeAttempted",
+        "AutoMergeFastForward",
+        "AutoMergeEquivalent",
+        "AutoMergeClean",
+        "AutoMergeBlocked",
+        "AutoMergeRequiresHuman",
+        "HistoryForkDetected",
+        "ContentConflictDetected",
+        "ConflictReviewAssigned",
+        "ConflictReviewEscalated",
+        "BridgeUsed",
+        "ConflictUnresolved",
+        "HistoryImported",
+        "QuorumUnlockAttempted",
+        "PasswordUnlockAttempted",
+        "ExpiredAccessAttempt",
+        "GateLinked",
+        "ShareLinkCreated",
+        "ShareLinkRedeemed",
+        "ShareLinkRevoked",
+        "ExpiryScheduled",
+        "FileRenamed",
+        "RevisionFinalized",
+        "ConflictResolved",
+        "MergeRejected",
+        "RevisionCheckedOut",
+        "VerificationRun",
+        "HistoryExported",
+        "FileRequested",
+        "ChangeRequested",
+        "RequestAnswered",
+        "LetterQueued",
+        "LetterSent",
+        "LetterDropped",
+        "LetterRefused",
+        "LetterReceived",
+        "LetterOpened",
+        "ErrorReported", /* KQ-12, ABI 3 */
     };
     static const char *const outcomes[] = {"Success", "Failure", "Denied", "Info"};
     const size_t n_events = sizeof events / sizeof events[0];
@@ -652,7 +594,6 @@ static int test_event_and_outcome_names_pinned(void) {
     for (c = 1; c <= n_outcomes; c++)
         ASSERT(strcmp(fl_kq_cp_outcome_name((uint8_t)c), outcomes[c - 1u]) == 0);
 
-    /* Every code outside the table falls back to "?" (never NULL, never an out-of-bounds read). */
     ASSERT(strcmp(fl_kq_cp_event_name(0), "?") == 0);
     for (c = (unsigned)n_events + 1u; c <= 255u; c++)
         ASSERT(strcmp(fl_kq_cp_event_name((uint8_t)c), "?") == 0);
@@ -683,8 +624,6 @@ static int walk_cb(const char *line, size_t n, void *ctx) {
     return w->stop_at != 0u && w->seen == w->stop_at;
 }
 
-/* The line walk: no lines, one line, a trailing fragment without a newline (skipped, not a
- * line), many lines in order, and a callback that stops the walk. */
 static int test_for_each_event_walks_lines(void) {
     static const char one[] = "a\tb\n";
     static const char partial[] = "x\ny\nfrag";
@@ -734,8 +673,7 @@ static int test_for_each_event_walks_lines(void) {
     return 0;
 }
 
-/* A newer copy is refused until the editor's supervisor has countersigned it: Steve keeps the copy
- * he has, and the same revision goes through once the permit is in the container. */
+/* A newer copy is refused until the editor's supervisor has countersigned it; the same revision goes through once permitted. */
 static int test_newer_without_the_permit_is_refused(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -768,9 +706,7 @@ static int test_newer_without_the_permit_is_refused(void) {
     return 0;
 }
 
-/* Once a file has been accepted, a newer delivery is checked against the accepted container
- * beside it. Without that exact container (missing, damaged, or another file's) the check
- * cannot be made, and the delivery is refused rather than assumed new. */
+/* A newer delivery is checked against the accepted container beside it; without that container it is refused. */
 static int test_newer_needs_the_accepted_container(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -799,21 +735,17 @@ static int test_newer_needs_the_accepted_container(void) {
     fl_kq_encoded_free(&enc);
 
     ASSERT(prepare_permitted(&w, src, "v2\n", T2, &enc, sig) == 0);
-    /* Missing. */
     ASSERT(rename(side, kept) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_IO);
-    /* Damaged. */
-    ASSERT(write_text(side, "not a KQTF container") == 0);
+    ASSERT(kq_test_write_text(side, "not a KQTF container") == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_INVALID);
-    /* A valid container, but not the one accepted for this file. */
     ASSERT(rename(side2, side) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_INVALID);
     ASSERT(read_text(dest, got, sizeof got) == 0 && strcmp(got, "v1\n") == 0);
 
-    /* The accepted container back in place: the same delivery is now newer. */
     ASSERT(rename(kept, side) == 0);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, mya_pub, STEVE, w.steve_box, &enc.letter, &enc.offer, sig,
                            dest) == FL_KQ_CP_OK);
@@ -848,10 +780,7 @@ static int test_only_plain_file_names_are_safe(void) {
 }
 
 
-/* ---- the storage table (kq_storage.h) ------------------------------------ */
 
-/* A table that forwards to the default and counts each call, so a test can see that every
- * checkpoint read and write goes through it. */
 typedef struct {
     int read_file, write_atomic, exists, dir_open, dir_close, dir_read, dir_exists, dir_read_tail,
         dir_commit;
@@ -928,7 +857,6 @@ static void use_default(void) {
     (void)fl_kq_cp_set_storage(NULL);
 }
 
-/* Every checkpoint that touches a file does it through the installed table. */
 static int test_checkpoints_use_the_storage_table(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -940,13 +868,12 @@ static int test_checkpoints_use_the_storage_table(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "routed.txt");
     path_in(dest, sizeof dest, "routed-copy.txt");
-    ASSERT(write_text(src, "routed\n") == 0);
+    ASSERT(kq_test_write_text(src, "routed\n") == 0);
 
     use_counting();
     ASSERT(fl_kq_cp_storage() == &k_counting);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
-    /* the file, whether a container is there, and the new container */
     ASSERT(s_counts.read_file == 1 && s_counts.exists == 1 && s_counts.write_atomic == 1);
     ASSERT(fl_kq_cp_head(src, head) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK);
@@ -956,8 +883,6 @@ static int test_checkpoints_use_the_storage_table(void) {
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
                            &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
-    /* one held directory, opened and closed once; the leaf and its seen record looked up;
-     * the seen record read from its tail; the three files replaced together */
     ASSERT(s_counts.dir_open == 1 && s_counts.dir_close == 1);
     ASSERT(s_counts.dir_exists >= 1 && s_counts.dir_read_tail == 1);
     ASSERT(s_counts.dir_commit == 1);
@@ -969,7 +894,6 @@ static int test_checkpoints_use_the_storage_table(void) {
     return 0;
 }
 
-/* base + suffix without a truncating snprintf into a PATH_MAX buffer. */
 static int with_suffix(char *out, size_t cap, const char *base, const char *suffix) {
     size_t n = strlen(base), m = strlen(suffix);
 
@@ -990,7 +914,7 @@ static int test_a_refused_commit_installs_nothing(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "refused.txt");
     path_in(dest, sizeof dest, "refused-copy.txt");
-    ASSERT(write_text(src, "refused\n") == 0);
+    ASSERT(kq_test_write_text(src, "refused\n") == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
@@ -1005,7 +929,6 @@ static int test_a_refused_commit_installs_nothing(void) {
     ASSERT(with_suffix(sidecar_path, sizeof sidecar_path, dest, FL_KQ_SEEN_SUFFIX) == 0);
     ASSERT(access(sidecar_path, F_OK) != 0);
 
-    /* the table allows it again and the same delivery then lands (nothing was half-installed) */
     s_counts.fail_commit = 0;
     ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
                            &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
@@ -1015,8 +938,7 @@ static int test_a_refused_commit_installs_nothing(void) {
     return 0;
 }
 
-/* A container that cannot be looked at is not "absent": encode fails instead of starting a new
- * history over it. */
+/* A container that cannot be looked at is not absent: encode fails instead of starting a new history. */
 static int test_an_unreadable_container_is_not_replaced(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -1024,7 +946,7 @@ static int test_an_unreadable_container_is_not_replaced(void) {
 
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "unlooked.txt");
-    ASSERT(write_text(src, "unlooked\n") == 0);
+    ASSERT(kq_test_write_text(src, "unlooked\n") == 0);
     use_counting();
     s_counts.fail_exists = 1;
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
@@ -1035,8 +957,7 @@ static int test_an_unreadable_container_is_not_replaced(void) {
     return 0;
 }
 
-/* The decode that is given a held directory writes into that directory, never into whatever
- * the path names now, and leaves the caller's handle open. */
+/* A decode given a held directory writes into that directory, never wherever the path names now. */
 static int test_decode_uses_the_held_directory(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -1049,14 +970,13 @@ static int test_decode_uses_the_held_directory(void) {
     path_in(src, sizeof src, "held.txt");
     path_in(land, sizeof land, "land-held");
     path_in(moved, sizeof moved, "land-held-moved");
-    ASSERT(write_text(src, "held\n") == 0);
+    ASSERT(kq_test_write_text(src, "held\n") == 0);
     ASSERT(mkdir(land, 0700) == 0);
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
 
     ASSERT(fl_kq_cp_storage()->dir_open(NULL, land, &held) == 0);
-    /* swap the directory for an impostor after it was held (and "checked") */
     ASSERT(rename(land, moved) == 0);
     ASSERT(mkdir(land, 0700) == 0);
 
@@ -1067,11 +987,9 @@ static int test_decode_uses_the_held_directory(void) {
     ASSERT(read_text(landed, got, sizeof got) == 0 && strcmp(got, "held\n") == 0);
     ASSERT(fl_fs_join_path(landed, sizeof landed, land, "copy.txt") == 0);
     ASSERT(access(landed, F_OK) != 0);
-    /* the caller's handle is still theirs: open, and the checkpoint did not close it */
     ASSERT(held.fd < 0 || fstat(held.fd, &st) == 0);
     fl_kq_cp_storage()->dir_close(NULL, &held);
 
-    /* bad arguments are refused before anything is touched */
     ASSERT(fl_kq_cp_decode_in(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE,
                               w.steve_box, &enc.letter, &enc.offer, sig, NULL,
                               "copy.txt") == FL_KQ_CP_INVALID);
@@ -1086,7 +1004,6 @@ static int test_decode_uses_the_held_directory(void) {
 }
 
 
-/* ---- the native shell's table: the facade ----------------------------------- */
 
 static int s_saved;
 
@@ -1111,9 +1028,7 @@ static int allow_any(fs_access_policy_t *pol, const char *user, const char *path
 
 static const fs_access_policy_vtable_t k_deny_seen_vt = {allow_any, deny_seen_write, allow_any};
 
-/* With the facade installed every checkpoint read and write is the facade's: the save event
- * follows each file of a delivery, and a policy that refuses one member of the decode's
- * commit stops all three before any is staged. */
+/* With the facade installed, every checkpoint read and write goes through it: one save event per file. */
 static int test_checkpoints_through_the_facade(void) {
     world_t w;
     fl_kq_encoded_t enc;
@@ -1127,7 +1042,7 @@ static int test_checkpoints_through_the_facade(void) {
     ASSERT(setup(&w) == 0);
     path_in(src, sizeof src, "face.txt");
     path_in(dest, sizeof dest, "face-copy.txt");
-    ASSERT(write_text(src, "through the facade\n") == 0);
+    ASSERT(kq_test_write_text(src, "through the facade\n") == 0);
     fs_events_init();
     fs_events_subscribe(FS_EV_FILE_SAVED, on_saved, NULL);
     ASSERT((prov = fs_local_provider_create()) != NULL);
@@ -1136,14 +1051,12 @@ static int test_checkpoints_through_the_facade(void) {
     ASSERT(fl_kq_storage_facade(NULL, &table) == NULL);
     (void)fl_kq_cp_set_storage(&table);
 
-    /* encode: the container is written by the facade (one save event) */
     s_saved = 0;
     ASSERT(fl_kq_cp_encode(&w.db, MYA, w.mya_sign, STEVE, fl_user_db_box_public(&w.db, STEVE),
                            src, T1, &enc) == FL_KQ_CP_OK);
     ASSERT(s_saved == 1);
     ASSERT(fl_kq_cp_cosign(&enc.offer, STEVE, w.steve_sign, sig) == FL_KQ_CP_OK);
 
-    /* a policy that refuses the seen record: nothing is staged, no event, no file */
     fm_service_set_policy(svc, &deny);
     s_saved = 0;
     ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
@@ -1152,7 +1065,6 @@ static int test_checkpoints_through_the_facade(void) {
     ASSERT(snprintf(extra, sizeof extra, "%s.part", dest) < (int)sizeof extra &&
            access(extra, F_OK) != 0);
 
-    /* allowed: the three files land together, one event each */
     fm_service_set_policy(svc, NULL);
     ASSERT(fl_kq_cp_decode(&w.db, MYA, fl_user_db_signing_public(&w.db, MYA), STEVE, w.steve_box,
                            &enc.letter, &enc.offer, sig, dest) == FL_KQ_CP_OK);
@@ -1164,6 +1076,189 @@ static int test_checkpoints_through_the_facade(void) {
     fm_service_destroy(svc);
     fs_provider_destroy(prov);
     fs_events_shutdown();
+    teardown(&w);
+    return 0;
+}
+
+static int make_forked(world_t *w, const char *path) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    fl_kq_buf_t base = {0}, one = {0}, both = {0};
+    uint8_t id[16], rev[32];
+    int rc = -1;
+
+    memset(id, 0x46, sizeof id);
+    if (drv->file_new(id, "forked.txt", MYA, &base) == KQ_FILE_OK &&
+        drv->check_in(&base, MYA, T1, (const uint8_t *)"v1\n", 3, w->mya_sign, &one, rev) == KQ_FILE_OK &&
+        kq_test_fork(drv, &one, MYA, w->mya_sign, T2, T2, T2, &both) == 0 && kq_test_put_container(path, &both) == 0)
+        rc = 0;
+    fl_kq_buf_free(&base);
+    fl_kq_buf_free(&one);
+    fl_kq_buf_free(&both);
+    return rc;
+}
+
+/* Only a fork names FORKED; an empty, missing, or unfit buffer names nobody. */
+static int test_head_author_names_the_single_head(void) {
+    const fl_kq_driver_t *drv;
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t empty = {0};
+    char src[PATH_MAX], forked[PATH_MAX], bare[PATH_MAX], missing[PATH_MAX], who[96];
+    uint8_t sig[64], id[16];
+
+    ASSERT(setup(&w) == 0);
+    drv = fl_kq_driver_get();
+    path_in(src, sizeof src, "authored.txt");
+    path_in(forked, sizeof forked, "forked.txt");
+    path_in(bare, sizeof bare, "bare.txt");
+    path_in(missing, sizeof missing, "never-tracked.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    fl_kq_encoded_free(&enc);
+    ASSERT(fl_kq_cp_head_author(src, who, sizeof who) == FL_KQ_CP_OK && strcmp(who, MYA) == 0);
+    ASSERT(fl_kq_cp_head_author(src, who, 4) == FL_KQ_CP_INVALID && who[0] == '\0');
+
+    ASSERT(make_forked(&w, forked) == 0);
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(forked, who, sizeof who) == FL_KQ_CP_FORKED && who[0] == '\0');
+
+    memset(id, 0x45, sizeof id);
+    ASSERT(drv->file_new(id, "bare.txt", MYA, &empty) == KQ_FILE_OK && kq_test_put_container(bare, &empty) == 0);
+    fl_kq_buf_free(&empty);
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(bare, who, sizeof who) == FL_KQ_CP_INVALID && who[0] == '\0');
+    strcpy(who, "stale");
+    ASSERT(fl_kq_cp_head_author(missing, who, sizeof who) == FL_KQ_CP_IO && who[0] == '\0');
+    teardown(&w);
+    return 0;
+}
+
+/* A refused receive's KQER is verified only for that artifact and reporter; injecting adds one ErrorReported event. */
+static int test_refusal_report_is_verified_and_injected(void) {
+    world_t w;
+    fl_user_db_keydir_t keys;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t before = {0}, after = {0};
+    kq_file_offer_t other;
+    fl_kq_dir_t held;
+    char src[PATH_MAX], report[PATH_MAX];
+    uint8_t sig[64], ref[32], other_ref[32];
+
+    ASSERT(setup(&w) == 0);
+    fl_user_db_keydir_init(&keys, &w.db);
+    path_in(src, sizeof src, "refused.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    ASSERT(fl_kq_cp_offer_ref(&enc.offer, ref) == FL_RESULT_OK);
+    other = enc.offer;
+    other.topology_generation ^= 1u;
+    ASSERT(fl_kq_cp_offer_ref(&other, other_ref) == FL_RESULT_OK && memcmp(ref, other_ref, 32) != 0);
+
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, s_dir, &held) == 0);
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
+    ASSERT(access(report, F_OK) == 0);
+    ASSERT(strlen(report) == strlen(s_dir) + 1 + 64 + strlen(FL_KQ_REPORT_SUFFIX));
+    ASSERT(fl_kq_cp_report_write_in(999, 5, 6, other_ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_INVALID);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
+    ASSERT(fl_kq_cp_report_path(s_dir, other_ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(fl_kq_cp_report_path(s_dir, ref, report, sizeof report) == 0);
+
+    ASSERT(fl_kq_cp_history(src, &before) == FL_KQ_CP_OK && count(&before, "\t48\t") == 0);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, STEVE, report, other_ref, src) == FL_KQ_CP_BAD_SIGNATURE);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, MYA, report, ref, src) == FL_KQ_CP_BAD_SIGNATURE);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, "Root.Nobody", report, ref, src) == FL_KQ_CP_NO_KEY);
+    ASSERT(fl_kq_cp_history(src, &after) == FL_KQ_CP_OK && after.len == before.len);
+    fl_kq_buf_free(&after);
+    ASSERT(fl_kq_cp_inject_report_with(&keys.base, STEVE, report, ref, src) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_history(src, &after) == FL_KQ_CP_OK);
+    ASSERT(count(&after, "\t48\t") == 1 && count(&after, "\n") == count(&before, "\n") + 1);
+    ASSERT(strcmp(fl_kq_cp_event_name(48), "ErrorReported") == 0);
+    fl_kq_buf_free(&before);
+    fl_kq_buf_free(&after);
+    fl_kq_encoded_free(&enc);
+    teardown(&w);
+    return 0;
+}
+
+/* Offer wire layout: file id 16, revision 32, commitment 32, identity 16, signature 64, generation u64 BE, policy hash 32 = 200 bytes. */
+static int test_offer_wire_layout_is_fixed(void) {
+    kq_file_offer_t o;
+    uint8_t want[200], got[FL_KQ_OFFER_WIRE_LEN];
+    size_t i;
+
+    ASSERT(FL_KQ_OFFER_WIRE_LEN == 200u);
+    memset(&o, 0, sizeof o);
+    for (i = 0; i < 16; i++)
+        o.file_id[i] = (uint8_t)(0x10 + i);
+    for (i = 0; i < 32; i++) {
+        o.revision_id[i] = (uint8_t)(0x40 + i);
+        o.content_commitment[i] = (uint8_t)(0x80 + i);
+        o.policy_hash[i] = (uint8_t)(0xC0 + i);
+    }
+    for (i = 0; i < 16; i++)
+        o.author_identity[i] = (uint8_t)(0xA0 + i);
+    for (i = 0; i < 64; i++)
+        o.author_signature[i] = (uint8_t)i;
+    o.topology_generation = 0x0102030405060708ull;
+    for (i = 0; i < 16; i++)
+        want[i] = (uint8_t)(0x10 + i);
+    for (i = 0; i < 32; i++)
+        want[16 + i] = (uint8_t)(0x40 + i);
+    for (i = 0; i < 32; i++)
+        want[48 + i] = (uint8_t)(0x80 + i);
+    for (i = 0; i < 16; i++)
+        want[80 + i] = (uint8_t)(0xA0 + i);
+    for (i = 0; i < 64; i++)
+        want[96 + i] = (uint8_t)i;
+    for (i = 0; i < 8; i++)
+        want[160 + i] = (uint8_t)(i + 1);
+    for (i = 0; i < 32; i++)
+        want[168 + i] = (uint8_t)(0xC0 + i);
+    memset(got, 0xEE, sizeof got);
+    fl_kq_cp_offer_encode(&o, got);
+    ASSERT(memcmp(got, want, sizeof want) == 0);
+    return 0;
+}
+
+/* A report lands in the held directory even when its path was swapped; past FL_KQ_REPORT_CAP nothing more is written. */
+static int test_reports_are_held_and_capped(void) {
+    world_t w;
+    fl_kq_dir_t held;
+    char land[PATH_MAX], moved[PATH_MAX], report[PATH_MAX], ledger[PATH_MAX];
+    uint8_t ref[32];
+    struct stat st, again;
+    unsigned i;
+
+    ASSERT(setup(&w) == 0);
+    path_in(land, sizeof land, "land-report");
+    path_in(moved, sizeof moved, "land-report-moved");
+    ASSERT(mkdir(land, 0700) == 0);
+    ASSERT(fl_kq_cp_storage()->dir_open(NULL, land, &held) == 0);
+    ASSERT(rename(land, moved) == 0);
+    ASSERT(mkdir(land, 0700) == 0);
+
+    memset(ref, 0, sizeof ref);
+    for (i = 0; i < FL_KQ_REPORT_CAP; i++) {
+        ref[0] = (uint8_t)i;
+        ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_OK);
+    }
+    ref[0] = 0;
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && access(report, F_OK) == 0);
+    ASSERT(fl_kq_cp_report_path(land, ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(fl_fs_join_path(ledger, sizeof ledger, moved, FL_KQ_REPORT_LEDGER) == 0);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && stat(report, &st) == 0);
+    ASSERT(fl_kq_cp_report_write_in(2, 2, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_EXISTS);
+    ASSERT(stat(report, &again) == 0 && again.st_ino == st.st_ino && again.st_size == st.st_size);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+
+    ref[0] = 0xFF;
+    ref[1] = 0xFF;
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, &held) == FL_KQ_CP_TOO_LARGE);
+    ASSERT(fl_kq_cp_report_path(moved, ref, report, sizeof report) == 0 && access(report, F_OK) != 0);
+    ASSERT(stat(ledger, &st) == 0 && (size_t)st.st_size == FL_KQ_REPORT_CAP * 32u);
+    fl_kq_cp_storage()->dir_close(NULL, &held);
+    ASSERT(fl_kq_cp_report_write_in(8, 5, 6, ref, STEVE, T2, w.steve_sign, NULL) == FL_KQ_CP_INVALID);
     teardown(&w);
     return 0;
 }
@@ -1210,8 +1305,12 @@ int main(void) {
     RUN(test_an_unreadable_container_is_not_replaced);
     RUN(test_decode_uses_the_held_directory);
     RUN(test_checkpoints_through_the_facade);
+    RUN(test_head_author_names_the_single_head);
+    RUN(test_refusal_report_is_verified_and_injected);
+    RUN(test_offer_wire_layout_is_fixed);
+    RUN(test_reports_are_held_and_capped);
     RUN(test_reasons_and_results);
-    rmrf(s_dir);
+    kq_test_rmrf(s_dir);
     if (rc == 0)
         printf("All KeyQuorum checkpoint tests passed.\n");
     return rc;

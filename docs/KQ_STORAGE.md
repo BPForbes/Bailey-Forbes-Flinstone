@@ -85,6 +85,7 @@ the user's own to 0700. `su -` and `sudo -i` take the login home from the passwo
 |--------|-------|
 | `userland/command/cmd_server_file.c` (`kq_use_storage`, once per `server file` command) | facade, when the shell's file manager service exists |
 | the browser lab (`lab_kq.c`) and the unit tests | default |
+| `tests/test_kq_mem_storage.c`, and the freestanding image when its checkpoints are linked (FL-02 stage 2) | memory (`kq_mem_storage.c`) |
 
 `fl_kq_cp_set_storage(table)` installs a table (NULL restores the default) and returns the one it
 replaced. The table is process-wide, like the KeyQuorum driver; set it at start, not while a
@@ -104,7 +105,8 @@ checkpoint runs.
    installed.
 2. Pass the existing results contract above. Return `-1` rather than guessing when you cannot tell.
 3. Install it with `fl_kq_cp_set_storage`. Test it by running `tests/test_kq_checkpoint.c` against it:
-   the counting table there shows which calls a delivery makes.
+   the counting table there shows which calls a delivery makes. `tests/test_kq_mem_storage.c` is the shorter form for the memory table: the
+   table's own rules, then encode, co-sign, held-directory decode, a commit that cannot complete, history and signing on it.
 4. If it is for the lab, it must not pull the facade or the native session code into the wasm build.
 
 ## Tests that pin this
@@ -124,4 +126,36 @@ checkpoint runs.
 - Other file code (the delivery store, the catalog, the lab's reader) uses the placement layer directly
   and is not behind this table.
 - The browser lab uses the default table; the facade table is native only.
+- The memory table (`fl_kq_storage_memory()`, `kq_mem_storage.h`) is bounded (32 files, 192-byte paths, 4 MiB; the byte limit is meant to be
+  measured against the image's RAM), keeps everything in `MEM_DOMAIN_FS` memory and loses it at reset, has no locking (checkpoints run under the
+  shell's lock), and wipes freed bytes. `dir_commit` stages every new buffer before it swaps any, so a failure installs nothing.
 - The restore-failure path of `fl_fs_commit_files` has no test that forces a rename to fail.
+
+## Landing names and commits
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+The placement layer (`kernel/core/vfs/server_shared_fs.[ch]`) is described in
+[ARCH.md](ARCH.md#server-shared-file-placement). The checkpoints depend on these rules:
+
+| Name | Meaning |
+|------|---------|
+| `.part` | staging file a write goes through before its rename (`FL_FS_PART_SUFFIX`) |
+| `.kqbak` | backup of a file a commit replaces (`FL_FS_BACKUP_SUFFIX`) |
+| `.meta` | sidecar of a share payload (`FL_SERVER_SHARED_META_SUFFIX`) |
+| `.kqtf`, `.kqseen`, `.kqer` | the tracked container, the accepted-pairs record and an error report |
+
+`fl_server_shared_name_is_reserved` refuses every one of these names, in any ASCII case, as a delivery's
+landing name. The names are one list, shared by the share landing and the checkpoints.
+
+- `fl_fs_commit_files` takes 1 to 4 files (`FL_FS_COMMIT_FILES_MAX`). Each name is plain and at most
+  `FL_FS_COMMIT_NAME_MAX` bytes (255 minus 11, so `.kqbak.part` fits). No two names may be siblings of one
+  another, so one file's staging name cannot be another's payload.
+- The commit stages every `.part` first. A stale `.kqbak` is removed before each file is backed up, so a
+  leftover from an earlier run never blocks it. A file that is replaced is kept as `.kqbak`, by hard link or
+  by copy. The parts are then renamed into place. If a step fails, the files already replaced are put back and
+  the parts are removed.
+- An existence check that cannot tell (`fl_fs_exists_in` returns -1) stops the commit before anything is
+  replaced. A container that cannot be read is never treated as absent.
+- Where the contained calls exist, a landing directory without a file descriptor is refused: `EBADF` for an
+  absent descriptor, and the path is never a silent fallback.

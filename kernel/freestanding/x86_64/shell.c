@@ -17,6 +17,7 @@
 #define MODE_SUDO_CMD 5
 #define MODE_SUDO_I 6
 #define MODE_PASSWD 7
+#define MODE_SWITCHUSER 8
 
 struct perspective {
     int valid;
@@ -248,11 +249,11 @@ static void perspective_load(int user_idx, int session)
     str_copy(s_pending[session], view->pending, sizeof(s_pending[session]));
 }
 
-static void perspective_switch_user(int user_idx, int session)
+/* The identity has already changed, so the caller names the outgoing account whose display is saved. */
+static void perspective_switch_user(int from_idx, int user_idx, int session)
 {
-    int current = active_user_index();
-    if (current >= 0)
-        perspective_save(current, session);
+    if (from_idx >= 0)
+        perspective_save(from_idx, session);
     perspective_load(user_idx, session);
 }
 
@@ -277,11 +278,13 @@ static void session_go(int session)
 
 static int switchuser_to(int session, const char *name)
 {
+    int before = fl_fs_identity_user_index(session);
     int target;
-    if (!fl_fs_identity_switchuser(session, name))
+    if (!fl_fs_identity_switchuser(session, name, (const char *)0))
         return 0;
     target = fl_fs_identity_user_index(session);
-    perspective_switch_user(target, session);
+    if (target != before)
+        perspective_switch_user(before, target, session);
     announce_switchuser();
     return 1;
 }
@@ -304,16 +307,24 @@ static void finish_password(int session, const char *password)
         ok = fl_fs_identity_sudo(session, password);
     else if (mode == MODE_PASSWD)
         ok = fl_fs_identity_passwd(session, s_pending[session], password);
+    else if (mode == MODE_SWITCHUSER)
+        ok = fl_fs_identity_switchuser(session, s_pending[session], password);
     if (ok && mode == MODE_SUDO_I)
-        ok = fl_fs_identity_switchuser(session, "Root");
+        ok = fl_fs_identity_enter_root(session);
     emit(ok ? "ok\r\n" : "authentication failed\r\n");
     if (ok && fl_fs_identity_user_index(session) != before)
-        perspective_switch_user(fl_fs_identity_user_index(session), session);
+        perspective_switch_user(before, fl_fs_identity_user_index(session), session);
     if (ok && mode == MODE_SUDO_CMD && s_pending[session][0]) {
         char held[LINE];
         str_copy(held, s_pending[session], sizeof(held));
         s_pending[session][0] = 0;
         run_command(session, held);
+        return;
+    }
+    if (mode == MODE_SWITCHUSER) {
+        s_pending[session][0] = 0;
+        if (ok)
+            announce_switchuser();
         return;
     }
     announce_session();
@@ -369,7 +380,7 @@ static void run_command(int session, char *line)
         int before = fl_fs_identity_user_index(session);
         fl_fs_identity_logout(session);
         if (fl_fs_identity_user_index(session) != before)
-            perspective_switch_user(fl_fs_identity_user_index(session), session);
+            perspective_switch_user(before, fl_fs_identity_user_index(session), session);
         announce_session();
         return;
     }
@@ -379,8 +390,15 @@ static void run_command(int session, char *line)
             emit("usage: switchuser <user>\r\n");
             return;
         }
-        if (!switchuser_to(session, name))
+        if (!fl_fs_identity_has_user(name)) {
             emit("unknown user\r\n");
+            return;
+        }
+        /* The session's own account is free; another one asks for its password. */
+        if (switchuser_to(session, name))
+            return;
+        str_copy(s_pending[session], name, sizeof(s_pending[session]));
+        s_mode[session] = MODE_SWITCHUSER;
         return;
     }
     if (str_eq(verb, "login") || str_eq(verb, "su") || str_eq(verb, "useradd")) {

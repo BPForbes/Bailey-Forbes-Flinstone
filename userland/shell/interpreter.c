@@ -21,6 +21,17 @@
 #include <signal.h>
 #include <pthread.h>
 
+/* Inside the sudo window every line is signed before any builtin handles it; sudo itself signs its own. */
+static void sign_elevated_line(const char *line, const char *buffer) {
+    char first[512];
+    char *argv[2];
+
+    snprintf(first, sizeof first, "%s", buffer);
+    if (fl_shell_tokenize_line(first, argv, 2) < 1 || strcmp(argv[0], "sudo") == 0)
+        return;
+    cmd_sudo_sign_elevated(line);
+}
+
 /*
  * execute_command_str:
  *   Parses and executes the command provided in 'line'.
@@ -39,6 +50,7 @@ int execute_command_str(const char *line) {
     char buffer[512];
     strncpy(buffer, line, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
+    sign_elevated_line(line, buffer);
     char *tokenBuf = strdup(buffer);
     if (!tokenBuf)
         goto finish;
@@ -94,7 +106,6 @@ int execute_command_str(const char *line) {
         free(cmdLine);
         goto finish;
     }
-
     if (strcmp(args[0], "sudo") == 0) {
         /* -i / -k: no password gate; cmd_sudo_run handles revoke and root login. */
         if (argc >= 2 && strcmp(args[1], "-k") == 0) {
@@ -112,7 +123,7 @@ int execute_command_str(const char *line) {
             free(cmdLine);
             goto finish;
         }
-        if (cmd_sudo_require_auth() != 0) {
+        if (cmd_sudo_require_auth() != 0 || cmd_sudo_sign_action(line) != 0) {
             free(cmdLine);
             out_rc = 1;
             goto finish;

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "bootinfo.h"
 #include "identity.h"
 #include "labdisk.h"
 #include "labnet.h"
@@ -11,6 +12,10 @@
 #include "vga.h"
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
+#include "kq_heap.h"
+#ifndef FL_SECFEAT
+void fl_fs_kq_bind_identity(void);
+#endif
 #endif
 
 struct idt_gate {
@@ -27,21 +32,27 @@ struct idtr {
 
 static struct idt_gate idt[256];
 
+/* The image's own bounds, from linker.ld. */
+extern char __kernel_start[], __bss_start[], __bss_end[];
+
+__attribute__((noreturn)) static void boot_fail(const char *marker)
+{
+    fl_fs_serial_puts(marker);
+    for (;;)
+        __asm__ volatile("cli; hlt");
+}
+
 __attribute__((interrupt)) static void early_exception(void *frame)
 {
     (void)frame;
-    fl_fs_serial_puts("FLINTSTONE_EARLY_EXCEPTION\r\n");
-    for (;;)
-        __asm__ volatile("cli; hlt");
+    boot_fail("FLINTSTONE_EARLY_EXCEPTION\r\n");
 }
 
 __attribute__((interrupt)) static void early_exception_with_error(void *frame, uintptr_t error)
 {
     (void)frame;
     (void)error;
-    fl_fs_serial_puts("FLINTSTONE_EARLY_EXCEPTION_WITH_ERROR\r\n");
-    for (;;)
-        __asm__ volatile("cli; hlt");
+    boot_fail("FLINTSTONE_EARLY_EXCEPTION_WITH_ERROR\r\n");
 }
 
 __attribute__((interrupt)) static void irq_pit(void *frame)
@@ -85,14 +96,37 @@ static void idt_init(void)
     __asm__ volatile("lidt %0" : : "m"(descriptor));
 }
 
-void fl_kernel_main(void)
+void fl_kernel_main(const fl_boot_info_t *boot_info)
 {
     fl_fs_serial_init();
+    /* Before anything else starts: the loader's handoff must describe this image and a whole map. */
+    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__bss_start,
+                             (uintptr_t)__bss_end) != FL_BOOTMAP_OK)
+        boot_fail("FLINTSTONE_BOOT_FAIL bootinfo\r\n");
+#ifdef FL_WITH_KEYQUORUM
+    {
+        /* The KeyQuorum heap: the largest E820 span above 1 MiB, inside the identity map and clear
+         * of every reserved range. Too little memory stops the boot here; there is no fallback. */
+        const fl_bootmap_limits_t limits = { 0x100000u, boot_info->mapped_end, FL_KQ_HEAP_MIN, 4096u };
+        uint64_t base, size;
+
+        if (fl_bootmap_select_arena((const fl_e820_entry_t *)(uintptr_t)boot_info->e820_addr,
+                                    boot_info->e820_count, boot_info->e820_capacity, boot_info->reserved,
+                                    boot_info->reserved_count, &limits, &base, &size) != FL_BOOTMAP_OK ||
+            fl_kq_heap_init(base, size) != 0)
+            boot_fail("FLINTSTONE_BOOT_FAIL memory\r\n");
+    }
+#endif
     idt_init();
     fl_fs_vga_init();
     fl_fs_pic_init();
     fl_fs_pit_init();
     fl_fs_kbd_init();
+#if defined(FL_WITH_KEYQUORUM) && !defined(FL_SECFEAT)
+    /* Only with a driver whose ABI probe passes: otherwise the demo accounts stay as they are. */
+    if (fl_kq_driver_get())
+        fl_fs_kq_bind_identity();
+#endif
     fl_fs_identity_init();
     fl_fs_ramfs_init();
     fl_fs_labdisk_init();

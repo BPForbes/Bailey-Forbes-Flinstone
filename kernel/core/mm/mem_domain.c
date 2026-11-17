@@ -1,16 +1,4 @@
-/**
- * Memory domain allocator.
- *
- * Host builds: thin wrappers over libc malloc/free — unchanged behaviour.
- *
- * DRIVERS_BAREMETAL builds: each domain is backed by a dedicated static BSS
- * arena.  Allocations use a bump pointer; freed blocks are returned to a
- * per-domain free list (first-fit).  Every allocation is preceded by a
- * size_t header so free() and realloc() know the block size without an
- * external table.
- *
- * Alignment: all allocations are rounded to ARENA_ALIGN (8) bytes.
- */
+/* Per-domain bump arenas (DRIVERS_BAREMETAL) with first-fit free lists; size_t header per block. */
 #include "mem_domain.h"
 #include "core/sys/spinlock.h"
 #include "fl/mem_asm.h"
@@ -21,7 +9,6 @@
 #define ARENA_ALIGN   8u
 #define HDR_SIZE      (sizeof(size_t))   /* stored immediately before payload */
 
-/* Arena sizes per domain (tune as needed) */
 #define ARENA_SZ_KERNEL (64u  * 1024u)
 #define ARENA_SZ_DRIVER (64u  * 1024u)
 #define ARENA_SZ_FS     (128u * 1024u)
@@ -58,7 +45,6 @@ static arena_t *arena_for(mem_domain_t domain) {
     return &s_arenas[(int)domain];
 }
 
-/* Check if ptr belongs to the arena. */
 static int arena_owns(const arena_t *a, const void *ptr) {
     uintptr_t addr = (uintptr_t)ptr;
     uintptr_t base = (uintptr_t)a->base;
@@ -75,7 +61,6 @@ static void *mem_domain_alloc_nolock(mem_domain_t domain, size_t size) {
     arena_t *a = arena_for(domain);
     size_t need = align_up(HDR_SIZE + size);
 
-    /* Search free list (first-fit) */
     free_node_t **pp = &a->freelist;
     while (*pp) {
         free_node_t *node = *pp;
@@ -88,7 +73,6 @@ static void *mem_domain_alloc_nolock(mem_domain_t domain, size_t size) {
         pp = &(*pp)->next;
     }
 
-    /* Bump allocate */
     if (a->bump + need <= a->capacity) {
         size_t *hdr = (size_t *)(void *)(a->base + a->bump);
         *hdr = size;
@@ -115,22 +99,17 @@ void *mem_domain_calloc(mem_domain_t domain, size_t nmemb, size_t size) {
     return p;
 }
 
-/* Internal free without locking (caller must hold s_mem_domain_lock). */
 static void mem_domain_free_nolock(mem_domain_t domain, void *ptr) {
     if (!ptr) return;
     arena_t *a = arena_for(domain);
     size_t *hdr = (size_t *)((uint8_t *)ptr - HDR_SIZE);
 
-    /* Ownership validation: ensure the block belongs to this arena before
-     * linking it into the freelist, preventing heap corruption. */
+    /* Validate ownership before linking into the freelist; a foreign block halts. */
     if (!arena_owns(a, hdr)) {
-        /* Panic: attempted to free a block not owned by this domain.
-         * Halt to prevent freelist corruption. */
         for (;;) {}
     }
 
     size_t data_size = *hdr;
-    /* Re-use the block header region as a free_node_t */
     free_node_t *node = (free_node_t *)(void *)hdr;
     node->data_size = data_size;
     node->next = a->freelist;
@@ -189,7 +168,6 @@ void mem_domain_free(mem_domain_t domain, void *ptr) {
 
 #endif /* DRIVERS_BAREMETAL */
 
-/* Buffer ops — always use ASM regardless of mode */
 void mem_domain_copy(void *dst, const void *src, size_t n) {
     asm_mem_copy(dst, src, n);
 }
@@ -204,4 +182,8 @@ void mem_domain_secure_zero(void *ptr, size_t n) {
 
 void mem_domain_fill(void *ptr, unsigned char byte, size_t n) {
     asm_block_fill(ptr, byte, n);
+}
+
+int mem_domain_equal(const void *a, const void *b, size_t n) {
+    return asm_mem_ct_equal(a, b, n);
 }

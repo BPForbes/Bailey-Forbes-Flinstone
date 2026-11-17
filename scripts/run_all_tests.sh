@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# Unified test driver — runs the standard make test_* matrix in one pass.
-# Usage (from repo root):
-#   make test_all
-#   make test_all-quiet
-#   ./scripts/run_all_tests.sh
-#
-# Optional:
-#   FL_TEST_QUICK=1          CI-ish subset (faster smoke)
-#   FL_NETNS_PCAP_OK=1       include test_netns_pcap (sudo/netns)
-#   FL_TEST_INCLUDE_VM_REPLAY=1   test_replay (runs make clean first — last)
-#   FL_TEST_INCLUDE_SHELL_CTRL_C=1   test_shell_ctrl_c (python + shell)
-#   FL_TEST_INCLUDE_NETWORK_BRIDGE_PY=1
-#   USE_ASM_ALLOC=1          use test_alloc_asm instead of test_alloc_libc
-#   SKIP_NETWORK_INTEROP=1   skip check-network-requirements
+# Runs the make test_* matrix. Toggles: FL_TEST_QUICK, FL_NETNS_PCAP_OK, FL_TEST_INCLUDE_*, USE_ASM_ALLOC, SKIP_NETWORK_INTEROP.
+# Run from the repo root (make test_all, or this script).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -97,17 +85,21 @@ run_make "test_userspace_connection" test_userspace_connection
 run_make "test_invariants" test_invariants
 run_make "test_issue222" test_issue222
 run_make "test_audit_log" test_audit_log
+run_make "test_cmd_journal" test_cmd_journal
 run_make "test_fs_jail" test_fs_jail
 run_make "test_heritage" test_heritage
 run_make "test_sqlite_schema" test_sqlite_schema
 run_make "test_fs_helpers" test_fs_helpers
 run_make "test_fs_provider_bytes" test_fs_provider_bytes
+run_make "test_fs_identity" test_fs_identity
+run_make "test_fs_bootmap" test_fs_bootmap
 run_make "test_hex" test_hex
 run_make "test_secret_compare" test_secret_compare
 run_make "test_random" test_random
 run_make "test_kq_checkpoint" test_kq_checkpoint
 run_make "test_kq_delivery" test_kq_delivery
 run_make "test_kq_net" test_kq_net
+run_make "test_kq_history_member" test_kq_history_member
 run_make "test_kq_wire" test_kq_wire
 run_make "test_kq_history_bundle" test_kq_history_bundle
 run_make "test_kq_service" test_kq_service
@@ -189,6 +181,7 @@ run_cmd "gen_version_changelog (CI)" bash -c \
   'gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog'
 run_make "CUnit suite (build)" CHANGELOG_CI=1 BPForbes_Flinstone_Tests
 run_cmd "CUnit suite (run)" ./BPForbes_Flinstone_Tests
+run_make "test_interpreter_sudo_gate" CHANGELOG_CI=1 test_interpreter_sudo_gate
 
 if [[ "${FL_TEST_INCLUDE_VM_REPLAY:-0}" == "1" ]]; then
   run_make "test_replay (make clean inside)" test_replay

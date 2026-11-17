@@ -1,11 +1,6 @@
-/*
- * Account heritage key ids. The rules live in KeyQuorum's Rust crate
- * (third_party/keyquorum/ffi/identity, libkeyquorum_identity.a); these are the
- * thin C names the rest of the shell uses. Return codes map onto fl_result_t
- * as before: invalid input is INVAL, too deep or too long is NOMEM, and the
- * master account has no parent (NOENT).
- */
+/* Account heritage key ids: thin C names over KeyQuorum's Rust crate. Invalid input is INVAL; too deep or long is NOMEM. */
 #include "heritage.h"
+#include "fl/driver/keyquorum.h"
 #include "keyquorum_identity.h"
 #include <stdio.h>
 #include <string.h>
@@ -68,9 +63,15 @@ fl_heritage_relation_t fl_heritage_relation(const char *a, const char *b) {
 }
 
 int fl_heritage_bridge_connects(const char *end_a, const char *end_b, const char *actor, const char *scope) {
+    const fl_kq_driver_t *drv;
+
     if (!end_a || !end_b || !actor || !scope)
         return 0;
-    return kq_bridge_connects(end_a, end_b, actor, scope) != 0;
+    /* No driver or no op does not connect. */
+    drv = fl_kq_driver_get_or_register();
+    if (!drv || !drv->bridge_connects)
+        return 0;
+    return drv->bridge_connects(end_a, end_b, actor, scope) != 0;
 }
 
 const char *fl_heritage_relation_name(fl_heritage_relation_t rel) {

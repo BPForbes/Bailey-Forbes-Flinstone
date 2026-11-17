@@ -1,6 +1,7 @@
 ENTRY(kernel_entry)
 SECTIONS {
   . = 0x10000;
+  __kernel_start = .;
   .text : { *(.text*) }
   .rodata : { *(.rodata*) }
   .data : { *(.data*) }

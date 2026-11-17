@@ -1,23 +1,41 @@
-/**
- * test_heritage.c - account heritage key ids, migration, bridges and account homes
- * (contracts/identity/contract_p2_heritage.h; kernel/core/identity/{heritage,bridge,user_db}.c,
- * kernel/core/vfs/fs_jail.c home checks).
- */
+/* Account heritage: key ids, migration, bridges, account homes and the switch and sudo access factors. */
 #include "heritage.h"
 #include "bridge.h"
+#include "fl/driver/keyquorum.h"
+#include "fl/kq.h"
+#include "fl/hex.h"
 #include "mem_domain.h"
 #include "share_gate.h"
 #include "user_db.h"
 #include "session.h"
+#include "elevation.h"
+#include "timekeeping.h"
+#include "fl/authz_subsystem.h"
+#include "cmd_authutil.h"
+#include "fs_facade.h"
 #include "fs_jail.h"
+#define KQ_TEST_UTIL_SQLITE
+#include "tests/kq_test_util.h"
+
+/* session_sync.c calls these. The deny path never starts a file service. */
+file_manager_service_t *g_fm_service;
+void fm_service_set_user(file_manager_service_t *svc, const char *user) {
+    (void)svc;
+    (void)user;
+}
 #include "common.h"
+#include "cmd_decl.h"
 #include <dirent.h>
 #include <limits.h>
 #include <sqlite3.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern char g_fs_jail_root[];
@@ -41,28 +59,20 @@ static int temp_db(char *out, size_t cap) {
     return 0;
 }
 
-static void rmrf(const char *path) {
-    DIR *d = opendir(path);
-    struct dirent *e;
+/* Test seam: linked with -Wl,--wrap=fl_kq_driver_get_or_register; callers must fail closed on a changed driver. */
+const fl_kq_driver_t *__real_fl_kq_driver_get_or_register(void);
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void);
+static void (*s_patch)(fl_kq_driver_t *drv);
+static fl_kq_driver_t s_patched;
 
-    if (!d) {
-        unlink(path);
-        return;
-    }
-    while ((e = readdir(d)) != NULL) {
-        char sub[PATH_MAX];
-        struct stat st;
+const fl_kq_driver_t *__wrap_fl_kq_driver_get_or_register(void) {
+    const fl_kq_driver_t *real = __real_fl_kq_driver_get_or_register();
 
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
-            continue;
-        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
-        if (lstat(sub, &st) == 0 && S_ISDIR(st.st_mode))
-            rmrf(sub);
-        else
-            unlink(sub);
-    }
-    closedir(d);
-    rmdir(path);
+    if (!s_patch || !real)
+        return real;
+    s_patched = *real;
+    s_patch(&s_patched);
+    return &s_patched;
 }
 
 static int test_key_ids(void) {
@@ -92,13 +102,11 @@ static int test_key_ids(void) {
     ASSERT(fl_heritage_child("Root", "ROOT", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "a.b", out, sizeof out) == FL_RESULT_INVAL);
     ASSERT(fl_heritage_child("Root", "", out, sizeof out) == FL_RESULT_INVAL);
-    /* 31 characters is the longest name that fits FL_USER_NAME_MAX (32 with the NUL). */
     ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz12345", out, sizeof out)
            == FL_RESULT_OK);
     ASSERT(fl_heritage_child("Root", "abcdefghijklmnopqrstuvwxyz123456", out, sizeof out)
            == FL_RESULT_INVAL); /* 32 chars: one too long */
 
-    /* At most FL_HERITAGE_MAX_DEPTH segments. */
     strcpy(deep, "Root");
     for (i = 1; i < FL_HERITAGE_MAX_DEPTH; i++) {
         char next[FL_HERITAGE_KEY_ID_MAX];
@@ -129,7 +137,6 @@ static int test_relations(void) {
            == FL_HERITAGE_REL_OTHER_BRANCH);
     ASSERT(fl_heritage_relation("Root.Flinstone.Bob", "Root.Alternative")
            == FL_HERITAGE_REL_OTHER_BRANCH);
-    /* A shared prefix is not ancestry: Root.Flin is not above Root.Flinstone. */
     ASSERT(!fl_heritage_is_ancestor_or_self("Root.Flin", "Root.Flinstone"));
     ASSERT(fl_heritage_relation("Root.Flin", "Root.Flinstone") == FL_HERITAGE_REL_SIBLING);
     ASSERT(fl_heritage_relation("Root", "nope") == FL_HERITAGE_REL_INVALID);
@@ -155,7 +162,6 @@ static int test_seed_and_accounts(void) {
     ASSERT(fl_user_db_verify_password(&db, "FLINSTONE", "flinstone"));
     ASSERT(fl_user_db_verify_password(&db, "Alternative", "alternative"));
 
-    /* Flinstone makes Bob; Bob makes Cara. */
     ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Bob", "pw", 3000, 0, 1700000000)
            == FL_RESULT_OK);
     ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone.Bob", "Cara", "pw", 3001, 0, 0)
@@ -176,7 +182,6 @@ static int test_seed_and_accounts(void) {
     ASSERT(fl_user_db_remove_user(&db, "Bob") == FL_RESULT_BUSY);
     ASSERT(fl_user_db_remove_user(&db, "ROOT") == FL_RESULT_ACCES);
 
-    /* Key ids, creators and times survive a save and reload. */
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     u = fl_user_db_find(&db, "Cara");
@@ -199,7 +204,6 @@ static int test_legacy_migration(void) {
     size_t i;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    /* A store written before heritage: no key_id, created_by or created_at columns. */
     ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
     ASSERT(sqlite3_exec(sql,
                         "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
@@ -207,7 +211,6 @@ static int test_legacy_migration(void) {
                         "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
                         "INSERT INTO meta VALUES('default_user','flinstone');",
                         NULL, NULL, NULL) == SQLITE_OK);
-    /* Real hashes for the legacy rows, borrowed from a lab seed. */
     fl_user_db_clear(&seeded);
     fl_user_db_seed_defaults(&seeded);
     for (i = 0; i < seeded.count; i++) {
@@ -238,7 +241,6 @@ static int test_legacy_migration(void) {
     ASSERT(u && !u->key_id[0]); /* not a valid segment: no key id, no authority */
     ASSERT(fl_user_db_find(&db, "Alternative")); /* lab defaults on: second default account added */
     ASSERT(strcmp(db.default_user, "Flinstone") == 0);
-    /* Migrated accounts have no signing key until they sign in. */
     ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone"));
     {
         int created = 0;
@@ -249,7 +251,6 @@ static int test_legacy_migration(void) {
         ASSERT(fl_user_db_signing_public(&db, "Root.Flinstone"));
     }
 
-    /* The migration was written back: a second load changes nothing and agrees. */
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     u = fl_user_db_find(&db, "Root");
     ASSERT(u && strcmp(u->name, "Root") == 0 && strcmp(u->key_id, "Root") == 0);
@@ -258,50 +259,40 @@ static int test_legacy_migration(void) {
     return 0;
 }
 
-/* A bridge's reach (KQ-19, kq_bridge_connects): one end holds the actor or an ancestor of it, the other
- * sits on the scope's line. One hop only, and a bridge that touches neither is no reach. */
+/* A bridge's reach: one end holds the actor or an ancestor, the other sits on the scope's line; one hop only. */
 static int test_bridge_reach(void) {
     const char *a = "Root.Flinstone.Bob", *b = "Root.Alternative.Ann";
 
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 1);
     ASSERT(fl_heritage_bridge_connects(b, a, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 1); /* ends are unordered */
-    /* the actor may sit below an end, the scope may be above or below the other end */
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob.Kid", "Root.Alternative.Ann") == 1);
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative") == 1);
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Alternative.Ann.Doc") == 1);
-    /* no reach: an actor under neither end, a scope off the other end's line, a shared prefix that is not ancestry */
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Third.Eve", "Root.Alternative.Ann") == 0);
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bob", "Root.Third") == 0);
     ASSERT(fl_heritage_bridge_connects(a, b, "Root.Flinstone.Bo", "Root.Alternative.Ann") == 0);
-    /* an invalid key and a null argument connect nothing */
     ASSERT(fl_heritage_bridge_connects(a, b, "nope", "Root.Alternative.Ann") == 0);
     ASSERT(fl_heritage_bridge_connects(a, NULL, "Root.Flinstone.Bob", "Root.Alternative.Ann") == 0);
     return 0;
 }
 
-/* FL-15: the login mode and the KQST pairing. A store written before auth_mode upgrades in place and
- * every account reads PASSWORD; the mode survives save and load (save re-inserts every record from
- * memory, so a field outside the INSERT would be lost); the KQST path is read from account_keys. */
+/* A store written before auth_mode upgrades in place; save re-inserts every record, so no field may fall outside the INSERT. */
 static int test_auth_mode_and_kqst_path(void) {
     char path[256], kqst[128];
-    sqlite3 *sql = NULL;
     fl_user_db_t db;
     const fl_user_record_t *u;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
-                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0,"
-                        " key_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, signing_public TEXT NOT NULL DEFAULT '',"
-                        " signing_sealed TEXT NOT NULL DEFAULT '', box_public TEXT NOT NULL DEFAULT '',"
-                        " box_sealed TEXT NOT NULL DEFAULT '');"
-                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id) VALUES ('Root','x','y',0,'Root');"
-                        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,created_by)"
-                        " VALUES ('Bob','x','y',2000,'Root.Bob','Root');",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                            " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0,"
+                            " key_id TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, signing_public TEXT NOT NULL DEFAULT '',"
+                            " signing_sealed TEXT NOT NULL DEFAULT '', box_public TEXT NOT NULL DEFAULT '',"
+                            " box_sealed TEXT NOT NULL DEFAULT '');"
+                            "INSERT INTO users (name,password_hash,salt_hex,uid,key_id) VALUES ('Root','x','y',0,'Root');"
+                            "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,created_by)"
+                            " VALUES ('Bob','x','y',2000,'Root.Bob','Root');") == 0);
 
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     u = fl_user_db_find(&db, "Bob");
@@ -314,37 +305,29 @@ static int test_auth_mode_and_kqst_path(void) {
     ASSERT(fl_user_db_find(&db, "Bob")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
     ASSERT(fl_user_db_find(&db, "Root")->auth_mode == FL_USER_AUTH_PASSWORD);
 
-    /* no row, then a row without a path, then a path */
     ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
-                        " VALUES ('Root.Bob','own',1,'Root',1,1,NULL,x'00',x'00',x'00',0,x'00');"
-                        "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
-                        "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
-                        " VALUES ('Root.Eve','own',1,'Root',1,1,'/keys/eve.kqst',x'00',x'00',x'00',0,x'00');",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                            "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                            " VALUES ('Root.Bob','own',1,'Root',1,1,NULL,x'00',x'00',x'00',0,x'00');"
+                            "INSERT INTO account_keys (label,purpose,holds_share,minted_by,minted_at,generation,"
+                            "kqst_path,device_id,signing_public,encryption_public,ledger_seq,event_hash)"
+                            " VALUES ('Root.Eve','own',1,'Root',1,1,'/keys/eve.kqst',x'00',x'00',x'00',0,x'00');") == 0);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Bob", kqst, sizeof kqst) == FL_RESULT_NOENT);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, sizeof kqst) == FL_RESULT_OK);
     ASSERT(strcmp(kqst, "/keys/eve.kqst") == 0);
     ASSERT(fl_user_db_kqst_path(&db, "Root.Eve", kqst, 4) == FL_RESULT_NOMEM);
-    /* x'00' blobs are one byte: pairing requires full device id and public keys. */
     {
         unsigned char device_id[16], signing_public[32], encryption_public[32];
 
         ASSERT(fl_user_db_kqst_pairing(&db, "Root.Eve", device_id, signing_public, encryption_public) ==
                FL_RESULT_NOENT);
     }
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "UPDATE account_keys SET device_id=x'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
-                        " signing_public=x'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
-                        " encryption_public=x'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'"
-                        " WHERE label='Root.Eve';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_keys SET device_id=x'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
+                            " signing_public=x'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
+                            " encryption_public=x'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'"
+                            " WHERE label='Root.Eve';") == 0);
     {
         unsigned char device_id[16], signing_public[32], encryption_public[32];
 
@@ -365,17 +348,13 @@ static int test_legacy_bridge_migration(void) {
     int found = 0;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
-                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0);"
-                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
-                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                            " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0);"
+                            "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                            " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);") == 0);
 
-    /* Opening through the public API migrates; the legacy row survives with empty signature fields. */
     ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
     ASSERT(strcmp(b.a_key, "Root.Flinstone.Bob") == 0 && strcmp(b.b_key, "Root.Alternative.Ann") == 0);
     ASSERT(b.created_at == 7 && !b.nonce_hex[0] && !b.request_sig[0] && !b.accept_sig[0]);
@@ -392,29 +371,23 @@ static int test_legacy_bridge_migration(void) {
     sqlite3_finalize(st);
     sqlite3_close(sql);
     ASSERT(found == 3);
-    /* A second open is a no-op. */
     ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
     unlink(path);
     return 0;
 }
 
-/* Behavior change of D9: an existing column matches case-insensitively (was strcmp, then a duplicate ALTER failed). */
 static int test_legacy_bridge_mixed_case_columns(void) {
     char path[256];
-    sqlite3 *sql = NULL;
     fl_bridge_t b;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
-                        " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
-                        " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0,"
-                        " Nonce TEXT NOT NULL DEFAULT '', REQUEST_SIG TEXT NOT NULL DEFAULT '');"
-                        "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
-                        " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE bridges (id INTEGER PRIMARY KEY AUTOINCREMENT, a_key TEXT NOT NULL,"
+                            " b_key TEXT NOT NULL, state INTEGER NOT NULL, accepted_by TEXT NOT NULL DEFAULT '',"
+                            " created_at INTEGER NOT NULL DEFAULT 0, accepted_at INTEGER NOT NULL DEFAULT 0,"
+                            " Nonce TEXT NOT NULL DEFAULT '', REQUEST_SIG TEXT NOT NULL DEFAULT '');"
+                            "INSERT INTO bridges (a_key, b_key, state, created_at) VALUES"
+                            " ('Root.Flinstone.Bob','Root.Alternative.Ann',0,7);") == 0);
     ASSERT(fl_bridge_get(path, 1, &b) == FL_RESULT_OK);
     ASSERT(b.created_at == 7);
     unlink(path);
@@ -430,19 +403,15 @@ static int test_legacy_case_collision(void) {
     int rows = 0;
 
     ASSERT(temp_db(path, sizeof path) == 0);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql,
-                        "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
-                        " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0);"
-                        "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
-                        "INSERT INTO users VALUES('root','x','00',1000,1);"
-                        "INSERT INTO users VALUES('Root','y','11',2000,0);",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL, password_hash TEXT NOT NULL,"
+                            " salt_hex TEXT NOT NULL, uid INTEGER NOT NULL, is_elevated INTEGER NOT NULL DEFAULT 0);"
+                            "CREATE TABLE meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);"
+                            "INSERT INTO users VALUES('root','x','00',1000,1);"
+                            "INSERT INTO users VALUES('Root','y','11',2000,0);") == 0);
 
     ASSERT(fl_user_db_load(&db, path) != FL_RESULT_OK);
 
-    /* Nothing was rewritten: both legacy rows are still there, under their own names. */
     ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
     ASSERT(sqlite3_prepare_v2(sql, "SELECT name, key_id FROM users ORDER BY uid;", -1, &st, NULL)
            == SQLITE_OK);
@@ -487,7 +456,6 @@ static int test_bridges(void) {
     ASSERT(fl_user_db_open_key(&db, "Flinstone", "flinstone", flin) == FL_RESULT_OK);
     ASSERT(fl_user_db_open_key(&db, "Alternative", "alternative", alt) == FL_RESULT_OK);
 
-    /* One line needs no bridge. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Flinstone.Bob", 1, flin, &id)
            == FL_RESULT_INVAL);
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root", 1, bob, &id) == FL_RESULT_INVAL);
@@ -498,19 +466,15 @@ static int test_bridges(void) {
            == FL_RESULT_OK && id > 0);
     ASSERT(fl_bridge_request(path, &db, "Root.Alternative.Ann", "Root.Flinstone.Bob", 11, ann, &id2)
            == FL_RESULT_BUSY);
-    /* Pending grants nothing. */
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
-    /* The requesting side, or its ancestor, cannot accept. */
     ASSERT(fl_bridge_accept(path, &db, "Root.Flinstone.Bob", id, 12, bob) == FL_RESULT_ACCES);
     ASSERT(fl_bridge_accept(path, &db, "Root.Flinstone", id, 12, flin) == FL_RESULT_ACCES);
-    /* Ann's ancestor may accept for her. */
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative", id, 13, alt) == FL_RESULT_OK);
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 14, ann) == FL_RESULT_BUSY);
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_OK);
     ASSERT(b.state == FL_BRIDGE_STATE_ACTIVE && strcmp(b.accepted_by, "Root.Alternative") == 0 &&
            b.accepted_at == 13);
     ASSERT(fl_bridge_active_between(&db, "Root.Alternative.Ann", "Root.Flinstone.Bob"));
-    /* A bridge joins exactly its two accounts: no inheritance either way. */
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone", "Root.Alternative.Ann"));
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative"));
 
@@ -525,19 +489,16 @@ static int test_bridges(void) {
     ASSERT(fl_bridge_list_visible(path, "Root.Alternative.Cy", count_bridge, NULL) == FL_RESULT_OK);
     ASSERT(g_visited == 0u);
 
-    /* Revocation: not a third party, yes an ancestor of either side. */
     ASSERT(fl_bridge_revoke(path, "Root.Alternative.Cy", id) == FL_RESULT_ACCES);
     ASSERT(fl_bridge_revoke(path, "Root.Flinstone", id) == FL_RESULT_OK);
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_NOENT);
 
-    /* Removing an account removes its bridges. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 20, bob, &id2)
            == FL_RESULT_OK);
     ASSERT(fl_bridge_remove_for(path, "Root.Alternative.Ann") == FL_RESULT_OK);
     ASSERT(fl_bridge_get(path, id2, &b) == FL_RESULT_NOENT);
 
-    /* user_db saves never touch the bridge table. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone", "Root.Alternative", 30, flin, &id) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
     ASSERT(fl_bridge_get(path, id, &b) == FL_RESULT_OK);
@@ -549,7 +510,6 @@ static int test_bridges(void) {
     return 0;
 }
 
-/* Account keys: sealed under the password, kept or replaced, and what makes a bridge count. */
 static int test_signed_bridges(void) {
     char path[256];
     char stmt[256];
@@ -569,7 +529,6 @@ static int test_signed_bridges(void) {
     ASSERT(fl_user_db_add_user_under(&db, "Root.Alternative", "Ann", "pw", 3001, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
 
-    /* Every account has a key, and it survives a save and a load. */
     pub = fl_user_db_signing_public(&db, "Root.Flinstone.Bob");
     ASSERT(pub);
     memcpy(before, pub, sizeof before);
@@ -581,7 +540,6 @@ static int test_signed_bridges(void) {
     ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_OK);
     ASSERT(fl_user_db_open_key(&db, "Ann", "pw", ann) == FL_RESULT_OK);
 
-    /* Signing with someone else's key is refused. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 1, ann, &id)
            == FL_RESULT_ACCES);
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 1, bob, &id)
@@ -590,12 +548,10 @@ static int test_signed_bridges(void) {
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 2, ann) == FL_RESULT_OK);
     ASSERT(fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
 
-    /* A changed signature opens nothing. */
     ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
     ASSERT(sqlite3_exec(sql, "UPDATE bridges SET accept_sig=request_sig;", NULL, NULL, NULL)
            == SQLITE_OK);
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
-    /* Nor does an active row with no signatures (one written before bridges were signed). */
     ASSERT(sqlite3_exec(sql, "DELETE FROM bridges;", NULL, NULL, NULL) == SQLITE_OK);
     snprintf(stmt, sizeof stmt,
              "INSERT INTO bridges(a_key,b_key,state,accepted_by) VALUES("
@@ -606,16 +562,12 @@ static int test_signed_bridges(void) {
     ASSERT(sqlite3_exec(sql, "DELETE FROM bridges;", NULL, NULL, NULL) == SQLITE_OK);
     sqlite3_close(sql);
 
-    /* A request with no valid requester signature cannot be accepted. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 3, bob, &id)
            == FL_RESULT_OK);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET request_sig='';", NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE bridges SET request_sig='';") == 0);
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 4, ann) == FL_RESULT_INVAL);
     ASSERT(fl_bridge_revoke(path, "Root.Flinstone.Bob", id) == FL_RESULT_OK);
 
-    /* Changing your own password keeps the key; a reset replaces it and the bridge stops counting. */
     ASSERT(fl_bridge_request(path, &db, "Root.Flinstone.Bob", "Root.Alternative.Ann", 5, bob, &id)
            == FL_RESULT_OK);
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 6, ann) == FL_RESULT_OK);
@@ -629,9 +581,7 @@ static int test_signed_bridges(void) {
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Alternative.Ann"), before, sizeof before) != 0);
     ASSERT(!fl_bridge_active_between(&db, "Root.Flinstone.Bob", "Root.Alternative.Ann"));
 
-    /* ensure_key leaves an existing key alone. */
     ASSERT(fl_user_db_ensure_key(&db, "Bob", "pw", &created) == FL_RESULT_OK && created == 0);
-    /* A key that could not be saved is forgotten, and a later ensure_key makes a new one. */
     memcpy(before, fl_user_db_signing_public(&db, "Root.Flinstone.Bob"), sizeof before);
     fl_user_db_forget_key(&db, "Bob");
     ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Bob"));
@@ -647,12 +597,10 @@ static int test_signed_bridges(void) {
 }
 
 
-/* Box keys (what co-signed file letters are sealed to) follow the signing key. */
 static int test_box_keys(void) {
     char path[256];
     fl_user_db_t db;
     fl_user_db_t again;
-    sqlite3 *sql = NULL;
     int created = 0;
     unsigned char box[FL_USER_SIGNING_SECRET_LEN];
     unsigned char before[FL_USER_SIGNING_PUBLIC_LEN];
@@ -663,7 +611,6 @@ static int test_box_keys(void) {
     ASSERT(fl_user_db_add_user_under(&db, "Root.Flinstone", "Mya", "pw", 3100, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
 
-    /* A new account has a box key distinct from its signing key; it survives a reload. */
     pub = fl_user_db_box_public(&db, "Root.Flinstone.Mya");
     ASSERT(pub);
     ASSERT(memcmp(pub, fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), 32) != 0);
@@ -674,7 +621,6 @@ static int test_box_keys(void) {
     ASSERT(fl_user_db_open_box(&again, "Mya", "wrong", box) == FL_RESULT_ACCES);
     ASSERT(fl_user_db_open_box(&again, "Mya", "pw", box) == FL_RESULT_OK);
 
-    /* A password change re-seals it; an admin reset replaces it. */
     ASSERT(fl_user_db_change_password(&again, "Mya", "pw", "pw2") == FL_RESULT_OK);
     ASSERT(memcmp(fl_user_db_box_public(&again, "Root.Flinstone.Mya"), before, sizeof before) == 0);
     ASSERT(fl_user_db_open_box(&again, "Mya", "pw", box) == FL_RESULT_ACCES);
@@ -683,12 +629,8 @@ static int test_box_keys(void) {
     ASSERT(memcmp(fl_user_db_box_public(&again, "Root.Flinstone.Mya"), before, sizeof before) != 0);
     ASSERT(fl_user_db_save(&again) == FL_RESULT_OK);
 
-    /* An account from before box keys keeps its signing key and gains a box key. */
     memcpy(before, fl_user_db_signing_public(&again, "Root.Flinstone.Mya"), sizeof before);
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE users SET box_public='',box_sealed='' WHERE name='Mya';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET box_public='',box_sealed='' WHERE name='Mya';") == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
     ASSERT(fl_user_db_open_box(&db, "Mya", "pw3", box) == FL_RESULT_NOENT);
@@ -696,7 +638,6 @@ static int test_box_keys(void) {
            created == FL_USER_DB_CREATED_BOX);
     ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
-    /* A save that failed undoes only the new box key: the signing key, and what it signed, stay. */
     fl_user_db_forget_created(&db, "Mya", created);
     ASSERT(!fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
     ASSERT(memcmp(fl_user_db_signing_public(&db, "Root.Flinstone.Mya"), before, sizeof before) == 0);
@@ -706,12 +647,8 @@ static int test_box_keys(void) {
     ASSERT(fl_user_db_ensure_key(&db, "Mya", "pw3", &created) == FL_RESULT_OK && created == 0);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
 
-    /* A damaged signing key beside a valid box key: a password change makes both keys new,
-     * and the box key it stores is one the new password opens and that matches its public. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE users SET signing_public='',signing_sealed='' WHERE name='Mya';",
-                        NULL, NULL, NULL) == SQLITE_OK);
-    sqlite3_close(sql);
+/* A damaged signing key beside a valid box key: a password change makes both keys new. */
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET signing_public='',signing_sealed='' WHERE name='Mya';") == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
     ASSERT(!fl_user_db_signing_public(&db, "Root.Flinstone.Mya"));
     ASSERT(fl_user_db_box_public(&db, "Root.Flinstone.Mya"));
@@ -724,14 +661,12 @@ static int test_box_keys(void) {
     return 0;
 }
 
-/* The sender-side gate for server file offers (share_gate.h). */
 static int test_share_gate(void) {
     char path[256];
     fl_user_db_t db;
     int64_t id = 0;
     unsigned char bob[FL_USER_SIGNING_SECRET_LEN];
     unsigned char ann[FL_USER_SIGNING_SECRET_LEN];
-    sqlite3 *sql = NULL;
 
     ASSERT(temp_db(path, sizeof path) == 0);
     ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
@@ -739,12 +674,10 @@ static int test_share_gate(void) {
     ASSERT(fl_user_db_add_user_under(&db, "Root.Alternative", "Ann", "pw", 3001, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
 
-    /* One line: yourself, an ancestor, a descendant. */
     ASSERT(fl_share_gate_check(&db, "Bob", "Bob") == FL_SHARE_GATE_OK);
     ASSERT(fl_share_gate_check(&db, "Bob", "Flinstone") == FL_SHARE_GATE_OK);
     ASSERT(fl_share_gate_check(&db, "Flinstone", "Bob") == FL_SHARE_GATE_OK);
     ASSERT(fl_share_gate_check(&db, "Root", "Ann") == FL_SHARE_GATE_OK);
-    /* Another branch needs a signed, active bridge. */
     ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
     ASSERT(fl_share_gate_check(&db, "Flinstone", "Alternative") == FL_SHARE_GATE_NO_BRIDGE);
     ASSERT(fl_user_db_open_key(&db, "Bob", "pw", bob) == FL_RESULT_OK);
@@ -755,16 +688,10 @@ static int test_share_gate(void) {
     ASSERT(fl_bridge_accept(path, &db, "Root.Alternative.Ann", id, 2, ann) == FL_RESULT_OK);
     ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_OK);
     ASSERT(fl_share_gate_check(&db, "Ann", "Bob") == FL_SHARE_GATE_OK);
-    /* The bridge joins exactly those two: Bob's parent does not inherit it. */
     ASSERT(fl_share_gate_check(&db, "Flinstone", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
-    /* A tampered bridge stops counting. */
-    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
-    ASSERT(sqlite3_exec(sql, "UPDATE bridges SET accept_sig=request_sig;", NULL, NULL, NULL)
-           == SQLITE_OK);
-    sqlite3_close(sql);
+    ASSERT(kq_test_exec_sql(path, "UPDATE bridges SET accept_sig=request_sig;") == 0);
     ASSERT(fl_share_gate_check(&db, "Bob", "Ann") == FL_SHARE_GATE_NO_BRIDGE);
 
-    /* Unknown accounts and accounts without a key are refused. */
     ASSERT(fl_share_gate_check(&db, "Bob", "Ghost") == FL_SHARE_GATE_NO_RECEIVER);
     ASSERT(fl_share_gate_check(&db, "Ghost", "Bob") == FL_SHARE_GATE_NO_SENDER);
     {
@@ -783,7 +710,332 @@ static int test_share_gate(void) {
     return 0;
 }
 
-/* Account homes in an active VM jail, through the session singleton. */
+#define AUTH_SNAP_MAX 8
+
+typedef struct auth_row_snap {
+    char name[FL_USER_NAME_MAX];
+    char hash[FL_PASSWORD_HASH_HEX_MAX];
+    char salt[FL_PASSWORD_SALT_HEX_MAX];
+    int sql_type;
+    sqlite3_int64 ival;
+    double rval;
+    char text[64];
+    unsigned char blob[16];
+    int blob_len;
+} auth_row_snap;
+
+static int auth_snap_rows(const char *path, auth_row_snap *rows, int cap, int *nout) {
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    int n = 0;
+
+    if (sqlite3_open(path, &sql) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    if (sqlite3_prepare_v2(sql,
+                           "SELECT name, password_hash, salt_hex, auth_mode FROM users ORDER BY uid;",
+                           -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(sql);
+        return -1;
+    }
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(st, 0);
+        const char *hash = (const char *)sqlite3_column_text(st, 1);
+        const char *salt = (const char *)sqlite3_column_text(st, 2);
+        int t;
+
+        if (n >= cap || !name || !hash || !salt) {
+            sqlite3_finalize(st);
+            sqlite3_close(sql);
+            return -1;
+        }
+        memset(&rows[n], 0, sizeof rows[n]);
+        strncpy(rows[n].name, name, sizeof rows[n].name - 1);
+        strncpy(rows[n].hash, hash, sizeof rows[n].hash - 1);
+        strncpy(rows[n].salt, salt, sizeof rows[n].salt - 1);
+        t = sqlite3_column_type(st, 3);
+        rows[n].sql_type = t;
+        if (t == SQLITE_INTEGER)
+            rows[n].ival = sqlite3_column_int64(st, 3);
+        else if (t == SQLITE_FLOAT)
+            rows[n].rval = sqlite3_column_double(st, 3);
+        else if (t == SQLITE_TEXT) {
+            const char *tx = (const char *)sqlite3_column_text(st, 3);
+
+            if (tx)
+                strncpy(rows[n].text, tx, sizeof rows[n].text - 1);
+        } else if (t == SQLITE_BLOB) {
+            int nbytes = sqlite3_column_bytes(st, 3);
+            const void *blob = sqlite3_column_blob(st, 3);
+            int copy = nbytes;
+
+            rows[n].blob_len = nbytes;
+            if (blob && copy > 0) {
+                if (copy > (int)sizeof rows[n].blob)
+                    copy = (int)sizeof rows[n].blob;
+                memcpy(rows[n].blob, blob, (size_t)copy);
+            }
+        }
+        n++;
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    *nout = n;
+    return 0;
+}
+
+static int auth_snaps_equal(const auth_row_snap *a, const auth_row_snap *b, int n) {
+    int i;
+
+    for (i = 0; i < n; i++) {
+        if (strcmp(a[i].name, b[i].name) != 0 || strcmp(a[i].hash, b[i].hash) != 0 ||
+            strcmp(a[i].salt, b[i].salt) != 0 || a[i].sql_type != b[i].sql_type)
+            return 0;
+        if (a[i].sql_type == SQLITE_INTEGER && a[i].ival != b[i].ival)
+            return 0;
+        if (a[i].sql_type == SQLITE_FLOAT && a[i].rval != b[i].rval)
+            return 0;
+        if (a[i].sql_type == SQLITE_TEXT && strcmp(a[i].text, b[i].text) != 0)
+            return 0;
+        if (a[i].sql_type == SQLITE_BLOB &&
+            (a[i].blob_len != b[i].blob_len || memcmp(a[i].blob, b[i].blob, sizeof a[i].blob) != 0))
+            return 0;
+    }
+    return 1;
+}
+
+static int auth_cell_is(const char *path, const char *name, int sql_type, sqlite3_int64 ival,
+                        const char *text) {
+    auth_row_snap rows[AUTH_SNAP_MAX];
+    int n = 0;
+    int i;
+
+    if (auth_snap_rows(path, rows, AUTH_SNAP_MAX, &n) != 0)
+        return 0;
+    for (i = 0; i < n; i++) {
+        if (strcmp(rows[i].name, name) != 0)
+            continue;
+        if (rows[i].sql_type != sql_type)
+            return 0;
+        if (sql_type == SQLITE_INTEGER && rows[i].ival != ival)
+            return 0;
+        if (sql_type == SQLITE_TEXT && (!text || strcmp(rows[i].text, text) != 0))
+            return 0;
+        if (sql_type == SQLITE_FLOAT && rows[i].rval != 1.5)
+            return 0;
+        if (sql_type == SQLITE_BLOB && (rows[i].blob_len != 1 || rows[i].blob[0] != 0x01))
+            return 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int auth_expect_load_err(const char *path) {
+    fl_user_db_t db;
+    auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+    int nb = 0;
+    int na = 0;
+    int i;
+
+    if (auth_snap_rows(path, before, AUTH_SNAP_MAX, &nb) != 0 || nb < 1)
+        return 1;
+    if (fl_user_db_load(&db, path) != FL_RESULT_ERR)
+        return 1;
+    if (db.loaded != 0 || db.count != 0 || strcmp(db.path, path) != 0)
+        return 1;
+    for (i = 0; i < nb; i++) {
+        if (fl_user_db_find(&db, before[i].name) != NULL)
+            return 1;
+    }
+    if (auth_snap_rows(path, after, AUTH_SNAP_MAX, &na) != 0 || na != nb)
+        return 1;
+    if (!auth_snaps_equal(before, after, nb))
+        return 1;
+    return 0;
+}
+
+static int auth_write_null_mode(const char *path) {
+    const char *stmt =
+        "CREATE TABLE users ("
+        " name TEXT PRIMARY KEY NOT NULL,"
+        " password_hash TEXT NOT NULL,"
+        " salt_hex TEXT NOT NULL,"
+        " uid INTEGER NOT NULL,"
+        " is_elevated INTEGER NOT NULL DEFAULT 0,"
+        " key_id TEXT NOT NULL DEFAULT '',"
+        " created_by TEXT NOT NULL DEFAULT '',"
+        " created_at INTEGER NOT NULL DEFAULT 0,"
+        " signing_public TEXT NOT NULL DEFAULT '',"
+        " signing_sealed TEXT NOT NULL DEFAULT '',"
+        " box_public TEXT NOT NULL DEFAULT '',"
+        " box_sealed TEXT NOT NULL DEFAULT '',"
+        " auth_mode INTEGER);"
+        "INSERT INTO users (name,password_hash,salt_hex,uid,key_id,auth_mode)"
+        " VALUES ('Root','x','y',0,'Root',NULL);";
+
+    return kq_test_exec_sql(path, stmt);
+}
+
+/* Valid modes load; a bad row or path publishes the whole store or none and never rewrites the file. */
+static int test_auth_mode_reject_malformed(void) {
+    char path[256], partial[256], alias[256], badalias[256], nulls[256], longp[257];
+    fl_user_db_t db;
+    const fl_user_record_t *u;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_user_db_set_auth_mode(&db, "Flinstone", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_user_db_save(&db) == FL_RESULT_OK);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    u = fl_user_db_find(&db, "Root");
+    ASSERT(u && u->auth_mode == FL_USER_AUTH_PASSWORD);
+    u = fl_user_db_find(&db, "Flinstone");
+    ASSERT(u && u->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+
+    ASSERT(fl_user_db_load(&db, "") == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && fl_user_db_find(&db, "Root") && strcmp(db.path, path) == 0);
+    ASSERT(fl_user_db_load(&db, NULL) == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && strcmp(db.path, path) == 0);
+    ASSERT(fl_user_db_load(NULL, path) == FL_RESULT_INVAL);
+    memset(longp, 'b', sizeof longp - 1);
+    longp[sizeof longp - 1] = '\0';
+    ASSERT(strlen(longp) >= sizeof db.path);
+    ASSERT(fl_user_db_load(&db, longp) == FL_RESULT_INVAL);
+    ASSERT(db.loaded == 1 && strcmp(db.path, path) == 0);
+
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=-1 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, -1, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=4294967296 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, (sqlite3_int64)4294967296LL, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode='nope' WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_TEXT, 0, "nope"));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=1.5 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_FLOAT, 0, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=x'01' WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_BLOB, 0, NULL));
+    ASSERT(auth_expect_load_err(path) == 0);
+    unlink(path);
+
+    ASSERT(temp_db(partial, sizeof partial) == 0);
+    ASSERT(fl_user_db_load(&db, partial) == FL_RESULT_OK);
+    ASSERT(kq_test_exec_sql(partial, "UPDATE users SET auth_mode=2 WHERE name='Flinstone';") == 0);
+    ASSERT(auth_cell_is(partial, "Root", SQLITE_INTEGER, 0, NULL));
+    ASSERT(auth_cell_is(partial, "Flinstone", SQLITE_INTEGER, 2, NULL));
+    ASSERT(auth_expect_load_err(partial) == 0);
+    unlink(partial);
+
+    ASSERT(temp_db(alias, sizeof alias) == 0);
+    ASSERT(fl_user_db_load(&db, alias) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root", "Temp", "pw", 4100, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Temp") != NULL);
+    ASSERT(fl_user_db_load(&db, db.path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Temp") == NULL);
+    ASSERT(fl_user_db_find(&db, "Root") != NULL);
+    ASSERT(fl_user_db_find(&db, "Flinstone") != NULL);
+    ASSERT(strcmp(db.path, alias) == 0);
+    unlink(alias);
+
+    ASSERT(temp_db(badalias, sizeof badalias) == 0);
+    ASSERT(fl_user_db_load(&db, badalias) == FL_RESULT_OK);
+    ASSERT(fl_user_db_add_user_under(&db, "Root", "Temp", "pw", 4100, 0, 0) == FL_RESULT_OK);
+    ASSERT(kq_test_exec_sql(badalias, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_cell_is(badalias, "Root", SQLITE_INTEGER, 2, NULL));
+    {
+        auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+        int nb = 0;
+        int na = 0;
+        int i;
+
+        ASSERT(auth_snap_rows(badalias, before, AUTH_SNAP_MAX, &nb) == 0 && nb >= 2);
+        ASSERT(fl_user_db_load(&db, db.path) == FL_RESULT_ERR);
+        ASSERT(db.loaded == 0 && db.count == 0);
+        ASSERT(strcmp(db.path, badalias) == 0);
+        ASSERT(fl_user_db_find(&db, "Temp") == NULL);
+        ASSERT(fl_user_db_find(&db, "Root") == NULL);
+        ASSERT(auth_snap_rows(badalias, after, AUTH_SNAP_MAX, &na) == 0 && na == nb);
+        ASSERT(auth_snaps_equal(before, after, nb));
+        for (i = 0; i < na; i++)
+            ASSERT(strcmp(after[i].name, "Temp") != 0);
+    }
+    unlink(badalias);
+
+    ASSERT(temp_db(nulls, sizeof nulls) == 0);
+    ASSERT(auth_write_null_mode(nulls) == 0);
+    ASSERT(auth_cell_is(nulls, "Root", SQLITE_NULL, 0, NULL));
+    ASSERT(auth_expect_load_err(nulls) == 0);
+    unlink(nulls);
+    return 0;
+}
+
+static int auth_startup_child(const char *path, const char *lab) {
+    fl_session_switch_request_t req;
+    fl_result_t login_rc;
+    fl_result_t switch_rc;
+
+    if (setenv("FL_USERS_DB_PATH", path, 1) != 0 || setenv("FL_USERS_LAB_DEFAULTS", lab, 1) != 0)
+        return 2;
+    login_rc = fl_session_login("Root", "root");
+    if (login_rc != FL_RESULT_ERR) {
+        fprintf(stderr, "startup child lab=%s login returned %d\n", lab, (int)login_rc);
+        return 3;
+    }
+    memset(&req, 0, sizeof req);
+    req.target = "Root";
+    req.sudo = 1;
+    req.password = "root";
+    switch_rc = fl_session_switch_user(&req);
+    if (switch_rc == FL_RESULT_OK) {
+        fprintf(stderr, "startup child lab=%s switch returned OK\n", lab);
+        return 4;
+    }
+    return 0;
+}
+
+/* A bad auth_mode at startup must not seed over the file; this forks before fl_session_init. */
+static int test_auth_mode_startup_fail_closed(void) {
+    char path[256];
+    fl_user_db_t db;
+    auth_row_snap before[AUTH_SNAP_MAX], after[AUTH_SNAP_MAX];
+    int nb = 0;
+    int na = 0;
+    int i;
+    const char *labs[2] = {"0", "1"};
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(&db, "Root") && fl_user_db_find(&db, "Flinstone") &&
+           fl_user_db_find(&db, "Alternative"));
+    ASSERT(kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") == 0);
+    ASSERT(auth_snap_rows(path, before, AUTH_SNAP_MAX, &nb) == 0);
+    ASSERT(nb == 3);
+    ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    for (i = 0; i < 2; i++) {
+        pid_t pid;
+        int status = 0;
+
+        pid = fork();
+        ASSERT(pid >= 0);
+        if (pid == 0)
+            _exit(auth_startup_child(path, labs[i]));
+        ASSERT(waitpid(pid, &status, 0) == pid);
+        ASSERT(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        ASSERT(auth_snap_rows(path, after, AUTH_SNAP_MAX, &na) == 0);
+        ASSERT(na == nb && auth_snaps_equal(before, after, nb));
+        ASSERT(auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL));
+    }
+    unlink(path);
+    return 0;
+}
+
 static int test_jail_homes(const char *jail_parent) {
     char home[PATH_MAX];
     char p[PATH_MAX];
@@ -799,7 +1051,7 @@ static int test_jail_homes(const char *jail_parent) {
 
     fl_session_init();
     db = fl_session_user_db_mut();
-    ASSERT(fl_user_db_add_user_under(db, "Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Bob", "pw", 3000, 0, 0) == FL_RESULT_OK);
     ASSERT(fl_session_save_users() == FL_RESULT_OK);
 
     ASSERT(fs_jail_account_home("Root.Flinstone.Bob", home, sizeof home) == 0);
@@ -812,7 +1064,6 @@ static int test_jail_homes(const char *jail_parent) {
     ASSERT(fs_jail_account_home("Root.Alternative", home, sizeof home) == 0);
     ASSERT(fs_jail_account_home("not a key", home, sizeof home) == -1);
 
-    /* Flinstone: own home and Bob's (descendant), not Alternative's (sibling). */
     ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
     snprintf(p, sizeof p, "%s/home/Flinstone/notes.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == 0);
@@ -821,28 +1072,23 @@ static int test_jail_homes(const char *jail_parent) {
     snprintf(p, sizeof p, "%s/home/Alternative/secret.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
     ASSERT(fs_jail_check_home(p) == -1);
-    /* The home tree itself is Root's; outside it nothing changes. */
     snprintf(p, sizeof p, "%s/home", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
     snprintf(p, sizeof p, "%s/shared.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == 0);
-    /* "..": canonical paths decide, not the spelling. */
     snprintf(p, sizeof p, "%s/home/Flinstone/../Alternative/x", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
 
-    /* Bob: own home only; his creator's files are above him. */
     ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
     snprintf(p, sizeof p, "%s/home/Flinstone/Bob/mine.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == 0);
     snprintf(p, sizeof p, "%s/home/Flinstone/notes.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
-    /* sudo lifts the outer jail, never heritage. */
     fl_session_begin_sudo_scope();
     snprintf(p, sizeof p, "%s/home/Alternative/secret.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
     fl_session_end_sudo_scope();
 
-    /* An active bridge Bob <-> Alternative opens Alternative's home to Bob only. */
     ASSERT(fl_user_db_open_key(db, "Bob", "pw", bob) == FL_RESULT_OK);
     ASSERT(fl_user_db_open_key(db, "Alternative", "alternative", alt) == FL_RESULT_OK);
     ASSERT(fl_bridge_request(db->path, db, "Root.Flinstone.Bob", "Root.Alternative", 1, bob, &id)
@@ -858,7 +1104,6 @@ static int test_jail_homes(const char *jail_parent) {
     snprintf(p, sizeof p, "%s/home/Flinstone/notes.txt", g_fs_jail_root);
     ASSERT(fs_jail_check_access(p) == -1);
 
-    /* Root reaches every home. */
     ASSERT(fl_session_set_user("root") == FL_RESULT_OK);
     ASSERT(strcmp(fl_session_current_key_id(), "Root") == 0);
     ASSERT(fs_jail_check_access(p) == 0);
@@ -872,15 +1117,1377 @@ static int test_jail_homes(const char *jail_parent) {
     return 0;
 }
 
+static void make_bridge(fl_user_bridge_t *b, const char *uid, const char *a, const char *z) {
+    memset(b, 0, sizeof *b);
+    snprintf(b->uid, sizeof b->uid, "%s", uid);
+    b->generation = 3;
+    memset(b->salt, 0x5a, sizeof b->salt);
+    memset(b->public_key, 0x6b, sizeof b->public_key);
+    b->nmembers = 2;
+    snprintf(b->members[0].label, sizeof b->members[0].label, "%s", a);
+    snprintf(b->members[1].label, sizeof b->members[1].label, "%s", z);
+    memset(b->members[0].encryption_public, 0x01, 32);
+    memset(b->members[0].signing_public, 0x02, 32);
+    memset(b->members[1].encryption_public, 0x03, 32);
+    memset(b->members[1].signing_public, 0x04, 32);
+}
+
+/* Private bridges: a store from before wrap_salt gains the column; sealed key and salt are read together. */
+static int test_private_bridge_store(void) {
+    char path[256];
+    sqlite3 *sql = NULL;
+    sqlite3_stmt *st = NULL;
+    fl_user_db_t db;
+    fl_user_bridge_t b, got, live[FL_USER_BRIDGES_MAX];
+    unsigned char sealed[96], salt[16], out[FL_USER_BRIDGE_SEALED_MAX], out_salt[16];
+    size_t n = 0, len = 0;
+    int has_wrap = 0;
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(kq_test_exec_sql(path,
+                            "CREATE TABLE account_bridge_members (uid TEXT NOT NULL, label TEXT NOT NULL,"
+                            " encryption_public BLOB NOT NULL, signing_public BLOB NOT NULL,"
+                            " sealed_bridge_key BLOB, PRIMARY KEY (uid, label));") == 0);
+    ASSERT(fl_user_db_load(&db, path) == FL_RESULT_OK);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_prepare_v2(sql, "SELECT name FROM pragma_table_info('account_bridge_members');", -1,
+                              &st, NULL) == SQLITE_OK);
+    while (sqlite3_step(st) == SQLITE_ROW)
+        if (!strcmp((const char *)sqlite3_column_text(st, 0), "wrap_salt"))
+            has_wrap = 1;
+    sqlite3_finalize(st);
+    sqlite3_close(sql);
+    ASSERT(has_wrap); /* the upgrade added it in place */
+
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    make_bridge(&b, "aaaa0000aaaa0000aaaa0000aaaa0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK);
+    ASSERT(got.generation == 3 && got.nmembers == 2 && !got.destroyed);
+    ASSERT(got.salt[0] == 0x5a && got.public_key[31] == 0x6b);
+    ASSERT(!strcmp(got.members[0].label, "Root.Alternative")); /* roster in label order */
+    ASSERT(got.members[1].signing_public[0] == 0x02);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    ASSERT(!strcmp(live[0].uid, b.uid));
+    ASSERT(fl_user_db_bridges_live(&db, live, 0, &n) == FL_RESULT_NOMEM && n == 0); /* never partial */
+
+    {
+        static const char *bad_gen[] = {
+            "UPDATE account_bridges SET generation=1.5 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation='gen' WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation=0 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+            "UPDATE account_bridges SET generation=4294967296 WHERE uid='aaaa0000aaaa0000aaaa0000aaaa0000';",
+        };
+        size_t gi;
+
+        for (gi = 0; gi < sizeof bad_gen / sizeof bad_gen[0]; gi++) {
+            ASSERT(kq_test_exec_sql(path, bad_gen[gi]) == 0);
+            ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+            ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        }
+        /* Numeric text stays text only without integer affinity. column_int64 would turn '3' into 3. */
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_text (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation TEXT, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_text SELECT uid, '3', salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_text RENAME TO account_bridges;") == 0);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        /* The column is NOT NULL, so a NULL generation has to be written behind that constraint. */
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_null (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation INTEGER, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_null SELECT uid, NULL, salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_null RENAME TO account_bridges;") == 0);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+        ASSERT(kq_test_exec_sql(path,
+                                "CREATE TABLE account_bridges_ok (uid TEXT PRIMARY KEY NOT NULL,"
+                                " generation INTEGER NOT NULL, salt BLOB NOT NULL, public_key BLOB NOT NULL,"
+                                " destroyed INTEGER NOT NULL DEFAULT 0);"
+                                "INSERT INTO account_bridges_ok SELECT uid, 3, salt, public_key, destroyed"
+                                " FROM account_bridges;"
+                                "DROP TABLE account_bridges;"
+                                "ALTER TABLE account_bridges_ok RENAME TO account_bridges;") == 0);
+        ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.generation == 3);
+        ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    }
+
+    memset(sealed, 0x77, sizeof sealed);
+    memset(salt, 0x88, sizeof salt);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridge_put_sealed_key(&db, b.uid, "Root.Nobody", sealed, sizeof sealed, salt) ==
+           FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridge_put_sealed_key(&db, b.uid, "Root.Flinstone.Bob", sealed, sizeof sealed, salt) ==
+           FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_OK);
+    ASSERT(len == sizeof sealed && out[95] == 0x77 && out_salt[15] == 0x88);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, 8, &len, out_salt) ==
+           FL_RESULT_NOMEM);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_bridge_members SET sealed_bridge_key=x'99', wrap_salt=NULL"
+                            " WHERE label='Root.Alternative';") == 0);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Alternative", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+
+    make_bridge(&b, "aaaa0000aaaa0000aaaa0000aaaa0000", "Root.Flinstone.Bob", "Root.Alternative.Ann");
+    b.generation = 4;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.generation == 4);
+    ASSERT(fl_user_db_bridge_sealed_key(&db, b.uid, "Root.Flinstone.Bob", out, sizeof out, &len, out_salt) ==
+           FL_RESULT_NOENT);
+
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_OK && got.destroyed == 1);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    make_bridge(&b, "bbbb0000bbbb0000bbbb0000bbbb0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(kq_test_exec_sql(path, "UPDATE account_bridges SET salt=x'00' WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_NOENT);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    ASSERT(kq_test_exec_sql(path,
+                            "UPDATE account_bridge_members SET signing_public=x'00' WHERE uid="
+                            "'bbbb0000bbbb0000bbbb0000bbbb0000' AND label='Root.Alternative';"
+                            "UPDATE account_bridges SET salt=zeroblob(16) WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    ASSERT(kq_test_exec_sql(path, "UPDATE account_bridges SET destroyed=1 WHERE uid='bbbb0000bbbb0000bbbb0000bbbb0000';") == 0);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    make_bridge(&b, "cccc1111cccc1111cccc1111cccc1111", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_OK);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 1);
+    ASSERT(sqlite3_open(path, &sql) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    ASSERT(fl_user_db_bridge_get(&db, b.uid, &got) == FL_RESULT_ERR);
+    ASSERT(sqlite3_exec(sql, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(sqlite3_exec(sql, "ALTER TABLE account_bridges DROP COLUMN destroyed;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(sql);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_ERR && n == 0);
+    b.nmembers = 1;
+    ASSERT(fl_user_db_bridge_put(&db, &b) == FL_RESULT_INVAL);
+    unlink(path);
+
+    ASSERT(temp_db(path, sizeof path) == 0);
+    ASSERT(kq_test_exec_sql(path, "CREATE TABLE users (name TEXT PRIMARY KEY NOT NULL);") == 0);
+    memset(&db, 0, sizeof db);
+    snprintf(db.path, sizeof db.path, "%s", path);
+    ASSERT(fl_user_db_bridges_live(&db, live, FL_USER_BRIDGES_MAX, &n) == FL_RESULT_OK && n == 0);
+    unlink(path);
+    return 0;
+}
+
+/* The switch factor is KeyQuorum's (kq_access_requirement) over the live bridges; any error is REFUSED. */
+static int test_unlock_requirement(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+    fl_kq_requirement_t r;
+
+    ASSERT(fl_user_db_find(db, "Bob") && fl_user_db_find(db, "Alternative"));
+    r = fl_kq_unlock_requirement("Flinstone", "Flinstone", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_NONE && r.bridge_index == -1 && !r.needs_parent_grant);
+    r = fl_kq_unlock_requirement("Flinstone", "Flinstone", 1);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD); /* sudo: Root's token */
+    r = fl_kq_unlock_requirement("flinstone", "root", 0); /* names are case-insensitive, key ids are not */
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD);
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD && !r.needs_parent_grant);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD && r.bridge_uid[0] == '\0');
+    r = fl_kq_unlock_requirement("Bob", "Nobody", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+    r = fl_kq_unlock_requirement(NULL, "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+
+    make_bridge(&b, "cccc0000cccc0000cccc0000cccc0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && r.bridge_index == 0);
+    ASSERT(!strcmp(r.bridge_uid, b.uid));
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw", NULL) == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Flinstone", "flinstone", NULL) == FL_KQ_BRIDGE_REFUSED);
+    ASSERT(fl_kq_prove_bridge_member("dddd0000dddd0000dddd0000dddd0000", "Bob", "pw", NULL) == FL_KQ_BRIDGE_STALE);
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    r = fl_kq_unlock_requirement("Bob", "Alternative", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_KQST_PASSWORD && r.bridge_index == -1);
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Bob", "pw", NULL) == FL_KQ_BRIDGE_STALE);
+    return 0;
+}
+
+static char s_audit[256];
+
+/* Expands on one line, so a failure names the caller's line. */
+#define REFUSED(call, rc, audit) do { \
+    ASSERT((call) == (rc)); \
+    ASSERT(!strcmp(s_audit, (audit))); \
+} while (0)
+
+static void capture_audit(const char *actor, const char *event, const char *subject, const char *detail) {
+    (void)actor;
+    (void)subject;
+    snprintf(s_audit, sizeof s_audit, "%s:%s", event ? event : "", detail ? detail : "");
+}
+
+static fl_result_t switch_to(const char *target, int sudo, const char *pw, const char *member,
+                             const char *member_pw) {
+    fl_session_switch_request_t req = {target, sudo, pw, member, member_pw, NULL};
+
+    s_audit[0] = '\0';
+    return fl_session_switch_user(&req);
+}
+
+static fl_result_t sudo_i_to(const char *root_pw, const char *invoker_pw) {
+    fl_session_switch_request_t req = {"Root", 1, root_pw, NULL, NULL, invoker_pw};
+
+    s_audit[0] = '\0';
+    return fl_session_switch_user(&req);
+}
+
+static void sudo_logout_during(void) { (void)fl_session_logout(); }
+
+static void sudo_root_password_only_during(void) {
+    (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD);
+}
+
+static void sudo_root_password_during(void) {
+    (void)fl_session_set_password("Root", "other");
+    (void)fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST);
+}
+
+static void sudo_flinstone_kqst_during(void) {
+    (void)fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD_KQST);
+}
+
+/* su and sudo -i commit only through fl_session_switch_user; a KQST-mode account never switches on a password alone. */
+static int test_session_switch(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(switch_to("Nobody", 0, "x", NULL, NULL) == FL_RESULT_NOENT);
+    ASSERT(switch_to(NULL, 0, "x", NULL, NULL) == FL_RESULT_INVAL);
+    REFUSED(switch_to("Bob", 0, "wrong", NULL, NULL), FL_RESULT_ACCES, "su-refused:password");
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(switch_to("Bob", 0, NULL, NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob") && s_audit[0] == '\0');
+    ASSERT(switch_to("Bob", 0, NULL, NULL, NULL) == FL_RESULT_OK);
+    ASSERT(switch_to("Alternative", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(switch_to("Alternative", 0, "alternative", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-kqst-legacy:password-only account"));
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    make_bridge(&b, "eeee0000eeee0000eeee0000eeee0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:bridge-member");
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
+    REFUSED(switch_to("Bob", 0, "wrong", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:password");
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+/* sudo needs Root's token: a password-only Root is refused before any password is checked. */
+    ASSERT(!fl_session_sudo_needs_root());
+    REFUSED(switch_to("root", 1, "alternative", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(switch_to("root", 1, "root", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    ASSERT(fl_session_is_elevated_account());
+    REFUSED(switch_to("Root", 1, NULL, NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(switch_to("Root", 1, "root", NULL, NULL), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:no-root-kqst");
+    ASSERT(fl_session_sudo_authenticate(NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(!fl_session_has_elevation());
+    ASSERT(strcmp(s_audit, "sudo-kqst-legacy:password-only account") != 0);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:kqst");
+    REFUSED(sudo_i_to("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:kqst");
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+static int s_stub_grant;
+
+static int stub_access_parent_grant(const char *current, const char *target, int sudo,
+                                    const kq_bridge_t *live_bridges, size_t nbridges, int parent_approval,
+                                    int *bridge_index_out, int *needs_parent_grant_out) {
+    (void)current, (void)target, (void)sudo, (void)live_bridges, (void)nbridges, (void)parent_approval;
+    if (bridge_index_out)
+        *bridge_index_out = -1;
+    if (needs_parent_grant_out)
+        *needs_parent_grant_out = s_stub_grant;
+    return FL_KQ_ACCESS_PASSWORD;
+}
+
+static void patch_no_access(fl_kq_driver_t *d) { d->access_requirement = NULL; }
+static void patch_no_prove(fl_kq_driver_t *d) { d->bridge_prove = NULL; }
+static void patch_no_verify(fl_kq_driver_t *d) { d->bridge_verify = NULL; }
+static void patch_no_connects(fl_kq_driver_t *d) { d->bridge_connects = NULL; }
+static void patch_parent_grant(fl_kq_driver_t *d) { d->access_requirement = stub_access_parent_grant; }
+
+static int exec_on_session_db(const char *stmt) {
+    return kq_test_exec_sql(fl_session_user_db()->path, stmt);
+}
+
+static int pair_stub_token(const char *label, const char *kqst) {
+    static const uint8_t zero[32];
+
+    return kq_test_pair_account(fl_session_user_db()->path, label, kqst, zero, zero, zero, 32, 0);
+}
+
+/* Each refusal below refuses outright; none falls to the password-only (legacy) branch. */
+static int test_switch_refusals(void) {
+    fl_user_db_t *db = fl_session_user_db_mut();
+    fl_user_bridge_t b;
+    fl_kq_requirement_t r;
+    char uid[40], kqst[300];
+    sqlite3 *lock = NULL;
+    unsigned i;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    s_patch = patch_no_access;
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_REFUSED);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
+    s_patch = patch_parent_grant;
+    s_stub_grant = 1;
+    r = fl_kq_unlock_requirement("Flinstone", "Bob", 0);
+    ASSERT(r.factor == FL_KQ_ACCESS_PASSWORD && r.needs_parent_grant == 1);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:parent-grant");
+    s_stub_grant = 0;
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK); /* the stub alone lets it through */
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    s_patch = patch_no_connects;
+    ASSERT(fl_heritage_bridge_connects("Root.Flinstone.Bob", "Root.Alternative.Ann", "Root.Flinstone.Bob",
+                                       "Root.Alternative.Ann") == 0);
+    s_patch = NULL;
+    ASSERT(fl_heritage_bridge_connects("Root.Flinstone.Bob", "Root.Alternative.Ann", "Root.Flinstone.Bob",
+                                       "Root.Alternative.Ann") == 1);
+
+    make_bridge(&b, "abab0000abab0000abab0000abab0000", "Root.Flinstone.Bob", "Root.Alternative");
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Alternative") == FL_RESULT_OK);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST);
+    s_patch = patch_no_prove;
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
+    s_patch = patch_no_verify;
+    ASSERT(fl_kq_prove_bridge_member(b.uid, "Alternative", "alternative", NULL) == FL_KQ_BRIDGE_INVALID);
+    REFUSED(switch_to("Bob", 0, "pw", "Alternative", "alternative"), FL_RESULT_ACCES, "su-refused:bridge-proof");
+    s_patch = NULL;
+
+/* A malformed live row refuses the switch rather than lowering to the cross-branch factor. */
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET public_key=x'00' WHERE uid="
+                              "'abab0000abab0000abab0000abab0000';") == 0);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    b.destroyed = 1;
+    ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    ASSERT(sqlite3_open(fl_session_user_db()->path, &lock) == SQLITE_OK);
+    ASSERT(sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) == SQLITE_OK);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
+    ASSERT(sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(lock);
+
+    for (i = 0; i <= FL_USER_BRIDGES_MAX; i++) {
+        snprintf(uid, sizeof uid, "%08x000000000000000000%06x", 0xf00du, i);
+        make_bridge(&b, uid, "Root.Flinstone.Bob", "Root.Third");
+        ASSERT(fl_user_db_bridge_put(db, &b) == FL_RESULT_OK);
+    }
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_REFUSED);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:policy");
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed=1;") == 0);
+    ASSERT(fl_kq_unlock_requirement("Alternative", "Bob", 0).factor == FL_KQ_ACCESS_KQST_PASSWORD);
+
+    snprintf(kqst, sizeof kqst, "%s.bob-missing.kqst", fl_session_user_db()->path);
+    unlink(kqst);
+    ASSERT(pair_stub_token("Root.Flinstone.Bob", kqst) == 0);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
+    ASSERT(kq_test_write_text(kqst, "not a slot token") == 0);
+    ASSERT(exec_on_session_db("UPDATE account_keys SET signing_public=x'00' WHERE label='Root.Flinstone.Bob';") == 0);
+    REFUSED(switch_to("Bob", 0, "pw", NULL, NULL), FL_RESULT_ACCES, "su-refused:kqst");
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root.Flinstone.Bob';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+static int stub_slot_open_root(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                               const uint8_t dev[16], const uint8_t spub[32], const uint8_t epub[32],
+                               uint8_t signing_out[32], uint8_t encryption_out[32]) {
+    (void)kqst, (void)klen, (void)dev, (void)spub, (void)epub;
+    memset(signing_out, 0, 32);
+    memset(encryption_out, 0, 32);
+    return (label && passphrase && !strcmp(label, "Root") && !strcmp(passphrase, "root")) ? FL_KQ_ACCOUNT_OK
+                                                                                         : FL_KQ_ACCOUNT_INVALID;
+}
+
+/* sudo_sign/sudo_verify stand-ins: a half is 64 bytes of its role; the pair verifies only with both halves. */
+static char s_cosign_action[64];
+static int s_cosign_signs, s_cosign_verifies;
+static uint8_t s_cosign_nonce[16];
+
+static int stub_sudo_sign(int role, const char *invoker, const char *authority, const uint8_t *action,
+                          size_t action_len, const uint8_t nonce[16], const uint8_t secret[32],
+                          uint8_t sig_out[64]) {
+    (void)invoker, (void)authority, (void)secret;
+    s_cosign_signs++;
+    snprintf(s_cosign_action, sizeof s_cosign_action, "%.*s", (int)action_len, (const char *)action);
+    memcpy(s_cosign_nonce, nonce, 16);
+    memset(sig_out, role, 64);
+    return FL_KQ_ACCOUNT_OK;
+}
+
+static int stub_sudo_verify(const char *invoker, const char *authority, const uint8_t *action,
+                            size_t action_len, const uint8_t nonce[16], const uint8_t invoker_public[32],
+                            const uint8_t invoker_sig[64], const uint8_t authority_public[32],
+                            const uint8_t authority_sig[64]) {
+    const fl_user_db_t *db = fl_session_user_db();
+    const fl_user_record_t *inv = invoker ? fl_user_db_find_by_key(db, invoker) : NULL;
+    unsigned char dev[16], inv_pub[32], root_pub[32], enc[32];
+
+    (void)action, (void)action_len;
+    s_cosign_verifies++;
+    if (!inv || !authority || strcmp(authority, "Root") != 0 ||
+        fl_user_db_kqst_pairing(db, "Root", dev, root_pub, enc) != FL_RESULT_OK)
+        return 0;
+    if (inv->auth_mode == FL_USER_AUTH_PASSWORD_KQST) {
+        if (fl_user_db_kqst_pairing(db, inv->key_id, dev, inv_pub, enc) != FL_RESULT_OK)
+            return 0;
+    } else {
+        memcpy(inv_pub, inv->signing_public, 32);
+    }
+    return memcmp(invoker_public, inv_pub, 32) == 0 && memcmp(authority_public, root_pub, 32) == 0 &&
+           invoker_sig[0] == FL_KQ_SUDO_INVOKER &&
+           invoker_sig[63] == FL_KQ_SUDO_INVOKER && authority_sig[0] == FL_KQ_SUDO_AUTHORITY &&
+           authority_sig[63] == FL_KQ_SUDO_AUTHORITY && memcmp(nonce, s_cosign_nonce, 16) == 0;
+}
+
+static void patch_root_slot(fl_kq_driver_t *d) {
+    d->slot_open = stub_slot_open_root;
+    d->sudo_sign = stub_sudo_sign;
+    d->sudo_verify = stub_sudo_verify;
+}
+
+static int stub_sudo_verify_never(const char *invoker, const char *authority, const uint8_t *action,
+                                  size_t action_len, const uint8_t nonce[16],
+                                  const uint8_t invoker_public[32], const uint8_t invoker_sig[64],
+                                  const uint8_t authority_public[32], const uint8_t authority_sig[64]) {
+    (void)invoker, (void)authority, (void)action, (void)action_len, (void)nonce;
+    (void)invoker_public, (void)invoker_sig, (void)authority_public, (void)authority_sig;
+    return 0;
+}
+
+static void patch_root_slot_bad_verify(fl_kq_driver_t *d) {
+    patch_root_slot(d);
+    d->sudo_verify = stub_sudo_verify_never;
+}
+
+static void patch_root_slot_no_cosign(fl_kq_driver_t *d) {
+    patch_root_slot(d);
+    d->sudo_sign = NULL;
+}
+
+static int audit_is_cosign(const char *action, const char *invoker_factor) {
+    char want[200];
+    const char *nonce;
+    size_t n;
+
+    snprintf(want, sizeof want, "sudo-coauth:%s; cosign=%s; nonce=", action, invoker_factor);
+    n = strlen(want);
+    if (strncmp(s_audit, want, n) != 0)
+        return 0;
+    nonce = s_audit + n;
+    return strlen(nonce) == 32 && strspn(nonce, "0123456789abcdef") == 32;
+}
+
+/* With a KQST-mode Root, sudo takes Root's password and token, never the caller's own, and grants only while the login is unchanged. */
+static int test_sudo_root_token(void) {
+    char kqst[300];
+
+    fl_session_set_audit_hook(capture_audit);
+    snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
+    ASSERT(kq_test_write_text(kqst, "stub slot token") == 0);
+    ASSERT(pair_stub_token("Root", kqst) == 0);
+    s_patch = patch_root_slot;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+
+    REFUSED(fl_session_sudo_authenticate("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
+    ASSERT(!fl_session_has_elevation());
+    REFUSED(fl_session_sudo_authenticate("root", NULL), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    REFUSED(fl_session_sudo_authenticate("root", "root"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    ASSERT(!fl_session_has_elevation());
+/* Root's password and token plus the invoker's own: granted, co-signed, and both halves verified. */
+    s_audit[0] = '\0';
+    s_cosign_signs = s_cosign_verifies = 0;
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo", "key"));
+    ASSERT(s_cosign_signs == 2 && s_cosign_verifies == 1 && !strcmp(s_cosign_action, "sudo"));
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+    {
+        char first[sizeof s_audit];
+
+        snprintf(first, sizeof first, "%s", s_audit);
+        ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+        ASSERT(audit_is_cosign("sudo", "key") && strcmp(first, s_audit) != 0);
+        fl_session_drop_elevation();
+    }
+    s_patch = patch_root_slot_bad_verify;
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:cosign");
+    ASSERT(!fl_session_has_elevation());
+    s_patch = patch_root_slot_no_cosign;
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:cosign");
+    ASSERT(!fl_session_has_elevation());
+    s_patch = patch_root_slot;
+
+    fl_session_test_set_switch_pre_lock(sudo_logout_during);
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "sudo-refused:superseded"));
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_test_set_switch_pre_lock(sudo_root_password_only_during);
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:mode");
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    fl_session_test_set_switch_pre_lock(sudo_flinstone_kqst_during);
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:mode");
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    fl_session_test_set_switch_pre_lock(sudo_root_password_during);
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
+    ASSERT(!fl_session_has_elevation());
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(fl_session_set_password("Root", "root") == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Root")->auth_mode == FL_USER_AUTH_PASSWORD);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+
+    REFUSED(sudo_i_to("flinstone", "flinstone"), FL_RESULT_ACCES, "sudo-refused:password");
+    REFUSED(sudo_i_to("root", NULL), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    REFUSED(sudo_i_to("root", "wrong"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo -i", "key"));
+    ASSERT(!strcmp(s_cosign_action, "sudo -i Root"));
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    REFUSED(sudo_i_to(NULL, NULL), FL_RESULT_ACCES, "sudo-refused:password");
+    ASSERT(sudo_i_to("root", NULL) == FL_RESULT_OK);
+
+    s_patch = NULL;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+static int test_sudo_commands_need_root_token(void) {
+    char *sudo_i_argv[] = {"sudo", "-i", NULL};
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(!fl_session_sudo_needs_root());
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!fl_session_has_elevation());
+    ASSERT(setenv("FL_CMD_PASSWORD", "flinstone", 1) == 0);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_run(2, sudo_i_argv) != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    unsetenv("FL_CMD_PASSWORD");
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* A slot_open stand-in: Root's token opens with "root", Flinstone's with "flinstone"; anything else is INVALID. */
+static int facts_are(const uint8_t *p, uint8_t v, size_t n) {
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        if (p[i] != v)
+            return 0;
+    return 1;
+}
+
+static int stub_slot_open_facts(const uint8_t *kqst, size_t klen, const char *label, const char *passphrase,
+                                const uint8_t dev[16], const uint8_t spub[32], const uint8_t epub[32],
+                                uint8_t signing_out[32], uint8_t encryption_out[32]) {
+    const char *want_pw;
+    uint8_t d, sg, en;
+
+    memset(signing_out, 0, 32);
+    memset(encryption_out, 0, 32);
+    if (!label || !passphrase || klen < 9 || memcmp(kqst, "stub kqst", 9) != 0)
+        return FL_KQ_ACCOUNT_INVALID;
+    if (!strcmp(label, "Root")) {
+        want_pw = "root", d = 0x11, sg = 0x22, en = 0x33;
+    } else if (!strcmp(label, "Root.Flinstone")) {
+        want_pw = "flinstone", d = 0x44, sg = 0x55, en = 0x66;
+    } else {
+        return FL_KQ_ACCOUNT_INVALID;
+    }
+    if (!facts_are(dev, d, 16) || !facts_are(spub, sg, 32) || !facts_are(epub, en, 32))
+        return FL_KQ_ACCOUNT_INVALID;
+    if (strcmp(passphrase, want_pw) != 0)
+        return FL_KQ_ACCOUNT_WRONG_PASSWORD;
+    memset(signing_out, 0x5a, 32);
+    return FL_KQ_ACCOUNT_OK;
+}
+
+static void patch_facts_slot(fl_kq_driver_t *d) {
+    d->slot_open = stub_slot_open_facts;
+    d->sudo_sign = stub_sudo_sign;
+    d->sudo_verify = stub_sudo_verify;
+}
+
+static int write_stub_token(const char *path) { return kq_test_write_text(path, "stub kqst token"); }
+
+static int row_generation(const char *key_id) {
+    fl_user_kqst_row_t row;
+
+    if (fl_user_db_kqst_row_get(fl_session_user_db(), key_id, &row) != FL_RESULT_OK)
+        return -1;
+    return row.present ? (int)row.generation : 0;
+}
+
+static int saved_auth_mode(const char *name) {
+    fl_user_record_t rec;
+
+    if (fl_session_reload_users() != FL_RESULT_OK || fl_session_snapshot_account(name, &rec) != FL_RESULT_OK)
+        return -1;
+    return rec.auth_mode;
+}
+
+/* The logged-in account pairs itself with a KQST matching the given facts; sudo is co-authorised by both tokens. */
+static int test_kqst_enroll(void) {
+    unsigned char d_root[16], s_root[32], e_root[32], d_fl[16], s_fl[32], e_fl[32];
+    char root_tok[300], root_tok2[300], fl_tok[300], missing[300];
+    char dev_hex[33], sig_hex[65], enc_hex[65];
+    char *enroll_argv[] = {"kqst", "enroll", fl_tok, dev_hex, sig_hex, enc_hex, NULL};
+    char *status_argv[] = {"kqst", "status", NULL};
+    int64_t gen = 0;
+
+    memset(d_root, 0x11, sizeof d_root);
+    memset(s_root, 0x22, sizeof s_root);
+    memset(e_root, 0x33, sizeof e_root);
+    memset(d_fl, 0x44, sizeof d_fl);
+    memset(s_fl, 0x55, sizeof s_fl);
+    memset(e_fl, 0x66, sizeof e_fl);
+    snprintf(root_tok, sizeof root_tok, "%s.enrol-root.kqst", fl_session_user_db()->path);
+    snprintf(root_tok2, sizeof root_tok2, "%s.enrol-root2.kqst", fl_session_user_db()->path);
+    snprintf(fl_tok, sizeof fl_tok, "%s.enrol-flinstone.kqst", fl_session_user_db()->path);
+    snprintf(missing, sizeof missing, "%s.enrol-missing.kqst", fl_session_user_db()->path);
+    unlink(missing);
+    ASSERT(write_stub_token(root_tok) == 0 && write_stub_token(root_tok2) == 0 && write_stub_token(fl_tok) == 0);
+    fl_session_set_audit_hook(capture_audit);
+    s_patch = patch_facts_slot;
+    ASSERT(row_generation("Root") == 0);
+    ASSERT(!fl_session_sudo_needs_root());
+
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    REFUSED(fl_session_enroll_kqst("flinstone", root_tok, d_root, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:password");
+    REFUSED(fl_session_enroll_kqst("root", root_tok, d_fl, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:kqst");
+    REFUSED(fl_session_enroll_kqst("root", missing, d_root, s_root, e_root, 1, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:kqst");
+    ASSERT(fl_session_enroll_kqst("root", root_tok, NULL, s_root, e_root, 1, &gen) == FL_RESULT_INVAL);
+    ASSERT(row_generation("Root") == 0);
+    ASSERT(!fl_session_sudo_needs_root());
+    fl_session_test_set_switch_pre_lock(sudo_logout_during);
+    ASSERT(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 1, &gen) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:superseded"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(row_generation("Root") == 0);
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+
+    ASSERT(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 1700000001, &gen) == FL_RESULT_OK);
+    ASSERT(gen == 1);
+    ASSERT(!strcmp(s_audit, "kqst-enrol:generation=1"));
+    ASSERT(row_generation("Root") == 1);
+    ASSERT(saved_auth_mode("Root") == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK); /* the reload kept the login; set it again */
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_kq_open_account("Root", "root", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account("Root", "flinstone", NULL) != FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_session_enroll_kqst("root", root_tok2, d_root, s_root, e_root, 1700000002, &gen) == FL_RESULT_OK);
+    ASSERT(gen == 2 && row_generation("Root") == 2);
+    unlink(root_tok2); /* the token Root has is gone: a password alone never replaces it */
+    REFUSED(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 3, &gen), FL_RESULT_ACCES, "kqst-enrol-refused:old-kqst");
+    ASSERT(row_generation("Root") == 2);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_enroll_kqst("root", root_tok, d_root, s_root, e_root, 4, &gen) == FL_RESULT_OK);
+    ASSERT(gen == 1);
+
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo", "key"));
+    fl_session_drop_elevation();
+
+    fl_hex_encode(d_fl, sizeof d_fl, dev_hex);
+    fl_hex_encode(s_fl, sizeof s_fl, sig_hex);
+    fl_hex_encode(e_fl, sizeof e_fl, enc_hex);
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    ASSERT(cmd_kqst_run(6, enroll_argv) != 0); /* Root's password is not Flinstone's */
+    ASSERT(!strcmp(s_audit, "kqst-enrol-refused:password"));
+    ASSERT(setenv("FL_CMD_PASSWORD", "flinstone", 1) == 0);
+    ASSERT(cmd_kqst_run(5, enroll_argv) != 0); /* usage: a fact is missing */
+    ASSERT(cmd_kqst_run(6, enroll_argv) == 0);
+    ASSERT(!strcmp(s_audit, "kqst-enrol:generation=1"));
+    ASSERT(cmd_kqst_run(2, status_argv) == 0);
+    unsetenv("FL_CMD_PASSWORD");
+    ASSERT(saved_auth_mode("Flinstone") == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo", "token"));
+    fl_session_drop_elevation();
+    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo -i", "token"));
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    unlink(fl_tok);
+    REFUSED(fl_session_sudo_authenticate("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:invoker-kqst");
+    REFUSED(sudo_i_to("root", "flinstone"), FL_RESULT_ACCES, "sudo-refused:invoker-kqst");
+    ASSERT(!fl_session_has_elevation());
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+
+    ASSERT(write_stub_token(fl_tok) == 0);
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:invoker-password"));
+    ASSERT(!fl_session_has_elevation());
+    unsetenv("FL_CMD_PASSWORD");
+
+    s_patch = NULL;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_save_users() == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label IN ('Root','Root.Flinstone');") == 0);
+    unlink(root_tok);
+    unlink(fl_tok);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+static fl_result_t stub_opened(const fl_user_record_t *account, const uint8_t secret[32], uint64_t gen) {
+    (void)account, (void)secret, (void)gen;
+    return FL_RESULT_OK;
+}
+
+static int file_mode_is(const char *path, mode_t want) {
+    struct stat st;
+
+    return stat(path, &st) == 0 && (st.st_mode & 0777) == want;
+}
+
+/* The sudo window lasts 15 minutes from the grant; a revoked token has no window to refresh. */
+static int test_elevation_window_refresh(void) {
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    int64_t first = 0, again = 0, now = 0;
+    const int64_t ttl = (int64_t)FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS * 1000000000LL;
+
+    ASSERT(FL_ELEVATION_LAB_TTL_SOFT_MAX_SECONDS == 15u * 60u);
+    ASSERT(fl_time_monotonic_ns(&now) == FL_RESULT_OK);
+    ASSERT(fl_elevation_grant("Root.Flinstone", "sudo", &tok) == FL_RESULT_OK);
+    ASSERT(fl_elevation_expires(tok, &first) == FL_RESULT_OK && first > now && first <= now + ttl + 1000000000LL);
+    ASSERT(fl_elevation_refresh(tok, &again) == FL_RESULT_OK && again >= first);
+    ASSERT(fl_elevation_expires(tok, &first) == FL_RESULT_OK && first == again);
+    ASSERT(fl_elevation_expires(tok, NULL) == FL_RESULT_INVAL);
+    fl_elevation_revoke(tok);
+    ASSERT(fl_elevation_refresh(tok, &again) == FL_RESULT_NOENT);
+    ASSERT(fl_elevation_expires(tok, &again) == FL_RESULT_NOENT);
+    ASSERT(fl_elevation_refresh(FL_ELEVATION_TOKEN_NONE, NULL) == FL_RESULT_NOENT);
+    return 0;
+}
+
+/* The token directory refuses a kqst symlink, a group-writable one, or an unsafe key id; nothing is written there. */
+static int test_token_write_refuses_unsafe_places(void) {
+    char base[] = "/tmp/fl-kqst-safe-XXXXXX";
+    char real[600], link[600], path[700], pw[33];
+    uint8_t sign[32], box[32];
+    unsigned char dev[16], spub[32], epub[32];
+    struct stat st;
+
+    ASSERT(mkdtemp(base) != NULL);
+    ASSERT(kq_test_random_hex(pw, 16) == 0 && fl_random_bytes(sign, sizeof sign) == 0 &&
+           fl_random_bytes(box, sizeof box) == 0 && fl_random_bytes(dev, sizeof dev) == 0);
+
+    snprintf(path, sizeof path, "%s/ok/kqst/Root.x.kqst", base);
+    snprintf(real, sizeof real, "%s/ok", base);
+    ASSERT(mkdir(real, 0700) == 0);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) == FL_KQ_ACCOUNT_OK);
+    ASSERT(file_mode_is(path, 0600));
+    unlink(path);
+
+    snprintf(real, sizeof real, "%s/elsewhere", base);
+    snprintf(link, sizeof link, "%s/kqst", base);
+    ASSERT(mkdir(real, 0700) == 0 && symlink(real, link) == 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", link);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", real);
+    ASSERT(stat(path, &st) != 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst.new", real);
+    ASSERT(stat(path, &st) != 0);
+    unlink(link);
+
+    snprintf(real, sizeof real, "%s/shared", base);
+    ASSERT(mkdir(real, 0700) == 0 && chmod(real, 0770) == 0);
+    snprintf(path, sizeof path, "%s/Root.x.kqst", real);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+    ASSERT(stat(path, &st) != 0);
+
+    snprintf(path, sizeof path, "%s/ok/kqst/..kqst", base);
+    ASSERT(fl_kq_write_account_token("Root.x", pw, sign, box, dev, path, spub, epub) != FL_KQ_ACCOUNT_OK);
+
+    mem_domain_secure_zero(pw, sizeof pw);
+    mem_domain_secure_zero(sign, sizeof sign);
+    mem_domain_secure_zero(box, sizeof box);
+    ASSERT(kq_test_rmrf(base) == 0);
+    return 0;
+}
+
+/* The kernel makes and pairs each account's token with the real driver, in an owner-only file beside the store. */
+static int test_kqst_made_by_kernel(void) {
+    char fl_tok[600], root_tok[600], bob_tok[600], db_path[512], junk[600];
+    char *make_argv[] = {"kqst", "enroll", NULL};
+    int64_t gen = 0;
+
+    snprintf(db_path, sizeof db_path, "%s", fl_session_user_db()->path);
+    ASSERT(fl_kq_account_token_path(db_path, "Root.Flinstone", fl_tok, sizeof fl_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root", root_tok, sizeof root_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root.Flinstone.Bob", bob_tok, sizeof bob_tok) == 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a/b", junk, sizeof junk) != 0); /* never a path out */
+    ASSERT(fl_kq_account_token_path(db_path, "..", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "Root..x", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, ".hidden", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a b", junk, sizeof junk) != 0);
+    ASSERT(fl_kq_account_token_path(db_path, "a\\b", junk, sizeof junk) != 0);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob"));
+    unlink(fl_tok), unlink(root_tok), unlink(bob_tok);
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 1, &gen) == FL_RESULT_NOSYS);
+    ASSERT(!strcmp(s_audit, "kqst-make-refused:no-service"));
+    fl_session_set_login_hooks(NULL, NULL, stub_opened);
+    REFUSED(fl_session_make_kqst("Flinstone", "root", 1, &gen), FL_RESULT_ACCES, "kqst-make-refused:password");
+    ASSERT(access(fl_tok, F_OK) != 0);
+    ASSERT(row_generation("Root.Flinstone") == 0);
+
+    ASSERT(fl_session_make_kqst("Flinstone", "flinstone", 1700000100, &gen) == FL_RESULT_OK && gen == 1);
+    ASSERT(!strcmp(s_audit, "kqst-made:generation=1"));
+    ASSERT(file_mode_is(fl_tok, 0600) && row_generation("Root.Flinstone") == 1);
+    ASSERT(saved_auth_mode("Flinstone") == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "root", NULL) != FL_KQ_ACCOUNT_OK);
+    {
+        const fl_user_record_t *u = fl_user_db_find(fl_session_user_db(), "Flinstone");
+        unsigned char dev[16], sp[32], ep[32];
+
+        ASSERT(u && fl_user_db_kqst_pairing(fl_session_user_db(), u->key_id, dev, sp, ep) == FL_RESULT_OK);
+        ASSERT(!memcmp(sp, u->signing_public, 32) && !memcmp(ep, u->box_public, 32));
+    }
+    REFUSED(fl_session_make_kqst("Flinstone", "flinstone", 2, &gen), FL_RESULT_ACCES, "kqst-make-refused:exists");
+
+    ASSERT(fl_session_change_password("Flinstone", "wrong", "stone2") == FL_RESULT_ACCES);
+    ASSERT(fl_session_change_password("Flinstone", "flinstone", "stone2") == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "kqst-resealed:"));
+    ASSERT(fl_kq_open_account("Flinstone", "stone2", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_kq_open_account("Flinstone", "flinstone", NULL) != FL_KQ_ACCOUNT_OK);
+    ASSERT(file_mode_is(fl_tok, 0600) && row_generation("Root.Flinstone") == 1);
+    ASSERT(fl_session_change_password("Flinstone", "stone2", "flinstone") == FL_RESULT_OK);
+    ASSERT(rename(fl_tok, bob_tok) == 0);
+    ASSERT(fl_session_change_password("Flinstone", "flinstone", "stone2") == FL_RESULT_ERR);
+    ASSERT(!strcmp(s_audit, "kqst-reseal-refused:open"));
+    ASSERT(fl_session_verify_account_password("Flinstone", "flinstone"));
+    ASSERT(rename(bob_tok, fl_tok) == 0);
+
+    ASSERT(fl_session_set_user("Root") == FL_RESULT_OK);
+    ASSERT(setenv("FL_CMD_PASSWORD", "root", 1) == 0);
+    ASSERT(cmd_kqst_run(2, make_argv) == 0);
+    ASSERT(!strcmp(s_audit, "kqst-made:generation=1"));
+    ASSERT(cmd_kqst_run(2, make_argv) != 0); /* it has one now */
+    unsetenv("FL_CMD_PASSWORD");
+    ASSERT(file_mode_is(root_tok, 0600));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo", "token"));
+    fl_session_drop_elevation();
+    REFUSED(fl_session_sudo_authenticate("root", "root"), FL_RESULT_ACCES, "sudo-refused:invoker-password");
+    ASSERT(sudo_i_to("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(audit_is_cosign("sudo -i", "token"));
+    ASSERT(!strcmp(fl_session_current_user(), "Root"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(file_mode_is(bob_tok, 0600) && row_generation("Root.Flinstone.Bob") == 1);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob")->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(fl_kq_open_account("Bob", "pw", NULL) == FL_KQ_ACCOUNT_OK);
+    ASSERT(fl_session_set_password("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Bob")->auth_mode == FL_USER_AUTH_PASSWORD);
+    ASSERT(fl_session_login("Bob", "pw") == FL_RESULT_OK);
+    ASSERT(row_generation("Root.Flinstone.Bob") == 2);
+    ASSERT(fl_kq_open_account("Bob", "pw", NULL) == FL_KQ_ACCOUNT_OK);
+
+    fl_session_set_login_hooks(NULL, NULL, NULL);
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Flinstone", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_set_auth_mode("Bob", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(fl_session_save_users() == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label IN "
+                              "('Root','Root.Flinstone','Root.Flinstone.Bob');") == 0);
+    unlink(root_tok);
+    unlink(fl_tok);
+    unlink(bob_tok);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* su -c's restore takes the old identity back only while the login it was asked in is current. */
+static int test_restore_user(void) {
+    uint64_t gen;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    gen = fl_session_login_generation();
+    ASSERT(fl_session_restore_user("Flinstone", 0) == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    ASSERT(fl_session_restore_user("Flinstone", gen) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(fl_session_logout() == FL_RESULT_OK); /* a new login generation */
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    s_audit[0] = '\0';
+    ASSERT(fl_session_restore_user("Flinstone", gen) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob")); /* left as it is */
+    ASSERT(!strcmp(s_audit, "su-restore-refused:superseded"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* After the password is accepted, a new live bridge must change the factor; a writer holding the database keeps the switch from committing. */
+static int s_recheck_put = -1;
+static sqlite3 *s_switch_ex;
+static int s_switch_ex_rc = -1;
+
+static void switch_insert_live_bridge(void) {
+    fl_user_bridge_t b;
+
+    make_bridge(&b, "f00d0000f00d0000f00d0000f00d0000", "Root.Flinstone.Bob", "Root.Alternative");
+    s_recheck_put = fl_user_db_bridge_put(fl_session_user_db(), &b);
+}
+
+static void switch_hold_exclusive(void) {
+    s_switch_ex_rc = -1;
+    if (sqlite3_open(fl_session_user_db()->path, &s_switch_ex) != SQLITE_OK) {
+        sqlite3_close(s_switch_ex);
+        s_switch_ex = NULL;
+        return;
+    }
+    sqlite3_busy_timeout(s_switch_ex, 0);
+    s_switch_ex_rc = sqlite3_exec(s_switch_ex, "BEGIN EXCLUSIVE;", NULL, NULL, NULL);
+}
+
+static int test_switch_bridge_recheck(void) {
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed = 1;") == 0);
+    ASSERT(fl_session_set_user("Alternative") == FL_RESULT_OK);
+    fl_session_test_set_switch_pre_lock(switch_insert_live_bridge);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    ASSERT(s_recheck_put == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(exec_on_session_db("UPDATE account_bridges SET destroyed = 1;") == 0);
+
+    s_switch_ex = NULL;
+    fl_session_test_set_switch_pre_lock(switch_hold_exclusive);
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(s_audit, "su-refused:busy"));
+    ASSERT(!strcmp(fl_session_current_user(), "Alternative"));
+    fl_session_test_set_switch_pre_lock(NULL);
+    ASSERT(s_switch_ex && s_switch_ex_rc == SQLITE_OK);
+    ASSERT(sqlite3_exec(s_switch_ex, "ROLLBACK;", NULL, NULL, NULL) == SQLITE_OK);
+    sqlite3_close(s_switch_ex);
+    s_switch_ex = NULL;
+    ASSERT(switch_to("Bob", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* A second thread mutates a password during a switch; the mutation goes through the session lock. */
+static pthread_t s_mut_thread;
+static pthread_barrier_t s_mut_go, s_mut_done;
+static atomic_int s_mut_phase;
+static int s_mut_rc = -1;
+static int s_mut_op; /* 0 delete, 1 set password */
+static char s_mut_user[FL_USER_NAME_MAX];
+static char s_mut_newpw[32];
+static int s_during_phase = -1;
+static int s_during_present = -1;
+static int s_during_oldpw = -1;
+
+static void *session_mutator(void *arg) {
+    (void)arg;
+    pthread_barrier_wait(&s_mut_go);
+    atomic_store(&s_mut_phase, 1);
+    if (s_mut_op)
+        s_mut_rc = fl_session_set_password(s_mut_user, s_mut_newpw);
+    else
+        s_mut_rc = fl_session_remove_user(s_mut_user);
+    atomic_store(&s_mut_phase, 2);
+    pthread_barrier_wait(&s_mut_done);
+    return NULL;
+}
+
+static int start_mutator(const char *user, int op, const char *newpw) {
+    snprintf(s_mut_user, sizeof s_mut_user, "%s", user);
+    snprintf(s_mut_newpw, sizeof s_mut_newpw, "%s", newpw ? newpw : "");
+    s_mut_op = op;
+    s_mut_rc = -1;
+    atomic_store(&s_mut_phase, 0);
+    s_during_phase = s_during_present = s_during_oldpw = -1;
+    if (pthread_barrier_init(&s_mut_go, NULL, 2) != 0 || pthread_barrier_init(&s_mut_done, NULL, 2) != 0)
+        return -1;
+    if (pthread_create(&s_mut_thread, NULL, session_mutator, NULL) != 0)
+        return -1;
+    return 0;
+}
+
+static void finish_mutator(int wait_done) {
+    if (wait_done)
+        pthread_barrier_wait(&s_mut_done);
+    pthread_join(s_mut_thread, NULL);
+    pthread_barrier_destroy(&s_mut_go);
+    pthread_barrier_destroy(&s_mut_done);
+    fl_session_test_set_switch_pre_lock(NULL);
+    fl_session_test_set_switch_pre_commit(NULL);
+}
+
+static void pre_lock_finish_mutator(void) {
+    pthread_barrier_wait(&s_mut_go);
+    pthread_barrier_wait(&s_mut_done);
+}
+
+static void pre_commit_release_mutator(void) {
+    const fl_user_db_t *db = fl_session_user_db();
+
+    pthread_barrier_wait(&s_mut_go);
+    while (atomic_load(&s_mut_phase) < 1)
+        sched_yield();
+    s_during_phase = atomic_load(&s_mut_phase);
+    s_during_present = fl_user_db_find(db, s_mut_user) != NULL;
+    s_during_oldpw = fl_user_db_verify_password(db, s_mut_user, "pw");
+}
+
+static int test_switch_mutation_barriers(void) {
+    const fl_user_db_t *db;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Pax", "pw", 3200, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Qin", "pw", 3201, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Rex", "pw", 3202, 0, 0) == FL_RESULT_OK);
+    ASSERT(fl_session_add_user_under("Root.Flinstone", "Sue", "pw", 3203, 0, 0) == FL_RESULT_OK);
+
+    ASSERT(start_mutator("Pax", 1, "pw2") == 0);
+    fl_session_test_set_switch_pre_lock(pre_lock_finish_mutator);
+    ASSERT(switch_to("Pax", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    finish_mutator(0);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    db = fl_session_user_db();
+    ASSERT(fl_user_db_verify_password(db, "Pax", "pw2"));
+    ASSERT(!fl_user_db_verify_password(db, "Pax", "pw"));
+
+    ASSERT(start_mutator("Qin", 0, NULL) == 0);
+    fl_session_test_set_switch_pre_lock(pre_lock_finish_mutator);
+    ASSERT(switch_to("Qin", 0, "pw", NULL, NULL) == FL_RESULT_ACCES);
+    finish_mutator(0);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(!strcmp(s_audit, "su-refused:changed"));
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Qin") == NULL);
+
+    ASSERT(start_mutator("Rex", 1, "pw2") == 0);
+    fl_session_test_set_switch_pre_commit(pre_commit_release_mutator);
+    ASSERT(switch_to("Rex", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    finish_mutator(1);
+    ASSERT(s_mut_rc == FL_RESULT_OK);
+    ASSERT(s_during_phase == 1 && s_during_present == 1 && s_during_oldpw == 1);
+    ASSERT(!strcmp(fl_session_current_user(), "Rex"));
+    db = fl_session_user_db();
+    ASSERT(fl_user_db_verify_password(db, "Rex", "pw2"));
+    ASSERT(!fl_user_db_verify_password(db, "Rex", "pw"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(start_mutator("Sue", 0, NULL) == 0);
+    fl_session_test_set_switch_pre_commit(pre_commit_release_mutator);
+    ASSERT(switch_to("Sue", 0, "pw", NULL, NULL) == FL_RESULT_OK);
+    finish_mutator(1);
+    ASSERT(s_mut_rc == FL_RESULT_ACCES);
+    ASSERT(s_during_phase == 1 && s_during_present == 1);
+    ASSERT(!strcmp(fl_session_current_user(), "Sue"));
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") != NULL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_remove_user("Sue") == FL_RESULT_OK);
+    ASSERT(fl_user_db_find(fl_session_user_db(), "Sue") == NULL);
+
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* A failed reload fails closed: the in-memory store publishes nothing and the file on disk is left as it was. */
+static int test_account_command_reload_fails_closed(void) {
+    char path[256];
+    char *argv[] = {"useradd", "Zed", NULL};
+    int rc;
+    int failed = 0;
+    sqlite3 *lock = NULL;
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    uint64_t gen;
+
+    if (fl_session_set_user("Root") != FL_RESULT_OK || !fl_session_is_elevated_account())
+        return 1;
+    snprintf(path, sizeof path, "%s", fl_session_user_db()->path);
+    if (!path[0] || kq_test_exec_sql(path, "UPDATE users SET auth_mode=2 WHERE name='Root';") != 0)
+        return 1;
+    if (sqlite3_open(path, &lock) != SQLITE_OK ||
+        sqlite3_exec(lock, "BEGIN EXCLUSIVE;", NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(lock);
+        return 1;
+    }
+/* A token and a sudo scope keep has_elevation true after the store is gone; the failed reload drops both. */
+    fl_session_begin_sudo_scope();
+    if (fl_elevation_grant("Root", "reload", &tok) != FL_RESULT_OK ||
+        setenv("FL_CMD_PASSWORD", "zed-pw", 1) != 0) {
+        sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_close(lock);
+        fl_session_end_sudo_scope();
+        return 1;
+    }
+    fl_session_bind_elevation(tok);
+    gen = fl_session_login_generation();
+    rc = cmd_useradd_run(2, argv);
+    unsetenv("FL_CMD_PASSWORD");
+    sqlite3_exec(lock, "ROLLBACK;", NULL, NULL, NULL);
+    sqlite3_close(lock);
+    if (rc == 0 || fl_session_users_loaded() || fl_session_user_db()->count != 0)
+        failed = 1;
+    if (fl_session_has_elevation() || fl_session_in_sudo_scope() ||
+        fl_session_current_user()[0] != '\0' || fl_session_login_generation() == gen)
+        failed = 1;
+    if (!auth_cell_is(path, "Root", SQLITE_INTEGER, 2, NULL) || auth_cell_is(path, "Zed", SQLITE_INTEGER, 0, NULL))
+        failed = 1;
+    if (kq_test_exec_sql(path, "UPDATE users SET auth_mode=0 WHERE name='Root';") != 0 ||
+        fl_session_reload_users() != FL_RESULT_OK || !fl_session_users_loaded() ||
+        fl_session_set_user("Flinstone") != FL_RESULT_OK)
+        return 1;
+    return failed;
+}
+
+static int s_switch_denies;
+
+static fl_authz_decision_t deny_identity_switch(unsigned op, void *ctx) {
+    (void)ctx;
+    if (op == (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH) {
+        s_switch_denies++;
+        return FL_AUTHZ_DENY;
+    }
+    return FL_AUTHZ_ALLOW;
+}
+
+/* A deny hook stops su and sudo before either asks for a password, including the sudo <command> path. */
+static int test_identity_switch_denied_before_prompt(void) {
+    char *su_argv[] = {"su", "Root", NULL};
+    char *sudo_argv[] = {"sudo", "-i", NULL};
+    char *sudo_k_argv[] = {"sudo", "-k", NULL};
+
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SU) ==
+           (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH);
+    ASSERT(fl_authz_subsystem_op_for_shell_cmd((unsigned)FL_SCMD_SUDO) ==
+           (unsigned)FL_AUTHZ_OP_IDENTITY_SWITCH);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    unsetenv("FL_CMD_PASSWORD");
+    s_switch_denies = 0;
+    fl_authz_subsystem_set_hook(deny_identity_switch, NULL);
+    ASSERT(cmd_su_run(2, su_argv) != 0);
+    ASSERT(cmd_sudo_run(2, sudo_argv) != 0);
+    ASSERT(cmd_sudo_require_auth() != 0);
+    ASSERT(cmd_sudo_run(2, sudo_k_argv) == 0);
+    fl_authz_subsystem_set_hook(NULL, NULL);
+    ASSERT(s_switch_denies == 3);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    return 0;
+}
+
+static int sudo_sign_with_answers(const char *line, const char *answers) {
+    char path[] = "/tmp/fl-sudo-renew-XXXXXX";
+    int fd = mkstemp(path), saved = dup(STDIN_FILENO), rc;
+
+    if (fd < 0 || saved < 0 || write(fd, answers, strlen(answers)) != (ssize_t)strlen(answers) ||
+        lseek(fd, 0, SEEK_SET) != 0 || dup2(fd, STDIN_FILENO) < 0) {
+        if (fd >= 0)
+            close(fd);
+        if (saved >= 0)
+            close(saved);
+        unlink(path);
+        return -1;
+    }
+    close(fd);
+    unlink(path);
+    clearerr(stdin);
+    rc = cmd_sudo_sign_action(line);
+    (void)dup2(saved, STDIN_FILENO);
+    close(saved);
+    clearerr(stdin);
+    return rc;
+}
+
+static void audit_end_window_on_coauth(const char *actor, const char *event, const char *subject,
+                                       const char *detail) {
+    capture_audit(actor, event, subject, detail);
+    if (event && !strcmp(event, "sudo-coauth"))
+        fl_elevation_revoke_all();
+}
+
+/* A sudo whose window ended is not reported as renewed; sudo asks for the full co-signature again. */
+static int test_sudo_renew_after_window_ended(void) {
+    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    static const char action_want[] = "sudo-action:sudo; nonce=";
+    char kqst[300];
+
+    fl_session_set_audit_hook(capture_audit);
+    unsetenv("FL_CMD_PASSWORD");
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+
+    ASSERT(!fl_session_sudo_needs_root());
+    ASSERT(fl_session_grant_elevation("sudo", &tok) == FL_RESULT_OK && tok != FL_ELEVATION_TOKEN_NONE);
+    ASSERT(fl_session_has_elevation());
+    fl_elevation_revoke(tok);
+    s_audit[0] = '\0';
+    ASSERT(cmd_sudo_sign_action("sudo") != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:no-root-kqst"));
+    ASSERT(!fl_session_has_elevation());
+
+    snprintf(kqst, sizeof kqst, "%s.root.kqst", fl_session_user_db()->path);
+    ASSERT(kq_test_write_text(kqst, "stub slot token") == 0);
+    ASSERT(pair_stub_token("Root", kqst) == 0);
+    s_patch = patch_root_slot;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD_KQST) == FL_RESULT_OK);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_sudo_needs_root());
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_has_elevation());
+    fl_elevation_revoke_all();
+    s_audit[0] = '\0';
+    ASSERT(sudo_sign_with_answers("sudo", "root\nflinstone\n") == 0);
+    ASSERT(!strncmp(s_audit, action_want, sizeof action_want - 1));
+    ASSERT(fl_session_has_elevation());
+    fl_session_drop_elevation();
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    fl_elevation_revoke_all();
+    ASSERT(sudo_sign_with_answers("sudo", "flinstone\nflinstone\n") != 0);
+    ASSERT(!strcmp(s_audit, "sudo-refused:password"));
+    ASSERT(!fl_session_has_elevation());
+    ASSERT(fl_session_sudo_authenticate("root", "flinstone") == FL_RESULT_OK);
+    fl_elevation_revoke_all();
+    fl_session_set_audit_hook(audit_end_window_on_coauth);
+    ASSERT(sudo_sign_with_answers("sudo", "root\nflinstone\n") != 0);
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(!fl_session_has_elevation());
+
+    s_patch = NULL;
+    ASSERT(fl_session_set_auth_mode("Root", FL_USER_AUTH_PASSWORD) == FL_RESULT_OK);
+    ASSERT(exec_on_session_db("DELETE FROM account_keys WHERE label='Root';") == 0);
+    unlink(kqst);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
+/* su -c's restore point is one capture of account and login together; a login in between is refused. */
+static int test_restore_point_captured_together(void) {
+    fl_session_restore_point_t before, after;
+
+    fl_session_set_audit_hook(capture_audit);
+    ASSERT(fl_session_capture_restore_point(NULL) == FL_RESULT_INVAL);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_capture_restore_point(&before) == FL_RESULT_OK);
+    ASSERT(!strcmp(before.user, "Flinstone"));
+    ASSERT(before.login_generation != 0 && before.login_generation == fl_session_login_generation());
+    ASSERT(fl_session_logout() == FL_RESULT_OK); /* a new login generation */
+    ASSERT(fl_session_set_user("Bob") == FL_RESULT_OK);
+    ASSERT(fl_session_capture_restore_point(&after) == FL_RESULT_OK);
+    ASSERT(!strcmp(after.user, "Bob"));
+    ASSERT(after.login_generation == fl_session_login_generation());
+    ASSERT(after.login_generation != before.login_generation);
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    ASSERT(fl_session_login_generation() == after.login_generation);
+    s_audit[0] = '\0';
+    ASSERT(fl_session_restore_user(before.user, before.login_generation) == FL_RESULT_BUSY);
+    ASSERT(!strcmp(fl_session_current_user(), "Flinstone"));
+    ASSERT(!strcmp(s_audit, "su-restore-refused:superseded"));
+    ASSERT(fl_session_restore_user(after.user, after.login_generation) == FL_RESULT_OK);
+    ASSERT(!strcmp(fl_session_current_user(), "Bob"));
+    ASSERT(fl_session_set_user("Flinstone") == FL_RESULT_OK);
+    fl_session_set_audit_hook(NULL);
+    return 0;
+}
+
 int main(void) {
     char db_path[256];
+    char db_dir[] = "/tmp/fl_heritage_storeXXXXXX";
     char tmpl[] = "/tmp/fl_heritage_jailXXXXXX";
     char *jail_parent;
     int rc = 0;
 
     (void)setenv("FL_USERS_LAB_DEFAULTS", "1", 1);
-    if (temp_db(db_path, sizeof db_path) != 0)
+    if (!mkdtemp(db_dir))
         return 1;
+    snprintf(db_path, sizeof db_path, "%s/users.db", db_dir);
     (void)setenv("FL_USERS_DB_PATH", db_path, 1);
     if (!mkdtemp(tmpl))
         return 1;
@@ -903,13 +2510,32 @@ int main(void) {
     RUN(test_signed_bridges);
     RUN(test_box_keys);
     RUN(test_share_gate);
+    RUN(test_auth_mode_reject_malformed);
+    RUN(test_auth_mode_startup_fail_closed);
     RUN(test_jail_homes, jail_parent);
+    RUN(test_private_bridge_store);
+    RUN(test_unlock_requirement);
+    RUN(test_session_switch);
+    RUN(test_switch_refusals);
+    RUN(test_sudo_root_token);
+    RUN(test_sudo_commands_need_root_token);
+    RUN(test_kqst_enroll);
+    RUN(test_kqst_made_by_kernel);
+    RUN(test_token_write_refuses_unsafe_places);
+    RUN(test_elevation_window_refresh);
+    RUN(test_restore_user);
+    RUN(test_restore_point_captured_together);
+    RUN(test_switch_bridge_recheck);
+    RUN(test_switch_mutation_barriers);
+    RUN(test_account_command_reload_fails_closed);
+    RUN(test_identity_switch_denied_before_prompt);
+    RUN(test_sudo_renew_after_window_ended);
 
     if (chdir("/tmp") != 0)
         rc = 1;
-    rmrf(jail_parent);
+    kq_test_rmrf(jail_parent);
     free(jail_parent);
-    unlink(db_path);
+    kq_test_rmrf(db_dir);
     if (rc == 0)
         printf("All heritage tests passed.\n");
     return rc;

@@ -1,48 +1,6 @@
-/******************************************************************************
- * BPForbes_Flinstone_Shell – Single-Session Thread-Pool Shell (Interactive &
- *                              Batch Modes)
- * ----------------------------------------------------------------------------
- * Author: Bailey Forbes
- * CSCI P436 Projects: P03, P05, P07, P08, & P09
- *
- * Description:
- *   This shell supports both interactive and batch modes. Disk operations are
- *   performed on text files and managed in clusters. Clusters are displayed in
- *   hexadecimal. The new –cd command (or its batch shortcut) creates a new disk
- *   file (<volume>_disk.dat legacy hex, or <volume>_disk.img for FAT32) filled with random data, then prints its contents.
- *
- *   The –cd command syntax is:
- *       -cd <volume> <rowCount> <nibbleCount> [<interactive>]
- *   The batch shortcut (invoked with exactly 3 or 4 parameters and the first not
- *   starting with a dash) is equivalent. In both cases the optional parameter is
- *   either -y or -n; if omitted in batch mode, –n is assumed.
- *
- *   Additionally, the –v and exit commands in batch mode assume –n if no flag is given.
- *
- * Compilation:
- *   Use the provided Makefile. To compile the main shell program, run:
- *
- *       make
- *
- *   This builds the executable "BPForbes_Flinstone_Shell".
- *
- *   To compile the unit tests (which use the CUnit testing framework), run:
- *
- *       make BPForbes_Flinstone_Tests
- *
- *   To install CUnit on Debian/Ubuntu, you can run:
- *
- *       sudo apt install libcunit1 libcunit1-dev
- *
- *   Unit tests are defined in BPForbes_Flinstone_Tests.c.
- *
- * Usage:
- *   - Interactive mode: run "./BPForbes_Flinstone_Shell" on a TTY (no command args).
- *   - Batch mode: supply commands as arguments; the shell exits after they finish
- *     (e.g., "./BPForbes_Flinstone_Shell ping 127.0.0.1 9").
- *
- *****************************************************************************/
+/* Interactive and batch shell over text disk files; see README for the command syntax. */
 
+#include "fl/audit_log.h"
 #include "common.h"
 #include "cmd_decl.h"
 #include "shell_io.h"
@@ -80,7 +38,6 @@ void cmd_server_atexit(void);
 #define PATH_MAX 4096
 #endif
 
-/* Recursively remove directory and contents */
 static void rmrf(const char *path) {
     DIR *d = opendir(path);
     if (!d) return;
@@ -136,7 +93,6 @@ static void shell_pool_cleanup(void) {
     pthread_cond_destroy(&g_pool.cond);
 }
 
-/* Case-insensitive compare (no locale/allocation) */
 static int eq_ci(const char *a, const char *b) {
     while (*a && *b) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
@@ -145,7 +101,6 @@ static int eq_ci(const char *a, const char *b) {
     return *a == *b;
 }
 
-/* Strip -Virtualization and -y/-n from argv; set g_vm_mode. Returns new argc. */
 static int parse_vm_args(int argc, char *argv[]) {
     int out = 1;  /* argv[0] always kept */
     int vm_confirm = 0;  /* -y = cleanup on exit */
@@ -173,7 +128,6 @@ static int parse_vm_args(int argc, char *argv[]) {
     return out;
 }
 
-/* Spawn popup terminal running shell in VM sandbox. Returns 0 on success, -1 if no terminal. */
 static int vm_spawn_popup(const char *exe_path) {
     char cmd[PATH_MAX + 128];
     snprintf(cmd, sizeof(cmd), "cd '%s' && exec '%s'", g_vm_root, exe_path);
@@ -237,17 +191,12 @@ int main(int argc, char *argv[]) {
     /* Lab weak seeds are opt-in; set FL_USERS_LAB_DEFAULTS=1 to enable. */
     if (!getenv("FL_USERS_LAB_DEFAULTS"))
         (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
-    /* Register the prompt-aware async print hooks so server / client
-     * background threads can interleave colour-tagged output with the
-     * interactive readline without gluing onto "shell> ". */
+    /* Prompt-aware print hooks, so background output does not glue onto "shell> ". */
     fl_shell_io_init();
-    /* Seed the random number generator */
     srand((unsigned) time(NULL));
 
-    /* Parse -Virtualization -y first */
     argc = parse_vm_args(argc, argv);
 
-    /* Fast path: single commands that need no init (no allocation) */
     if (argc == 2 && argv[1]) {
         if (strcmp(argv[1], "help") == 0) {
             fl_print_help_message();
@@ -263,7 +212,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* VM popup: -Virtualization -y with no other args (no -vm) -> spawn popup once */
     if (g_vm_mode && g_vm_cleanup && argc == 1 && !g_vm_run_embedded) {
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
@@ -296,11 +244,9 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* Initialize current working directory */
     if (getcwd(g_cwd, sizeof(g_cwd)) == NULL)
         g_cwd[0] = '.', g_cwd[1] = '\0';
 
-    /* VM command mode uses a temp sandbox; embedded VM runs from the launch root. */
     if (g_vm_mode && argc > 1 && !g_vm_run_embedded) {
         char tmpl[] = "/tmp/flintstone_vm_XXXXXX";
         char *root = mkdtemp(tmpl);
@@ -322,16 +268,9 @@ int main(int argc, char *argv[]) {
             atexit(vm_cleanup_at_exit);
     }
 
-    /* Batch shortcut: if exactly 4 or 5 parameters and argv[1] is not a known command,
-       treat as createdisk shortcut.
-    */
+    /* Batch shortcut: exactly 4 or 5 parameters and argv[1] is not a known command. */
     if ((argc == 4 || argc == 5) && argv[1] && argv[1][0] != '-') {
-        /* Replaces the legacy hard-coded skip[] list. The central command
-         * registry (cmd_registry.c, fl_shell_cmd_lookup) covers every
-         * registered builtin, so new commands no longer need a sync
-         * update here. A small fixed list still covers the *line-mode*
-         * builtins (help / exit / clear / history / cc / make / bios)
-         * that aren't in the numeric dispatch table. */
+        /* Line-mode builtins (help, exit, clear, history, cc, make, bios) are not in the numeric table. */
         static const char *line_mode_builtins[] = {
             "help", "exit", "clear", "history", "his", "cc", "make", "bios", "version",
             NULL
@@ -366,8 +305,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* No args: non-tty prints help; tty continues to interactive init below.
-     * Exception: -Virtualization -y -vm with no other args runs guest then shell. */
+    /* No args: non-tty prints help; tty continues to interactive init. */
     if (argc < 2 && !(g_vm_mode && g_vm_run_embedded)) {
         if (!isatty(STDIN_FILENO)) {
             fl_print_help_message();
@@ -375,40 +313,35 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* VM mode: confine host file I/O to vm_hostfs/ under the launch directory (or temp VM sandbox). */
     if (vm_configure_root_from_cwd() != 0)
         fprintf(stderr, "[VM] 5-layer driver config warning: layer 4 shell/VM root is not configured\n");
     fs_jail_init();
     fl_session_init();
+    /* Refused (and legacy) identity switches are audited from the session layer. */
+    fl_session_set_audit_hook(fl_audit_identity_event);
     fl_net_netdev_init();
     fl_net_netdev_set_authz_hook(fl_authz_subsystem_check, NULL);
     atexit(shell_netdev_cleanup_at_exit);
 
-    /* Default host volume: ensure drive.img is a valid FAT32 image before probing.
-     * If the file is missing or exists but is blank/unrecognized (all-zero, truncated,
-     * etc.), create a fresh FAT32 image in place so setdisk/vm startup never stalls. */
+    /* Default drive.img: a blank or unrecognised file is replaced by a fresh FAT32 image. */
     if (strcmp(current_disk_file, "drive.img") == 0) {
         if (access(current_disk_file, F_OK) != 0) {
             disk_ensure_default_fat32(current_disk_file, 32, 512);
         }
         read_disk_header();
         if (!g_disk_host_fat32) {
-            /* File exists but has no recognizable content — overwrite with default image. */
             disk_reinit_default_fat32(current_disk_file, 32, 512);
             read_disk_header();
         }
     }
 
-    /* Initialize file manager service, path log, and drivers */
     fs_service_glue_init();
     path_log_init();
     drivers_init(NULL);
-    /* The KeyQuorum key service: after the driver registry exists, before the pool. */
     if (fl_kq_service_start() != FL_RESULT_OK)
         fprintf(stderr, "kq: key service not started\n");
     vm_warn_layer_config();
 
-    /* Initialize thread pool and signals */
     signal(SIGINT, SIG_IGN);
     pq_init(&g_pool.pq);
     g_pool.shutting_down = 0;
@@ -448,7 +381,6 @@ int main(int argc, char *argv[]) {
         original_stdout_file = fdopen(original_stdout_fd, "w");
     }
 
-    /* Embedded x86 guest first, then same session continues to interactive shell */
     if (g_vm_mode && g_vm_run_embedded && argc == 1) {
         const char *vlog = getenv("VM_LOG_LEVEL");
         int lvl = vlog ? atoi(vlog) : 1;
@@ -465,7 +397,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    /* Process batch-mode arguments first */
     if (argc > 1) {
         int i = 1;
         while (i < argc) {

@@ -173,7 +173,6 @@
       lines += `filerecv data ${hex.slice(i, i + FILE_RECV_HEX_PER_LINE)}\n`;
     return lines + "filerecv end\n";
   }
-  /* The answer to `server file accept`: every waiting file in order, or a line saying there are none. */
   function fileAcceptLines(files) {
     const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
     return lines || "filerecv none\n";
@@ -200,19 +199,85 @@
   function guestUserNameOk(name) {
     return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,14}$/.test(name);
   }
-  function guestRegisterLines(name, password) {
-    if (!guestUserNameOk(name)) return "";
+  // Secret steps answer the guest's Password: prompt and are sent only once it has appeared.
+  const sameUser = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+  function switchSteps(name, password, currentUser) {
+    const steps = [{ line: `switchuser ${name}`, secret: false }];
+    if (!sameUser(name, currentUser)) steps.push({ line: String(password || ""), secret: true });
+    return steps;
+  }
+  function guestRegisterLines(name, password, rootPassword, currentUser) {
+    if (!guestUserNameOk(name)) return [];
     const secret = String(password || name).trim() || name;
-    return `switchuser Root\nuseradd ${name}\n${secret}\n`;
+    return switchSteps("Root", rootPassword, currentUser).concat(
+      { line: `useradd ${name}`, secret: false }, { line: secret, secret: true });
   }
-  function guestSwitchLines(name) {
-    if (!guestUserNameOk(name)) return "";
-    return `switchuser ${name}\n`;
+  function guestSwitchLines(name, password, currentUser) {
+    if (!guestUserNameOk(name)) return [];
+    return switchSteps(name, password, currentUser);
   }
-  function guestNewSessionLines(name) {
+  // One owner at a time: run() work starts only after earlier run() calls settle, so a password never reaches another prompt.
+  function createExclusiveQueue() {
+    let tail = Promise.resolve();
+    return {
+      run(work) {
+        const turn = tail.then(() => work());
+        tail = turn.then(() => {}, () => {});
+        return turn;
+      },
+    };
+  }
+  // sendIfLast(mark, work) sends only if nothing reached the guest since send number `mark`, checked and sent in one turn.
+  function createGuestInput() {
+    const keys = createExclusiveQueue();
+    let sent = 0;
+    const deliver = work => {
+      const seq = ++sent;
+      return Promise.resolve(work()).then(() => seq);
+    };
+    return {
+      send(work) { return keys.run(() => deliver(work)); },
+      sendIfLast(mark, work) { return keys.run(() => (sent === mark ? deliver(work) : 0)); },
+    };
+  }
+  function promptAfterEcho(said, line) {
+    const out = String(said || "").replace(/\r/g, "");
+    const echo = out.indexOf(`${line}\n`);
+    return echo >= 0 && out.indexOf("Password:", echo + line.length + 1) >= 0;
+  }
+  const GUEST_REPLY = /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
+  // Secret steps are sent only as the answer to the prompt the previous command opened, and only if nothing else reached the guest since.
+  async function driveGuestSteps(steps, patterns, io) {
+    let asked = false;
+    let last = 0;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.secret && !asked) {
+        io.status("The guest did not ask for a password, so nothing more was sent.");
+        return false;
+      }
+      if (!io.ready()) return false;
+      const from = io.mark();
+      const line = `${step.line}\n`;
+      const seq = step.secret
+        ? await io.input.sendIfLast(last, () => io.write(line))
+        : await io.input.send(() => io.write(line));
+      if (!seq) {
+        io.status("Other input reached the guest before the password, so the password was not sent.");
+        return false;
+      }
+      last = seq;
+      await io.wait((patterns && patterns[i]) || GUEST_REPLY, from);
+      const said = io.said(from);
+      asked = !step.secret && promptAfterEcho(said, step.line);
+      if (/unknown user|authentication failed/.test(said)) return false;
+    }
+    return true;
+  }
+  function guestNewSessionLines(name, password) {
     const user = guestUserNameOk(name) ? name : "Flinstone";
-    return `session new\nswitchuser ${user}\n`;
+    return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
 });

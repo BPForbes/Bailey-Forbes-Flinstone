@@ -1,6 +1,7 @@
 #include "cmd_decl.h"
 #include "cmd_batch.h"
 #include "fl/audit_log.h"
+#include "fl/driver/keyquorum.h"
 #include "fl/session.h"
 #include "bridge.h"
 #include "cmd_authutil.h"
@@ -15,6 +16,8 @@
 static void bridge_usage(void) {
     fprintf(stderr,
             "bridge: usage: bridge list | request <account> | accept <id> | revoke <id>\n"
+            "                    | kq-import <keyquorum-store> <uid> [--roster-only]   (with sudo)\n"
+            "                    | assembly <parent> [--reissue]                       (with sudo)\n"
             "  Accounts on different branches of the heritage tree reach each other's\n"
             "  homes only through an active bridge: one side requests, the other side\n"
             "  (or an account above it) accepts. Either side, or an account above\n"
@@ -31,7 +34,7 @@ static void bridge_print(const fl_bridge_t *b, void *ctx) {
     bridge_list_ctx_t *list = ctx;
     const char *state = "pending";
 
-    /* An active row whose signatures do not verify opens nothing: say so. */
+        /* An active row whose signatures do not verify opens nothing: say so. */
     if (b->state == FL_BRIDGE_STATE_ACTIVE)
         state = fl_bridge_verified(list->db, b) ? "active" : "unsigned";
     printf("#%lld  %-8s  %s <-> %s", (long long)b->id, state, b->a_key, b->b_key);
@@ -41,7 +44,7 @@ static void bridge_print(const fl_bridge_t *b, void *ctx) {
     list->shown++;
 }
 
-/* Opens the logged-in account's signing key (cmd_open_account_keys) with bridge's messages. */
+/* Opens the logged-in account's signing key with which bridge messages are signed. */
 static int bridge_open_actor_key(unsigned char *secret) {
     fl_result_t rc = cmd_open_account_keys("signs the bridge", secret, NULL);
 
@@ -68,6 +71,102 @@ static int bridge_parse_id(const char *s, int64_t *out) {
         return -1;
     *out = (int64_t)v;
     return 0;
+}
+
+/* bridge assembly <parent>: stores KeyQuorum's opaque record; the split and seals are its own. */
+static int bridge_assembly(fl_user_db_t *db, const char *actor, const char *parent_name, int reissue) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get_or_register();
+    const fl_user_record_t *parent = fl_user_db_find(db, parent_name);
+    const char *labels[FL_USER_DB_MAX_USERS];
+    unsigned char boxes[FL_USER_DB_MAX_USERS][32];
+    unsigned char seed[FL_USER_SIGNING_SECRET_LEN];
+    unsigned char *rec;
+    char pw[256], up[FL_HERITAGE_KEY_ID_MAX], parent_key[FL_HERITAGE_KEY_ID_MAX];
+    size_t n = 0, rlen = 0;
+    unsigned threshold, gen = 0, old_gen = 0, old_thr = 0;
+    fl_result_t rc;
+    fl_heritage_relation_t rel;
+    int st, ret = 1;
+
+    if (!fl_session_has_elevation()) {
+        fprintf(stderr, "bridge: assembly changes who can sign for %s; run it with sudo\n", parent_name);
+        return 1;
+    }
+    if (!parent) {
+        fprintf(stderr, "bridge: %s does not exist\n", parent_name);
+        return 1;
+    }
+    mem_domain_copy(parent_key, parent->key_id, sizeof parent_key);
+    rel = fl_heritage_relation(actor, parent_key);
+    if (rel != FL_HERITAGE_REL_SELF && rel != FL_HERITAGE_REL_DESCENDANT) {
+        fprintf(stderr, "bridge: %s is not this account or below it\n", parent_name);
+        return 1;
+    }
+    if (reissue) {
+        /* A reissue must rotate the parent's signing key first, or a removed child's share stays valid. */
+        fprintf(stderr, "bridge: assembly --reissue is not available: there is no signing-key rotation that keeps the "
+                        "password (see docs/IDENTITY_HERITAGE.md)\n");
+        return 1;
+    }
+    if (!drv || !drv->assembly_split || !drv->assembly_threshold) {
+        fprintf(stderr, "bridge: assembly needs the KeyQuorum driver (not in this build)\n");
+        return 1;
+    }
+    if (!parent->has_key) {
+        fprintf(stderr, "bridge: %s has no signing key yet; it must sign in once first\n", parent_name);
+        return 1;
+    }
+    for (size_t i = 0; i < db->count && n < FL_USER_DB_MAX_USERS; i++) {
+        const fl_user_record_t *c = &db->users[i];
+
+        if (!c->has_box || fl_heritage_parent(c->key_id, up, sizeof up) != FL_RESULT_OK || strcmp(up, parent_key) != 0)
+            continue;
+        labels[n] = c->key_id;
+        mem_domain_copy(boxes[n], c->box_public, 32);
+        n++;
+    }
+    if (n == 0) {
+        fprintf(stderr, "bridge: %s has no child account with a box key (each child must sign in once)\n", parent_name);
+        return 1;
+    }
+    rec = (unsigned char *)mem_domain_alloc(MEM_DOMAIN_FS, FL_USER_ASSEMBLY_MAX);
+    if (!rec)
+        return 1;
+    rc = fl_user_db_assembly_get(db, parent_key, rec, FL_USER_ASSEMBLY_MAX, &rlen, &old_gen, &old_thr);
+    if (rc == FL_RESULT_OK) {
+        fprintf(stderr, "bridge: %s already has an assembly (generation %u); use --reissue after removing a child\n",
+                parent_name, old_gen);
+        goto out;
+    }
+    if (rc != FL_RESULT_NOENT) { /* only a store that holds no record may be dealt into */
+        fprintf(stderr, "bridge: the assembly record of %s cannot be read; nothing was dealt\n", parent_name);
+        goto out;
+    }
+    if (cmd_read_password("Password of the parent: ", pw, sizeof pw) != 0) {
+        fprintf(stderr, "bridge: password read failed\n");
+        goto out;
+    }
+    rc = fl_user_db_open_key(db, parent_name, pw, seed);
+    cmd_wipe_password(pw, sizeof pw);
+    if (rc != FL_RESULT_OK) {
+        fprintf(stderr, "bridge: incorrect password for %s\n", parent_name);
+        goto out;
+    }
+    gen = 1;
+    threshold = drv->assembly_threshold((unsigned)n);
+    st = drv->assembly_split(seed, gen, labels, (const uint8_t(*)[32])boxes, n, rec, FL_USER_ASSEMBLY_MAX, &rlen);
+    mem_domain_secure_zero(seed, sizeof seed);
+    if (st != KQ_ASSEMBLY_OK || fl_user_db_assembly_put(db, parent_key, gen, threshold, rec, rlen) != FL_RESULT_OK) {
+        fprintf(stderr, "bridge: assembly failed (%d)\n", st);
+        goto out;
+    }
+    fl_audit_identity_event(actor, "bridge-assembly", parent_key, "created");
+    printf("bridge: %s can now sign when %u of its %zu children are online on separate devices\n", parent_name, threshold, n);
+    ret = 0;
+out:
+    mem_domain_secure_zero(seed, sizeof seed);
+    mem_domain_free(MEM_DOMAIN_FS, rec);
+    return ret;
 }
 
 int cmd_bridge_run(int argc, char **argv) {
@@ -190,6 +289,33 @@ int cmd_bridge_run(int argc, char **argv) {
         return 0;
     }
 
+    /* Copies a KeyQuorum private bridge into the account store; this changes who may cross at su. */
+    if (!strcmp(argv[1], "kq-import") && (argc == 4 || (argc == 5 && !strcmp(argv[4], "--roster-only")))) {
+        int roster_only = argc == 5;
+
+        if (!fl_session_has_elevation()) {
+            fprintf(stderr, "bridge: kq-import changes who may cross a bridge; run it with sudo\n");
+            return 1;
+        }
+        rc = fl_user_db_bridge_import_from_kq(db, argv[2], argv[3], roster_only ? NULL : actor);
+        if (rc == FL_RESULT_NOENT) {
+            fprintf(stderr, roster_only ? "bridge: %s has no private bridge %s\n"
+                                        : "bridge: %s has no private bridge %s with a sealed key for %s\n",
+                    argv[2], argv[3], actor);
+            return 1;
+        }
+        if (rc != FL_RESULT_OK) {
+            fprintf(stderr, "bridge: kq-import failed (%d); the KeyQuorum store was not usable or the bridge was malformed\n", (int)rc);
+            return 1;
+        }
+        fl_audit_identity_event(actor, "bridge-kq-import", argv[3], roster_only ? "roster" : "with-key");
+        printf("bridge: imported private bridge %s%s\n", argv[3], roster_only ? " (roster only: can verify, cannot prove)" : "");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "assembly") && (argc == 3 || (argc == 4 && !strcmp(argv[3], "--reissue"))))
+        return bridge_assembly(db, actor, argv[2], argc == 4);
+
     bridge_usage();
     return 1;
 }
@@ -199,6 +325,27 @@ int cmd_bridge_batch_tokens_count(int argc, char **argv, int i) {
         return 1;
     if (!strcmp(argv[i + 1], "list"))
         return 2;
+    if (!strcmp(argv[i + 1], "kq-import")) {
+        /* bridge kq-import <keyquorum-store> <uid> [--roster-only]: never past a token that starts the next command. */
+        int n = 2;
+
+        if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
+            n++;
+        if (n == 3 && i + 3 < argc && argv[i + 3] && !cmd_batch_token_is_shell_command(argv[i + 3]))
+            n++;
+        if (n == 4 && i + 4 < argc && argv[i + 4] && !strcmp(argv[i + 4], "--roster-only"))
+            n++;
+        return n;
+    }
+    if (!strcmp(argv[i + 1], "assembly")) {
+        int n = 2;
+
+        if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
+            n++;
+        if (n == 3 && i + 3 < argc && argv[i + 3] && !strcmp(argv[i + 3], "--reissue"))
+            n++;
+        return n;
+    }
     if (i + 2 < argc && argv[i + 2] && !cmd_batch_token_is_shell_command(argv[i + 2]))
         return 3;
     return 2;

@@ -1,12 +1,6 @@
 #!/usr/bin/env node
 "use strict";
-/*
- * Files between two lab pages in a real browser, through the server panel and the local relay
- * hub: a KeyQuorum co-signed file (send form, the recipient's Co-sign button, every checkpoint
- * in both checkpoint logs, the delivered file in the recipient's shell) and a plain file (send
- * form, Accept button). Needs the WebAssembly lab built with KeyQuorum (EMCC_REQUIRED=1 make
- * wasm) and Playwright's Chromium.
- */
+/* Two lab pages in a real browser: a co-signed file and a plain file (needs the KeyQuorum wasm lab). */
 const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire } = require("node:module");
@@ -30,9 +24,9 @@ async function openLab(name) {
   page.errors = errors;
   await page.goto(base);
   await page.locator("#status").filter({ hasText: /^Ready$/ }).waitFor({ timeout: 90000 });
-  // A visitor registers their own user (built-in accounts publish no keys) and switches to it.
   await page.fill("#account-name", name);
-  await page.fill("#account-secret", name);
+  // The account's password is drawn at run time; Register asks for Root's (the public demo seed).
+  await page.fill("#account-secret", require("crypto").randomBytes(9).toString("hex"));
   await page.click("#account-register");
   await page.waitForFunction(n => (document.getElementById("wasm-term")?.textContent || "").includes(`useradd ${n}`),
                              name, { timeout: 20000 });
@@ -88,7 +82,6 @@ async function main() {
   await bob.waitForFunction(() => /\nhello bob/.test(document.getElementById("wasm-term")?.textContent || ""), null,
                             { timeout: 10000 });
 
-  // A plain file through the same form, accepted with the panel's button.
   await shell(alice, "write plain.txt just text");
   await alice.fill("#server-file-path", "plain.txt");
   await alice.uncheck("#server-file-kq");

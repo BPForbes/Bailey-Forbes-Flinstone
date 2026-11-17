@@ -1,19 +1,11 @@
-/*
- * KeyQuorum security driver (contracts/drivers/contract_p4_keyquorum.h, P4-9).
- *
- * Thin wrappers over keyquorum_files.h and keyquorum_identity.h (the account ops): each op asks KeyQuorum for the size it needs,
- * allocates, and calls again; it returns KeyQuorum's status unchanged. Secrets are wiped
- * through mem_domain_secure_zero (which extends mem_domain_zero) and digests compared by
- * asm_mem_ct_equal.
- */
+/* KeyQuorum security driver (P4-9): thin wrappers returning KeyQuorum's status unchanged. */
 #include "fl/driver/keyquorum.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 
 #include <stdlib.h>
 
-/* The P4-9 contract copies these from keyquorum_files.h; a submodule bump that changes one
- * must fail the build, not the wire framing (the runtime probe checks only the linked ABI). */
+/* The P4-9 contract's copies must match keyquorum_files.h; the build fails, not the wire framing. */
 _Static_assert(FL_KQ_ABI_VERSION == KQ_FILE_ABI_VERSION,
                "KeyQuorum header ABI differs from the P4-9 contract");
 _Static_assert(FL_KQ_DELIVERY_ID_LEN == KQ_FILE_DELIVERY_ID_LEN,
@@ -33,6 +25,22 @@ _Static_assert(FL_KQ_ACCOUNT_INVALID == KQ_ACCOUNT_INVALID, "account INVALID dif
 _Static_assert(FL_KQ_ACCOUNT_NO_ROOM == KQ_ACCOUNT_NO_ROOM, "account NO_ROOM differs");
 _Static_assert(FL_KQ_ACCOUNT_WRONG_PASSWORD == KQ_ACCOUNT_WRONG_PASSWORD,
                "account WRONG_PASSWORD differs");
+_Static_assert(FL_KQ_SUDO_INVOKER == KQ_SUDO_INVOKER, "sudo INVOKER differs");
+_Static_assert(FL_KQ_SUDO_AUTHORITY == KQ_SUDO_AUTHORITY, "sudo AUTHORITY differs");
+_Static_assert(FL_KQ_SUDO_ACTION_MAX == KQ_SUDO_ACTION_MAX, "sudo action limit differs");
+_Static_assert(FL_KQ_SLOT_TOKEN_LEN(7) == KQ_SLOT_TOKEN_LEN(7), "slot token length differs");
+_Static_assert(FL_KQ_ACCESS_NONE == KQ_ACCESS_NONE, "access NONE differs");
+_Static_assert(FL_KQ_ACCESS_PASSWORD == KQ_ACCESS_PASSWORD, "access PASSWORD differs");
+_Static_assert(FL_KQ_ACCESS_KQST_PASSWORD == KQ_ACCESS_KQST_PASSWORD, "access KQST_PASSWORD differs");
+_Static_assert(FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST == KQ_ACCESS_PASSWORD_BRIDGE_KQST,
+               "access PASSWORD_BRIDGE_KQST differs");
+_Static_assert(FL_KQ_ACCESS_REFUSED == KQ_ACCESS_REFUSED, "access REFUSED differs");
+_Static_assert(FL_KQ_ACCESS_INVALID == KQ_ACCESS_INVALID, "access INVALID differs");
+_Static_assert(FL_KQ_BRIDGE_OK == KQ_BRIDGE_OK, "bridge OK differs");
+_Static_assert(FL_KQ_BRIDGE_INVALID == KQ_BRIDGE_INVALID, "bridge INVALID differs");
+_Static_assert(FL_KQ_BRIDGE_NO_ROOM == KQ_BRIDGE_NO_ROOM, "bridge NO_ROOM differs");
+_Static_assert(FL_KQ_BRIDGE_REFUSED == KQ_BRIDGE_REFUSED, "bridge REFUSED differs");
+_Static_assert(FL_KQ_BRIDGE_STALE == KQ_BRIDGE_STALE, "bridge STALE differs");
 _Static_assert(sizeof(kq_file_offer_t) == FL_KQ_OFFER_WIRE_LEN,
                "kq_file_offer_t differs from the offer's wire length");
 
@@ -47,9 +55,7 @@ void fl_kq_buf_free(fl_kq_buf_t *buf) {
     buf->len = 0;
 }
 
-/* After a KeyQuorum call that reports its size (first==KQ_FILE_NO_ROOM with need set),
- * allocates need bytes into *data and *cap. Any other first status is returned as is. out is
- * not touched here: it may alias an input of the second call. */
+/* After a sized KeyQuorum call (first == NO_ROOM), allocates need bytes; other statuses pass through. */
 static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
     if (first != KQ_FILE_NO_ROOM)
         return first;
@@ -61,9 +67,7 @@ static int take_sized(int first, size_t need, uint8_t **data, size_t *cap) {
 }
 
 /*
- * Two-pass call: size, allocate, fill. out changes only after the second call succeeds, so an
- * out that is also an input stays intact during the call and on failure; on success the
- * buffer it held before (callers pass a zeroed or owned buffer) is wiped and freed.
+ * Two-pass call. out changes only after the second call succeeds; on success the old buffer is wiped and freed.
  */
 #define SIZED_CALL(out, call_with)                                        \
     do {                                                                  \
@@ -180,8 +184,7 @@ static int drv_freshness(const uint8_t (*seen)[64], size_t nseen, const fl_kq_bu
     return kq_file_freshness(seen, nseen, c->data, c->len, rev, root);
 }
 
-/* Lifecycle (the base driver's ops): the probe accepts this driver only when the linked
- * library speaks the ABI it was written for. There is no device to attach or start. */
+/* Probe accepts this driver only when the linked library speaks its ABI. */
 static fl_result_t kq_probe(fl_device_t *dev) {
     (void)dev;
     return kq_file_abi_version() == FL_KQ_ABI_VERSION ? FL_RESULT_OK : FL_RESULT_PROBE_SKIP;
@@ -203,7 +206,6 @@ static int drv_events(const fl_kq_buf_t *c, fl_kq_buf_t *out) {
     SIZED_CALL(out, kq_file_events(c->data, c->len, outp_, cap_, &need_));
 }
 
-/* Account keys: one-to-one over kq_account_*, status unchanged, no buffer kept. */
 static int drv_account_keygen(uint8_t secret[32], uint8_t pub[32]) {
     return kq_account_keygen(secret, pub);
 }
@@ -303,6 +305,31 @@ static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, co
                         expected_encryption_pub, signing_secret_out, encryption_secret_out);
 }
 
+#ifndef FL_FREESTANDING
+/* No checkpoint storage here: the op is NULL and fl_kq_cp_head_author fails closed (image budget). */
+/* KeyQuorum writes the label without a terminator; one byte is kept back for it. */
+static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
+    size_t n = 0;
+    int rc;
+
+    if (!out || cap == 0)
+        return KQ_FILE_NO_ROOM;
+    out[0] = '\0';
+    if (!c || !c->data)
+        return KQ_FILE_INVALID;
+    rc = kq_file_head_author(c->data, c->len, (unsigned char *)out, cap - 1u, &n);
+    if (rc == KQ_FILE_OK && n >= cap)
+        rc = KQ_FILE_NO_ROOM;
+    if (rc != KQ_FILE_OK) {
+        out[0] = '\0';
+        return rc;
+    }
+    out[n] = '\0';
+    return KQ_FILE_OK;
+}
+
+#endif
+
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
 };
@@ -354,6 +381,21 @@ static const fl_kq_driver_t s_kq_driver = {
     .error_name = drv_error_name,
     .error_class_name = drv_error_class_name,
     .slot_open = drv_slot_open,
+#ifndef FL_FREESTANDING
+    .head_author = drv_head_author,
+    /* The freestanding image has no account store, token or bridge: those ops are NULL and callers fail closed. */
+    .access_requirement = kq_access_requirement,
+    .bridge_prove = kq_bridge_prove,
+    .bridge_verify = kq_bridge_verify,
+    .bridge_connects = kq_bridge_connects,
+    .assembly_threshold = kq_assembly_threshold,
+    .assembly_split = kq_assembly_split,
+    .assembly_generation = kq_assembly_generation,
+    .assembly_assemble = kq_assembly_assemble,
+    .sudo_sign = kq_sudo_sign,
+    .sudo_verify = kq_sudo_verify,
+    .slot_seal = kq_slot_seal,
+#endif
 };
 
 const fl_driver_desc_t *fl_kq_driver_desc(void) {
@@ -361,8 +403,7 @@ const fl_driver_desc_t *fl_kq_driver_desc(void) {
 }
 
 #ifdef FL_FREESTANDING
-/* The freestanding image has no driver model or registry: the resolver is the same ABI probe, on
- * the one static descriptor. NULL when the linked library speaks another ABI. */
+/* The static descriptor's resolver: the ABI probe; NULL if the linked library speaks another ABI. */
 const fl_kq_driver_t *fl_kq_driver_get(void) {
     return kq_probe(NULL) == FL_RESULT_OK ? &s_kq_driver : NULL;
 }
@@ -373,8 +414,7 @@ const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
 #else
 
 const fl_kq_driver_t *fl_kq_driver_get_or_register(void) {
-    /* Before drivers_init (session seed, unit tests, the browser lab) the descriptor may not
-     * be registered yet; after drivers_shutdown ensure refuses and this stays NULL. */
+    /* Before drivers_init the descriptor may not be registered yet; after shutdown it stays NULL. */
     (void)fl_driver_registry_ensure(&s_kq_driver.base);
     return fl_kq_driver_get();
 }

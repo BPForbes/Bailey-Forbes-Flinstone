@@ -1,12 +1,6 @@
 "use strict";
-/*
- * KeyQuorum co-signed delivery in the lab's WebAssembly shell, end to end: two copies of the
- * built module play two browser tabs (alice hosts the server, bob joins), connected through
- * the relay room itself (session-relay-room.js) with the lab's wire encoding, as the page
- * does. The shell commands are the real ones; the checkpoints are the native C ones.
- *
- * Needs the module built with KeyQuorum (EMCC_REQUIRED=1 make wasm); skips otherwise.
- */
+// KeyQuorum co-signed delivery in the lab's WebAssembly shell: alice hosts, bob joins.
+// Needs the module built with KeyQuorum (EMCC_REQUIRED=1 make wasm); skips otherwise.
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -87,7 +81,6 @@ async function tab(name, relay) {
   return t;
 }
 
-// The relay: the room itself, each tab on a socket that queues what the room sends it.
 function makeRelay() {
   const room = new Room("lab");
   const carried = [];
@@ -102,13 +95,11 @@ function makeRelay() {
     },
     memberId(name) { return room.members.find(m => m.principal === name).memberId; },
     members() { return room.members.map(m => ({ id: m.memberId, principal: m.principal, host: m.isHost })); },
-    // What the page does with a frame its shell hands it.
     send(from, f) {
       carried.push(Buffer.from(f.bytes));
       relay.links[from].link.onMessage(encodeFrame(LAB.KQ, encodeKqRoute(f.toHost, f.memberId, f.op, f.bytes)));
     },
     publish(from, keys) { relay.links[from].link.onMessage(encodeFrame(LAB.KQ_KEYS, keys)); },
-    // What the page does with frames the room sends it.
     drain() {
       for (let busy = true, guard = 0; busy && guard < 1000; guard++) {
         busy = false;
@@ -135,12 +126,22 @@ function makeRelay() {
   return relay;
 }
 
-function registered(t, user) {
-  // The lab's own way in: Root adds the account, then the session switches to it.
+// switchuser asks for the target's password, as su does; Root's is the public demo seed.
+const ROOT_DEMO = "root";
+const passwords = {};
+function asRoot(t) {
   t.run("switchuser root");
+  t.run(ROOT_DEMO);
+}
+
+function registered(t, user) {
+  passwords[user] = require("crypto").randomBytes(9).toString("hex");
+  asRoot(t);
   t.run(`useradd ${user}`);
-  t.run(user);
+  t.run(passwords[user]);
   t.run(`switchuser ${user}`);
+  t.run(passwords[user]);
+  assert.match(t.text(), new RegExp(`SWITCHUSER user=${user}`));
 }
 
 (async () => {
@@ -156,7 +157,6 @@ function registered(t, user) {
   alice.roster(relay.memberId("alice"), relay.members());
   bob.roster(relay.memberId("bob"), relay.members());
 
-  // Keys published on join, as the page does; the host keeps the first keys it sees for a name.
   const bobKeys = bob.publicKeys("bob");
   relay.publish("bob", bobKeys);
   relay.drain();
@@ -165,14 +165,12 @@ function registered(t, user) {
   const other = Uint8Array.from(bobKeys); other[0] ^= 1;
   assert.strictEqual(alice.learn("bob", other), 0, "different keys for a known name are refused");
 
-  // Encode (alice): the host answers bob's keys; the offer and the sealed letter go out.
   alice.run("write note.txt hello bob");
   alice.run("server file send -t note.txt -user bob");
   relay.drain();
   assert.match(alice.text(), /encode checkpoint ok/);
   assert.match(alice.text(), /offered note\.txt to bob \(delivery [0-9a-f]{32}\)/);
 
-  // Latent (host) then announce: bob gets the request, not the file.
   const req = bob.events.find(e => e.kind === "request");
   assert(req, "bob is asked to co-sign");
   assert.strictEqual(req.b, "alice");
@@ -180,7 +178,6 @@ function registered(t, user) {
   bob.run("cat note.txt");
   assert.match(bob.text(), /not found/, "nothing is delivered before bob co-signs");
 
-  // Co-sign (bob) -> the host fires once and releases -> decode (bob).
   bob.run(`server file cosign ${req.a}`);
   relay.drain();
   bob.mod._wasm_kq_tick();
@@ -193,11 +190,9 @@ function registered(t, user) {
   assert.match(bob.text(), /\nhello bob\n/);
   assert(bob.events.some(e => e.kind === "received" && e.a === "note.txt"));
 
-  // The relay never carried the plaintext: only the sealed letter and public offers.
   assert(!relay.carried.some(b => b.includes(Buffer.from("hello bob"))), "plaintext crossed the relay");
 
-  // Names match regardless of case, as lab accounts do: BOB finds bob, and the delivery
-  // names the account as it is spelled.
+  // Names match regardless of case; the delivery names the account as spelled.
   alice.run("write case.txt any case");
   alice.run("server file send -t case.txt -user BOB");
   relay.drain();
@@ -209,14 +204,11 @@ function registered(t, user) {
   bob.run("cat case.txt");
   assert.match(bob.text(), /\nany case\n/);
 
-  // A user the server has no keys for.
   alice.run("server file send -t note.txt -user nobody");
   relay.drain();
   assert.match(alice.text(), /the server holds no keys for nobody/);
 
-  // A second revision arrives as newer, but it needs the editor's permit first. The lab's accounts
-  // are flat names (no Root hierarchy), so alice, the scope owner, permits her own head here; a
-  // separate supervisor is covered by the native checkpoint tests.
+  // Flat lab names (no Root hierarchy): the scope owner permits her own head here.
   alice.run("write note.txt hello again");
   alice.run("server file send -t note.txt -user bob");
   relay.drain();
@@ -239,13 +231,12 @@ function registered(t, user) {
   bob.run("cat note.txt");
   assert.match(bob.text(), /\nhello again\n/);
 
-  // Only the recipient can co-sign: the host's checkpoint refuses anyone else's signature,
-  // and nothing is released.
+  // Only the recipient can co-sign; the host refuses other signatures and releases nothing.
   alice.run("write other.txt for bob only");
   alice.run("server file send -t other.txt -user bob");
   relay.drain();
   const req3 = bob.events.filter(e => e.kind === "request").pop();
-  bob.run("switchuser root");
+  asRoot(bob);
   bob.run(`server file cosign ${req3.a}`);
   relay.drain();
   assert.match(bob.text(), /host checkpoint refused\n  co-signature refused: not addressed to this account/);

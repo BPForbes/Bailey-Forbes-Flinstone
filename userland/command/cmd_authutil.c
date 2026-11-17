@@ -1,7 +1,9 @@
 #include "cmd_authutil.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
-#include "fl/elevation.h"
+#include "fl/kq.h"
+#include "heritage.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
 #include "user_db.h"
@@ -18,7 +20,6 @@
 void cmd_wipe_password(char *buf, size_t buf_size) {
     if (!buf || buf_size == 0)
         return;
-    /* The secret-wipe primitive: a plain memset of a dying buffer may be optimised away. */
     mem_domain_secure_zero(buf, buf_size);
 }
 
@@ -33,6 +34,23 @@ static int cmd_read_password_line(const char *prompt, char *buf, size_t buf_size
         size_t n = strlen(buf);
         if (n > 0 && buf[n - 1] == '\n')
             buf[n - 1] = '\0';
+    }
+    return 0;
+}
+
+/* One non-secret line; the rest of an over-long line is discarded, never run. */
+static int cmd_read_line(char *buf, size_t buf_size, int *overlong) {
+    *overlong = 0;
+    if (cmd_read_password_line(NULL, buf, buf_size) != 0)
+        return -1;
+    if (buf_size > 1 && buf_size <= (size_t)INT_MAX && strlen(buf) + 1 == buf_size) {
+        int c = getc(stdin);
+
+        if (c != '\n' && c != EOF) {
+            *overlong = 1;
+            while ((c = getc(stdin)) != '\n' && c != EOF)
+                ;
+        }
     }
     return 0;
 }
@@ -93,77 +111,232 @@ int cmd_read_password(const char *prompt, char *buf, size_t buf_size) {
 #endif
 }
 
+/* Reads the invoker's own password for sudo's co-signature. -1: read failed, pw wiped. */
+static int cmd_read_invoker_password(const char *cmd, char *pw, size_t cap, int *asked) {
+    const char *self = fl_session_current_user();
+    const fl_user_record_t *me = fl_user_db_find(fl_session_user_db(), self ? self : "");
+    char prompt[160];
+
+    *asked = 0;
+    pw[0] = '\0';
+    if (!me || !strcmp(me->key_id, FL_HERITAGE_ROOT_KEY))
+        return 0;
+    snprintf(prompt, sizeof prompt, "[%s] %s password%s: ", cmd, me->name,
+             me->auth_mode == FL_USER_AUTH_PASSWORD_KQST ? " (opens your token)" : "");
+    if (cmd_read_password(prompt, pw, cap) != 0) {
+        cmd_wipe_password(pw, cap);
+        return -1;
+    }
+    *asked = 1;
+    return 0;
+}
+
+static void report_no_root_token(const char *cmd) {
+    fprintf(stderr, "%s: Root has no KeyQuorum token (KQST) yet; sign in as Root once, or run "
+                    "`kqst enroll` as Root, and the kernel makes it\n", cmd);
+}
+
 int cmd_sudo_require_auth_reason(const char *reason) {
-    char pw[128];
-    fl_elevation_token_t tok = FL_ELEVATION_TOKEN_NONE;
+    char pw[128], mine[128];
     fl_result_t rc;
+    int asked = 0;
     const char *why = (reason && reason[0]) ? reason : "sudo authentication";
 
     fl_session_init();
+    /* Before the password prompt, including sudo <command> which never enters cmd_sudo_run. */
+    if (fl_authz_identity_switch_denied("sudo"))
+        return 1;
     if (fl_session_is_elevated_account())
         return 0;
     if (fl_session_has_elevation())
         return 0;
 
-    if (cmd_read_password("[sudo] password: ", pw, sizeof(pw)) != 0) {
-        fprintf(stderr, "sudo: password read failed\n");
-        return 1;
-    }
-    if (!fl_session_verify_password(pw)) {
+    /* A password-only Root has no token: refused and audited, with no fallback to the caller's password. */
+    if (!fl_session_sudo_needs_root()) {
+        rc = fl_session_sudo_authenticate(NULL, NULL);
+        if (rc != FL_RESULT_OK) {
+            report_no_root_token("sudo");
+            return 1;
+        }
+    } else {
+        if (cmd_read_password("[sudo] Root password: ", pw, sizeof(pw)) != 0) {
+            cmd_wipe_password(pw, sizeof(pw));
+            fprintf(stderr, "sudo: password read failed\n");
+            return 1;
+        }
+        if (cmd_read_invoker_password("sudo", mine, sizeof(mine), &asked) != 0) {
+            cmd_wipe_password(pw, sizeof(pw));
+            fprintf(stderr, "sudo: password read failed\n");
+            return 1;
+        }
+        rc = fl_session_sudo_authenticate(pw, asked ? mine : NULL);
         cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "sudo: incorrect password\n");
-        return 1;
+        cmd_wipe_password(mine, sizeof(mine));
     }
-    cmd_wipe_password(pw, sizeof(pw));
-
-    rc = fl_session_grant_elevation(why, &tok);
     if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "sudo: elevation failed (%d)\n", (int)rc);
+        fprintf(stderr, rc == FL_RESULT_BUSY ? "sudo: elevation failed (%d)\n" : "sudo: incorrect password\n",
+                (int)rc);
         return 1;
     }
     fl_audit_elevation_event(fl_session_current_user(), why, 1);
     return 0;
 }
 
+static void report_elevation_end(int deelevated) {
+    fprintf(stderr, deelevated ? "sudo: Root's key is not available, so the elevation ended; sign in again\n"
+                               : "sudo: the elevation ended before the command was signed; run sudo again\n");
+}
+
+int cmd_sudo_sign_action(const char *line) {
+    int deelevated = 0;
+
+    if (!line || !line[0])
+        line = "sudo";
+    (void)fl_session_elevated_action(line, 1, &deelevated);
+    if (deelevated)
+        report_elevation_end(1);
+    else if (fl_session_has_elevation())
+        return 0;
+    /* Window ended before renewal: sudo asks for the full co-signature again. */
+    if (cmd_sudo_require_auth_reason("sudo authentication") != 0)
+        return 1;
+    (void)fl_session_elevated_action(line, 1, &deelevated);
+    if (!deelevated && fl_session_has_elevation())
+        return 0;
+    report_elevation_end(deelevated);
+    return 1;
+}
+
+void cmd_sudo_sign_elevated(const char *line) {
+    int deelevated = 0;
+
+    if (!line || !line[0])
+        return;
+    (void)fl_session_elevated_action(line, 0, &deelevated);
+    if (deelevated)
+        fprintf(stderr, "sudo: Root's key is not available, so the elevation ended; running as %s\n",
+                fl_session_current_user());
+}
+
 int cmd_sudo_require_auth(void) {
     return cmd_sudo_require_auth_reason("sudo authentication");
 }
 
-int cmd_su_require_auth(const char *target) {
-    char pw[128];
-    const fl_user_db_t *db;
+static int bridge_has_member(const char *uid, const char *key_id) {
+    fl_user_bridge_t *b = calloc(1, sizeof *b);
+    size_t i;
+    int found = 0;
 
-    if (!target || !target[0]) {
-        fprintf(stderr, "su: invalid target user\n");
-        return 1;
-    }
+    if (!b)
+        return 0;
+    if (fl_user_db_bridge_get(fl_session_user_db(), uid, b) == FL_RESULT_OK)
+        for (i = 0; i < b->nmembers && !found; i++)
+            found = strcmp(b->members[i].label, key_id) == 0;
+    free(b);
+    return found;
+}
+
+int cmd_switch_user(const char *cmd, const char *target, int sudo) {
+    char pw[128], member[FL_USER_NAME_MAX], member_pw[128], mine[128];
+    char prompt[160];
+    fl_session_switch_request_t req;
+    fl_kq_requirement_t need;
+    const fl_user_db_t *db;
+    const fl_user_record_t *root;
+    fl_result_t rc;
+    int ask_password = 1, asked_mine = 0;
+    int no_root_token;
 
     fl_session_init();
     db = fl_session_user_db();
-    if (!fl_user_db_find(db, target)) {
-        fprintf(stderr, "su: user %s does not exist\n", target);
+    if (!target || !target[0] || !fl_user_db_find(db, target)) {
+        fprintf(stderr, "%s: user %s does not exist\n", cmd, target ? target : "");
         return 1;
     }
+    memset(&req, 0, sizeof req);
+    req.target = target;
+    req.sudo = sudo;
+    pw[0] = member[0] = member_pw[0] = mine[0] = '\0';
+    /* Which factor to collect is KeyQuorum's answer; the session decides. */
+    need = fl_kq_unlock_requirement(fl_session_current_user(), target, sudo);
+    root = fl_user_db_find_by_key(db, FL_HERITAGE_ROOT_KEY);
+    if (need.factor == FL_KQ_ACCESS_NONE)
+        ask_password = 0;
+    /* A password-only Root is refused with the reason shown, as plain sudo already shows. */
+    no_root_token = sudo && !(root && root->auth_mode == FL_USER_AUTH_PASSWORD_KQST);
+    if (no_root_token)
+        ask_password = 0;
+    /* A refused switch asks for the password too: refusal and reason are not shown first. */
+    if (ask_password) {
+        if (sudo)
+            snprintf(prompt, sizeof prompt, "[sudo -i] Root password: ");
+        else
+            snprintf(prompt, sizeof prompt, "Password: ");
+        if (cmd_read_password(prompt, pw, sizeof pw) != 0) {
+            cmd_wipe_password(pw, sizeof pw);
+            fprintf(stderr, "%s: password read failed\n", cmd);
+            return 1;
+        }
+        req.password = pw;
+        if (sudo && cmd_read_invoker_password("sudo -i", mine, sizeof mine, &asked_mine) != 0) {
+            cmd_wipe_password(pw, sizeof pw);
+            fprintf(stderr, "%s: password read failed\n", cmd);
+            return 1;
+        }
+        if (asked_mine)
+            req.invoker_password = mine;
+    }
+        /* A bridge member is asked for only once the password is verified. */
+    if (need.factor == FL_KQ_ACCESS_PASSWORD_BRIDGE_KQST && !need.needs_parent_grant && req.password &&
+        fl_session_verify_account_password(sudo ? (root ? root->name : "") : target, pw)) {
+        const char *self = fl_session_current_user();
+        const fl_user_record_t *me = fl_user_db_find(db, self);
+        int overlong = 0;
 
-    if (cmd_read_password("Password: ", pw, sizeof(pw)) != 0) {
-        fprintf(stderr, "su: password read failed\n");
+        if (me && bridge_has_member(need.bridge_uid, me->key_id)) {
+            snprintf(member, sizeof member, "%s", me->name);
+        } else {
+            fputs("Bridge member account: ", stderr);
+            fflush(stderr);
+            if (cmd_read_line(member, sizeof member, &overlong) != 0)
+                member[0] = '\0';
+            member[strcspn(member, "\r\n")] = '\0';
+        }
+        if (overlong || !member[0]) {
+            /* An over-long or empty name names nobody: the session refuses. */
+            member[0] = '\0';
+        } else {
+            snprintf(prompt, sizeof prompt, "Password for %s (bridge slot token): ", member);
+            if (cmd_read_password(prompt, member_pw, sizeof member_pw) != 0) {
+                cmd_wipe_password(pw, sizeof pw);
+                cmd_wipe_password(member_pw, sizeof member_pw);
+                cmd_wipe_password(mine, sizeof mine);
+                fprintf(stderr, "%s: password read failed\n", cmd);
+                return 1;
+            }
+            req.bridge_member = member;
+            req.bridge_member_password = member_pw;
+        }
+    }
+    rc = fl_session_switch_user(&req);
+    cmd_wipe_password(pw, sizeof pw);
+    cmd_wipe_password(member_pw, sizeof member_pw);
+    cmd_wipe_password(mine, sizeof mine);
+    if (rc != FL_RESULT_OK) {
+        if (no_root_token)
+            report_no_root_token(cmd);
+        else
+            fprintf(stderr, "%s: authentication failed\n", cmd);
         return 1;
     }
-
-    if (!fl_user_db_verify_password(db, target, pw)) {
-        cmd_wipe_password(pw, sizeof(pw));
-        fprintf(stderr, "su: authentication failed\n");
-        return 1;
-    }
-    cmd_wipe_password(pw, sizeof(pw));
     return 0;
 }
 
 fl_result_t cmd_open_account_keys(const char *why, unsigned char *signing, unsigned char *box) {
     char pw[128];
     char prompt[96];
-    fl_user_db_t *db = fl_session_user_db_mut();
     const char *name = fl_session_current_user();
+    fl_user_record_t rec;
     int created = 0;
     fl_result_t rc;
 
@@ -172,16 +345,18 @@ fl_result_t cmd_open_account_keys(const char *why, unsigned char *signing, unsig
         cmd_wipe_password(pw, sizeof(pw));
         return FL_RESULT_EOF;
     }
-    rc = fl_user_db_ensure_key(db, name, pw, &created);
+    rc = fl_session_ensure_key(name, pw, &created);
     if (rc == FL_RESULT_OK && created && fl_session_save_users() != FL_RESULT_OK) {
         /* A key the store does not hold must not sign anything: drop what was just made. */
-        fl_user_db_forget_created(db, name, created);
+        fl_session_forget_created(name, created);
         rc = FL_RESULT_ERR;
     }
+    if (rc == FL_RESULT_OK)
+        rc = fl_session_snapshot_account(name, &rec);
     if (rc == FL_RESULT_OK && signing)
-        rc = fl_user_db_open_key(db, name, pw, signing);
+        rc = fl_user_db_open_key_record(&rec, pw, signing);
     if (rc == FL_RESULT_OK && box)
-        rc = fl_user_db_open_box(db, name, pw, box);
+        rc = fl_user_db_open_box_record(&rec, pw, box);
     cmd_wipe_password(pw, sizeof(pw));
     return rc;
 }

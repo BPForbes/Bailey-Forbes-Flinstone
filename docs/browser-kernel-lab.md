@@ -22,6 +22,12 @@ advancing the destination segment and the starting LBA between transfers.
 below `0xa0000` (the start of VGA memory and the conventional top of
 real-mode addressable memory) with 128 sectors of margin to spare.
 
+The default image seals its account keys at boot, which needs random bytes. The launcher must supply them: either
+`-fw_cfg name=opt/flintstone/entropy,file=<fresh random bytes>` (the browser worker writes `crypto.getRandomValues` into the
+Wasm file system and passes it; `scripts/test_freestanding_shell.py` and `scripts/test_browser_kernel_artifact.sh` use fresh bytes
+for every boot) or `-cpu max` (RDRAND). With neither the image halts with `FLINTSTONE_KQ_PANIC` before the boot marker. The
+security-lab image (`SECFEAT=1`) seals nothing and needs neither.
+
 The entry owns its
 stack, clears `.bss`, installs an early IDT, initializes COM1, writes the
 diagnostic VGA cell `F`, and only then emits the boot marker. After the marker
@@ -306,3 +312,12 @@ COOP/COEP/CSP; see [`docs/portfolio-iframe-integration.md`](./portfolio-iframe-i
 The lab fetches `./artifacts/build-info.json`, then
 `./artifacts/<artifact>?v=<shortCommit>`. Failed commits leave the previously
 deployed image in their slot untouched.
+
+## KeyQuorum, boot and test notes
+
+Recorded from source comments removed in PR #416 (2026-11).
+
+- The lab's KeyQuorum shell, its stand-ins for the native primitives, and its page behaviour are in
+  [LAB_KQ_SHELL.md](LAB_KQ_SHELL.md).
+- The freestanding boot, the KeyQuorum heap and the platform entropy order are in [FREESTANDING_BOOT.md](FREESTANDING_BOOT.md).
+- The shared test helpers and link-time seams are in [TEST_FIXTURES.md](TEST_FIXTURES.md).

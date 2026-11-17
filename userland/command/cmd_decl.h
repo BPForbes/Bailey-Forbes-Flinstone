@@ -3,8 +3,7 @@
 
 #include "fl_shell_cmd.h"
 
-/* Line-mode builtins (parsed before argv split). */
-/* Returns 1 if "exit" was recognized (including usage errors); 0 if unrelated line. */
+/* Line-mode builtins: return 1 when the line is theirs (usage errors too), else 0. */
 int cmd_exit_maybe(char *trimmed);
 int cmd_clear_maybe(const char *trimmed);
 int cmd_help_maybe(const char *trimmed);
@@ -60,6 +59,7 @@ int cmd_passwd_run(int argc, char **argv);
 int cmd_whoami_run(int argc, char **argv);
 int cmd_profile_run(int argc, char **argv);
 int cmd_bridge_run(int argc, char **argv);
+int cmd_kqst_run(int argc, char **argv);
 int cmd_ping_run(int argc, char **argv);
 int cmd_ping6_run(int argc, char **argv);
 int cmd_ping6_batch_tokens_count(int argc, char **argv, int i);
@@ -86,12 +86,7 @@ void cmd_netlab_on_server_kill(void);
 int cmd_wifi_batch_tokens_count(int argc, char **argv, int i);
 int cmd_netlab_batch_tokens_count(int argc, char **argv, int i);
 
-/*
- * Batch argv token counts (see cmd_batch.h).
- * Most commands are reached only via fl_shell_cmd_batch_tokens_count() in
- * cmd_batch_dispatch.c (called from cmd_batch.c); static analysis may
- * report the per-command helpers as unused even though the switch calls them.
- */
+/* Batch token counts; most are reached only through fl_shell_cmd_batch_tokens_count(). */
 int fl_shell_cmd_batch_tokens_count(fl_shell_cmd_no_t no, int argc, char **argv, int i);
 int cmd_help_batch_tokens_count(int argc, char **argv, int i);
 int cmd_clear_batch_tokens_count(int argc, char **argv, int i);
@@ -143,27 +138,17 @@ int cmd_passwd_batch_tokens_count(int argc, char **argv, int i);
 int cmd_whoami_batch_tokens_count(int argc, char **argv, int i);
 int cmd_profile_batch_tokens_count(int argc, char **argv, int i);
 int cmd_bridge_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_PING, ...) in cmd_batch_dispatch.c */
+int cmd_kqst_batch_tokens_count(int argc, char **argv, int i);
 int cmd_ping_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_CHECK, ...) in cmd_batch_dispatch.c */
 int cmd_check_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_SERVER, ...) in cmd_batch_dispatch.c */
 int cmd_server_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPSEND, ...) in cmd_batch_dispatch.c */
 int cmd_udpsend_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_UDPLISTEN, ...) in cmd_batch_dispatch.c */
 int cmd_udplisten_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_ARP, ...) in cmd_batch_dispatch.c */
 int cmd_arp_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_IFCONFIG, ...) in cmd_batch_dispatch.c */
 int cmd_ifconfig_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_ROUTE, ...) in cmd_batch_dispatch.c */
 int cmd_route_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NETSTAT, ...) in cmd_batch_dispatch.c */
 int cmd_netstat_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NSLOOKUP, ...) in cmd_batch_dispatch.c */
 int cmd_nslookup_batch_tokens_count(int argc, char **argv, int i);
-/* Indirect: fl_shell_cmd_batch_tokens_count(FL_SCMD_NETSH, ...) in cmd_batch_dispatch.c */
 int cmd_netsh_batch_tokens_count(int argc, char **argv, int i);
 
 #endif /* CMD_DECL_H */

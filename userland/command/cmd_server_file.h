@@ -17,6 +17,8 @@ typedef struct cmd_server_ctx {
 } cmd_server_ctx_t;
 
 int cmd_server_file_run(const cmd_server_ctx_t *ctx, int argc, char **argv);
+
+void cmd_server_file_install_history(void);
 int cmd_server_send_file_alias(const cmd_server_ctx_t *ctx, int argc, char **argv);
 
 #endif /* CMD_SERVER_FILE_H */

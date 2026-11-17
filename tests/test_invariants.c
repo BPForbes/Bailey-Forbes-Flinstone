@@ -1,6 +1,4 @@
-/**
- * Property tests: path normalization, directory entry validity, cluster invariants.
- */
+/* Property tests: path normalization, directory entry validity, cluster invariants. */
 #include "util.h"
 #include "common.h"
 #include "fl/history_record.h"
@@ -69,8 +67,7 @@ static int test_path_checked_refuses_truncation(void) {
     char out[256];
     ASSERT(resolve_path_checked("a/b/../c", out, sizeof(out)) == 0);
     ASSERT(strcmp(out, "/tmp/foo/a/c") == 0);
-    /* 70 segments, then ".." components that would climb out: the tail is not resolved, so the
-     * checked call must say so instead of returning a prefix. */
+/* 70 segments then climbing "..": the tail is not resolved, so the checked call must say so. */
     char deep[512] = "";
     for (int i = 0; i < 70; i++)
         strcat(deep, "d/");
@@ -78,12 +75,10 @@ static int test_path_checked_refuses_truncation(void) {
     ASSERT(resolve_path_checked(deep, out, sizeof(out)) != 0);
     char tiny[8];
     ASSERT(resolve_path_checked("/usr/local/bin/long", tiny, sizeof(tiny)) != 0);
-    /* Exactly fits: "/a/b" and its NUL are 5 bytes; one byte less must be refused. */
     ASSERT(resolve_path_checked("/a/b", out, 5) == 0);
     ASSERT(strcmp(out, "/a/b") == 0);
     ASSERT(resolve_path_checked("/a/b", out, 4) != 0);
     ASSERT(resolve_path_checked("/a/b", out, 3) != 0);
-    /* A one-byte buffer holds nothing: refused, NUL written, nothing past it touched. */
     char guard[4] = {'x', 'x', 'x', 'x'};
     ASSERT(resolve_path_checked("/a", guard, 1) != 0);
     ASSERT(guard[0] == '\0' && guard[1] == 'x');
@@ -93,7 +88,6 @@ static int test_path_checked_refuses_truncation(void) {
     longseg[0] = '/';
     longseg[sizeof(longseg) - 1] = '\0';
     ASSERT(resolve_path_checked(longseg, out, sizeof(out)) != 0);
-    /* Input longer than the working buffer, absolute and relative. */
     static char huge[20000];
     memset(huge, 'b', sizeof(huge) - 1);
     huge[sizeof(huge) - 1] = '\0';
@@ -147,23 +141,18 @@ static int test_history_contract_roundtrip(void) {
     return 0;
 }
 
-/* --- Additional fl_history_record_pack/unpack edge case tests --- */
 
 static int test_history_pack_null_args(void) {
     char buf[64];
-    /* NULL out buffer */
     ASSERT(fl_history_record_pack(NULL, sizeof buf, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
                                   FL_RESULT_OK, "cmd") == (size_t)-1);
-    /* NULL cmd */
     ASSERT(fl_history_record_pack(buf, sizeof buf, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
                                   FL_RESULT_OK, NULL) == (size_t)-1);
-    /* out_cap too small (< 16) */
     ASSERT(fl_history_record_pack(buf, 15u, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
                                   FL_RESULT_OK, "cmd") == (size_t)-1);
-    /* out_cap == 0 */
     ASSERT(fl_history_record_pack(buf, 0u, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
                                   FL_RESULT_OK, "cmd") == (size_t)-1);
@@ -172,7 +161,6 @@ static int test_history_pack_null_args(void) {
 
 static int test_history_pack_reject_rs(void) {
     char buf[256];
-    /* cmd containing RS (0x1E separator) must be rejected */
     char cmd_with_rs[8] = {'a', 0x1e, 'b', '\0'};
     ASSERT(fl_history_record_pack(buf, sizeof buf, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
@@ -182,7 +170,6 @@ static int test_history_pack_reject_rs(void) {
 
 static int test_history_pack_reject_newline(void) {
     char buf[256];
-    /* cmd containing newline must be rejected */
     ASSERT(fl_history_record_pack(buf, sizeof buf, 1u,
                                   FL_CONTRACT_SURFACE_DRIVER_OPS,
                                   FL_RESULT_OK, "cmd\nwith\nnewline") == (size_t)-1);
@@ -191,13 +178,10 @@ static int test_history_pack_reject_newline(void) {
 
 static int test_history_unpack_null_args(void) {
     char out[64];
-    /* NULL stored_line */
     ASSERT(fl_history_record_unpack_cmd(NULL, out, sizeof out,
                                         NULL, NULL, NULL) == 0);
-    /* NULL cmd_out */
     ASSERT(fl_history_record_unpack_cmd("some-cmd", NULL, sizeof out,
                                         NULL, NULL, NULL) == 0);
-    /* zero cap */
     ASSERT(fl_history_record_unpack_cmd("some-cmd", out, 0u,
                                         NULL, NULL, NULL) == 0);
     return 0;
@@ -205,12 +189,10 @@ static int test_history_unpack_null_args(void) {
 
 static int test_history_unpack_plain_passthrough(void) {
     char out[16];
-    /* Plain line shorter than cap copies verbatim */
     ASSERT(fl_history_record_unpack_cmd("ls", out, sizeof out,
                                         NULL, NULL, NULL) == 0);
     ASSERT(strcmp(out, "ls") == 0);
 
-    /* Plain line longer than cap is truncated */
     const char *long_plain = "123456789012345678901234567890";
     char small[8];
     ASSERT(fl_history_record_unpack_cmd(long_plain, small, sizeof small,
@@ -278,7 +260,6 @@ static int test_history_unpack_rc_json_out_of_bounds(void) {
              FL_HISTORY_RECORD_SEP, FL_HISTORY_RECORD_SEP);
     ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out, NULL, NULL, NULL) == -1);
     ASSERT(out[0] == '\0');
-    /* Boundary: within FL_RESULT_JSON_RC_* must succeed */
     snprintf(input, sizeof input, "FL1%c{\"br\":1,\"sf\":0,\"rc\":%d}%cecho ok",
              FL_HISTORY_RECORD_SEP, FL_RESULT_JSON_RC_MAX, FL_HISTORY_RECORD_SEP);
     ASSERT(fl_history_record_unpack_cmd(input, out, sizeof out, NULL, NULL, NULL) == 1);
@@ -298,7 +279,6 @@ static int test_batch_argv_contracts_audit(void) {
     return 0;
 }
 
-/* Issue #219 / #204: batch driver clamps token spans to argc-i (sh.c pattern). */
 static int batch_argv_clamp_tokens(int tokens_count, int argc, int i) {
     if (tokens_count > argc - i)
         tokens_count = argc - i;
@@ -313,7 +293,6 @@ static int test_batch_argv_sh_clamp_edges(void) {
     return 0;
 }
 
-/* Issue #219 / #186: session mutex-backed state, elevation, and sudo scope. */
 static int test_session_hardening_issue186(void) {
     char tmpl[] = "/tmp/fl_inv_sessXXXXXX";
     char dbpath[sizeof(tmpl) + 8];
@@ -339,7 +318,6 @@ static int test_session_hardening_issue186(void) {
     ASSERT(fl_session_jail_privileged() == 1);
 
     ASSERT(fl_session_login("flinstone", "flinstone") == FL_RESULT_OK);
-    /* Names match case-insensitively; the session keeps the account's own spelling. */
     ASSERT(strcmp(fl_session_current_user(), "Flinstone") == 0);
     ASSERT(strcmp(fl_session_current_key_id(), "Root.Flinstone") == 0);
     ASSERT(fl_session_is_elevated_account() == 0);
@@ -392,7 +370,6 @@ static int test_history_unpack_negative_rc(void) {
 }
 
 static int test_history_unpack_strips_trailing_newline(void) {
-    /* Manually construct a record with trailing \r\n to test strip logic */
     char packed[512];
     char cmd_out[512];
     const char *cmd_in = "echo hello";
@@ -401,7 +378,6 @@ static int test_history_unpack_strips_trailing_newline(void) {
                                       cmd_in);
     ASSERT(n != (size_t)-1);
     packed[n] = '\0';
-    /* pack appends \n; unpack should strip it */
     ASSERT(fl_history_record_unpack_cmd(packed, cmd_out, sizeof cmd_out,
                                         NULL, NULL, NULL) == 1);
     ASSERT(strcmp(cmd_out, cmd_in) == 0);
@@ -409,7 +385,6 @@ static int test_history_unpack_strips_trailing_newline(void) {
 }
 
 static int test_contract_constants(void) {
-    /* Verify the contract result codes match expected values (P0-2) */
     ASSERT(FL_RESULT_OK == 0);
     ASSERT(FL_RESULT_ERR == -1);
     ASSERT(FL_RESULT_INVAL == -22);
@@ -592,13 +567,16 @@ static int test_contract_constants(void) {
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_FILE_META) == 1);
     ASSERT(fl_net_session_is_file_opcode(0x2fu) == 0);
     ASSERT(fl_net_session_is_file_opcode(0x39u) == 0);
-    /* KeyQuorum history (FL-04) */
     ASSERT((int)FL_NET_SESSION_OP_KQH_REQ == 0x50);
     ASSERT((int)FL_NET_SESSION_OP_KQH_DATA == 0x51);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_REQ) == 1);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQH_DATA) == 1);
     ASSERT(fl_net_session_is_kq_opcode(0x4Fu) == 0);
-    ASSERT(fl_net_session_is_kq_opcode(0x52u) == 0);
+    ASSERT((int)FL_NET_SESSION_OP_KQR_REPORT == 0x52);
+    ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 1);
+    ASSERT(fl_net_session_is_kq_opcode(0x53u) == 0);
+    ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 0);
+    ASSERT(fl_net_session_is_wifi_opcode(FL_NET_SESSION_OP_KQR_REPORT) == 0);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_KQ_KEYS) == 1);
     ASSERT(fl_net_session_is_kq_opcode(FL_NET_SESSION_OP_WIFI_LAST) == 0);
     ASSERT(fl_net_session_is_file_opcode(FL_NET_SESSION_OP_KQH_REQ) == 0);
@@ -606,7 +584,6 @@ static int test_contract_constants(void) {
     ASSERT(FL_SERVER_FILE_STATUS_QUEUED == 1u);
     ASSERT(strcmp(FL_SFTP_VPATH_HOME, "/sftp/home") == 0);
 
-    /* Surface enum ordering */
     ASSERT((int)FL_CONTRACT_SURFACE_DRIVER_OPS == 0);
     ASSERT((int)FL_CONTRACT_SURFACE_NETDEV == 1);
     ASSERT((int)FL_CONTRACT_SURFACE_LOG_SINK == 2);
@@ -615,11 +592,9 @@ static int test_contract_constants(void) {
     ASSERT((int)FL_CONTRACT_SURFACE_BROWSER_ARTIFACT == 5);
     ASSERT((int)FL_CONTRACT_SURFACE_COUNT == 6);
 
-    /* Authz decisions */
     ASSERT((int)FL_AUTHZ_DENY == 0);
     ASSERT((int)FL_AUTHZ_ALLOW == 1);
 
-    /* History record tag and separator */
     ASSERT(strcmp(FL_HISTORY_RECORD_TAG, "FL1") == 0);
     ASSERT((unsigned char)FL_HISTORY_RECORD_SEP == 0x1eu);
     return 0;
@@ -653,12 +628,10 @@ static int test_history_record_tag_in_packed(void) {
                                       FL_CONTRACT_SURFACE_DRIVER_OPS,
                                       FL_RESULT_OK, "ls");
     ASSERT(n != (size_t)-1);
-    /* Output must start with "FL1\x1e" */
     ASSERT(packed[0] == 'F');
     ASSERT(packed[1] == 'L');
     ASSERT(packed[2] == '1');
     ASSERT((unsigned char)packed[3] == 0x1eu);
-    /* Must end with newline */
     ASSERT(packed[n - 1] == '\n');
     return 0;
 }

@@ -3,10 +3,12 @@
 #include "cmd_authutil.h"
 #include "common.h"
 #include "fl/audit_log.h"
+#include "fl/authz_subsystem.h"
 #include "fl/session.h"
 #include "user_db.h"
 #include "session_sync.h"
 #include "session_login_env.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,9 +76,11 @@ static int su_run_command(const char *command) {
 
 int cmd_su_run(int argc, char **argv) {
     su_request_t req;
-    char saved[FL_USER_NAME_MAX];
+    fl_session_restore_point_t back;
+    char switched[FL_USER_NAME_MAX];
     char saved_home[CWD_MAX];
     char saved_cwd[CWD_MAX];
+    int had_elevation;
     fl_result_t rc;
 
     if (argc < 1) {
@@ -88,21 +92,18 @@ int cmd_su_run(int argc, char **argv) {
         fprintf(stderr, "su: invalid options\n");
         return 1;
     }
-
-    if (cmd_su_require_auth(req.target) != 0)
+    if (fl_authz_identity_switch_denied("su"))
         return 1;
 
-    strncpy(saved, fl_session_current_user(), sizeof(saved) - 1);
-    saved[sizeof(saved) - 1] = '\0';
-
-    if (fl_session_has_elevation())
-        fl_audit_elevation_event(saved, "su user switch", 0);
-
-    rc = fl_session_set_user(req.target);
-    if (rc != FL_RESULT_OK) {
-        fprintf(stderr, "su: cannot switch to %s (%d)\n", req.target, (int)rc);
+    /* The account and login generation are read together; the restore runs only while this login is current. */
+    if (fl_session_capture_restore_point(&back) != FL_RESULT_OK)
         return 1;
-    }
+    had_elevation = fl_session_has_elevation();
+
+    if (cmd_switch_user("su", req.target, 0) != 0)
+        return 1;
+    if (had_elevation)
+        fl_audit_elevation_event(back.user, "su user switch", 0);
     fl_session_sync_services();
     if (req.login_shell) {
         fl_session_save_login_shell_env(saved_home, sizeof(saved_home),
@@ -111,7 +112,8 @@ int cmd_su_run(int argc, char **argv) {
             fprintf(stderr, "su: failed to apply login-shell environment for %s\n",
                     req.target);
             fl_session_restore_login_shell_env(saved_home, saved_cwd);
-            (void)fl_session_set_user(saved);
+            if (fl_session_restore_user(back.user, back.login_generation) != FL_RESULT_OK)
+                fprintf(stderr, "su: session user not restored (a login or logout ran meanwhile)\n");
             fl_session_sync_services();
             return 1;
         }
@@ -119,17 +121,28 @@ int cmd_su_run(int argc, char **argv) {
 
     if (req.command) {
         int cmd_rc = su_run_command(req.command);
-        if (fl_session_has_elevation())
-            fl_audit_elevation_event(fl_session_current_user(), "su restore", 0);
-        rc = fl_session_set_user(saved);
+
+        strncpy(switched, fl_session_current_user(), sizeof(switched) - 1);
+        switched[sizeof(switched) - 1] = '\0';
+        had_elevation = fl_session_has_elevation();
+        rc = fl_session_restore_user(back.user, back.login_generation);
+        if (rc == FL_RESULT_BUSY) {
+            /* Another login took the session meanwhile: left as it is, audited by the session. */
+            fprintf(stderr, "su: session user not restored (a login or logout ran meanwhile)\n");
+            fl_session_sync_services();
+            return 1;
+        }
         if (rc != FL_RESULT_OK) {
-            fprintf(stderr, "su: cannot restore session user %s (%d)\n", saved, (int)rc);
-            (void)fl_session_set_user("guest");
+            fprintf(stderr, "su: cannot restore session user %s (%d)\n", back.user, (int)rc);
+            if (fl_session_restore_user("guest", back.login_generation) == FL_RESULT_OK && had_elevation)
+                fl_audit_elevation_event(switched, "su restore", 0);
             if (req.login_shell)
                 fl_session_restore_login_shell_env(saved_home, saved_cwd);
             fl_session_sync_services();
             return 1;
         }
+        if (had_elevation)
+            fl_audit_elevation_event(switched, "su restore", 0);
         if (req.login_shell)
             fl_session_restore_login_shell_env(saved_home, saved_cwd);
         fl_session_sync_services();

@@ -1,23 +1,4 @@
-/*
- * Implementation of the colour helpers declared in fl_colors.h.
- *
- * Lives in userland/shell/ so the shell binary, every test binary, and the
- * embedded-VM build all link a single definition of `fl_color_disabled` and
- * the prompt-aware hook pointers (no weak-symbol tricks, no header-only
- * surprises).
- *
- * Prompt-aware hook protocol:
- *   - `fl_color_prelude_hook`  is called BEFORE writing the tagged colour
- *     line. The shell registers a callback that takes a pthread mutex and,
- *     if the interactive readline is currently sitting on a "shell> ..."
- *     line, clears that line so the announcement is not glued onto it.
- *   - `fl_color_postlude_hook` is called AFTER the trailing newline. The
- *     shell callback redraws "shell> " plus whatever the user had typed,
- *     then releases the mutex.
- *
- * Tests and non-shell binaries leave the hooks at NULL; printing then just
- * writes to stdout/stderr as before.
- */
+/* Implements fl_colors.h; the prelude mutex is released by the postlude, and hooks are NULL in tests. */
 
 #include "fl_colors.h"
 
@@ -61,12 +42,9 @@ void fl_color_vfprintf_tagged(FILE *fp, const char *color, const char *tag,
         fl_color_postlude_hook();
 }
 
-/* Single-line tagged helpers (newline appended). */
-
 void fl_color_announce(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    /* "[Server Announcement]: " — colon after the tag, per the user spec. */
     fl_color_vfprintf_tagged(stdout, KBLU, "[Server Announcement]: ", fmt, ap);
     va_end(ap);
 }
@@ -82,6 +60,12 @@ void fl_color_success(const char *fmt, ...) {
     fl_color_vfprintf_tagged(stdout, KGRN, "[Server] ", fmt, ap);
     va_end(ap);
 }
+void fl_color_warn_local(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fl_color_vfprintf_tagged(stderr, KYEL, "[WARNING] ", fmt, ap);
+    va_end(ap);
+}
 void fl_color_warn(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -89,15 +73,7 @@ void fl_color_warn(const char *fmt, ...) {
     va_end(ap);
 }
 
-/* Yellow interactive prompt: NO newline, NO tag — caller controls layout
- * (used by the nick prompt during `server join`).
- *
- * Bypasses the prelude/postlude hooks entirely. The prelude would acquire a
- * mutex that the postlude is responsible for releasing, and we deliberately
- * skip the postlude (so the redraw of "shell> " does not paint over the
- * prompt the user is about to answer). Caller is expected to be on the
- * foreground command thread; no other thread should be writing to stdout
- * during the brief Y/N + nick-read window. */
+/* No hooks, no newline, no tag: the postlude would redraw over the nick prompt. Foreground thread only. */
 void fl_color_prompt_yellow(const char *fmt, ...) {
     va_list ap;
     int use_color = fl_color_is_enabled_for(stdout);
@@ -111,7 +87,6 @@ void fl_color_prompt_yellow(const char *fmt, ...) {
     fflush(stdout);
 }
 
-/* [Server Message, ...]: family — cyan, prompt-aware. */
 
 static void msg_vprint(const char *prefix, const char *fmt, va_list ap) {
     int use_color = fl_color_is_enabled_for(stdout);

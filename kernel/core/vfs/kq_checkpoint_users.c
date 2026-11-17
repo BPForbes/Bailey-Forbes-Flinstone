@@ -1,9 +1,7 @@
-/*
- * The native shell's account store as a KeyQuorum key directory, and the checkpoints over
- * it. Each form here only wraps its `_with` counterpart in kq_checkpoint.c; the browser lab
- * builds kq_checkpoint.c without this file and passes its own directory.
- */
+/* The native shell's account store as a KeyQuorum key directory; the checkpoints wrap it. */
 #include "kq_checkpoint.h"
+#include "fl/hex.h"
+#include "server_shared_digest.h"
 #include "user_db.h"
 
 #include <stddef.h>
@@ -12,8 +10,7 @@ static const fl_user_db_t *db_of(const fl_kq_keydir_t *dir) {
     return ((const fl_user_db_keydir_t *)dir)->db;
 }
 
-/* A key id first, then an account name. They cannot collide: a name is one segment and
- * never "Root" (heritage::name_available), a key id is "Root" or dotted. */
+/* A key id first, then an account name; they cannot collide (a name is never "Root"). */
 static const char *resolve(const fl_kq_keydir_t *dir, const char *who) {
     const fl_user_record_t *u = fl_user_db_find_by_key(db_of(dir), who);
 
@@ -106,3 +103,16 @@ fl_kq_cp_result_t fl_kq_cp_reseal(const fl_user_db_t *users, const char *sender_
                                 recipient_key, recipient_box_public, path, rev, out);
 }
 
+
+fl_result_t fl_kq_cp_offer_ref(const kq_file_offer_t *o, uint8_t ref[32]) {
+    uint8_t wire[FL_KQ_OFFER_WIRE_LEN];
+    char hex[65];
+
+    if (!o || !ref)
+        return FL_RESULT_INVAL;
+    fl_kq_cp_offer_encode(o, wire);
+    if (fl_server_shared_sha256_hex(wire, sizeof wire, hex, sizeof hex) != FL_RESULT_OK ||
+        fl_hex_decode(hex, ref, 32) != 0)
+        return FL_RESULT_ERR;
+    return FL_RESULT_OK;
+}

@@ -67,14 +67,11 @@
   const isBuiltInUser = name => /^(flinstone|root)$/i.test(name);
   let activeSession = 1;
   let relay = null;
-  // Files other users sent, waiting for `server file accept` (each with the principal it was sent to).
   const MAX_WAITING_FILES = 16;
   let waitingFiles = [];
   let connectRelay = async () => {};
   let serialLine = "";
-  // Lab network mode: when a netlab MitM+RS session is active the guest emits
-  // `LAB_NETMODE lab` and we drop the real network (the relay); `LAB_NETMODE
-  // live` restores it. While isolated we also suppress auto-reconnect.
+  // LAB_NETMODE lab/live from the guest drops or restores the real network; isolation also stops auto-reconnect.
   let labIsolated = false;
   const search = new URLSearchParams(location.search);
   const validation = search.get("validate") === "1";
@@ -85,8 +82,7 @@
   const serial = document.getElementById("serial");
   const canvas = document.querySelector("#screen canvas");
   const screen = document.getElementById("screen");
-  // Classic VGA is 16 indexed slots; each slot is a 24-bit (sRGB) color so the
-  // JS terminal can use truecolor while the guest still writes 4-bit attributes.
+  // The terminal uses 24-bit sRGB for the 16 VGA slots; the guest still writes 4-bit attributes.
   const VGA_TRUECOLOR = [
     "#1c1c1e", "#0a84ff", "#30d158", "#64d2ff",
     "#ff453a", "#bf5af2", "#ff9f0a", "#d2d2d7",
@@ -106,17 +102,13 @@
     if (sess) sess.textContent = `${activeSession}/${count}`;
     if (st) st.textContent = state || document.getElementById("status")?.textContent || "…";
   }
-  // The MitM + RS panel drives netlab, which only the security build compiles
-  // in. Show it only when this build's manifest says so; a lab-free build would
-  // otherwise offer buttons that answer "unknown command".
+  // Show the MitM panel only when this build's manifest has netlab; a lab-free build would answer "unknown command".
   function applySecurityPanel(manifest) {
     const panel = document.querySelector(".netlab-panel");
     if (!panel) return;
     panel.hidden = !(manifest && manifest.capabilities && manifest.capabilities.securityLab === true);
   }
-  // A freshly booted or reset guest starts in live mode. Clear the isolation
-  // flag with the guest, so the relay is not suppressed for a guest that has
-  // no netlab binding.
+  // A booted or reset guest starts live: its isolation flag is cleared with the guest.
   function clearLabIsolation() {
     if (!labIsolated) return;
     labIsolated = false;
@@ -179,8 +171,6 @@
       : "Live — real network available";
     node.dataset.mode = isolated ? "lab" : "live";
   }
-  // React to the guest's LAB_NETMODE token: drop the relay (real network) for
-  // the duration of a netlab MitM+RS session, restore it when the demo ends.
   function applyNetmode(mode) {
     labIsolated = mode === "lab";
     renderNetmode(mode);
@@ -327,7 +317,6 @@
         if (body.ipv6) ipv6 = body.ipv6;
       }
     } catch (_) {
-      /* guest prints unknown host */
     }
     await sendGuest(ipv6 ? `dnsack ${host} ${ip} ${ipv6}\n` : `dnsack ${host} ${ip}\n`);
   }
@@ -349,7 +338,6 @@
       appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
-  /* ---- KeyQuorum co-signed delivery (the WebAssembly shell, lab_kq.c) ---------------- */
   function kqReady() {
     return Boolean(emulator && typeof emulator.kqFrame === "function");
   }
@@ -360,7 +348,6 @@
     node.scrollTop = node.scrollHeight;
   }
   async function sendKqToRelay(frame) {
-    // Lab isolation drops the real network; KeyQuorum frames stay home too.
     if (!relay || labIsolated) return;
     try {
       if (!relay.connected) await relay.connect(principal());
@@ -370,14 +357,12 @@
       appendChat(`[error] ${error.message || "Relay failed"}`);
     }
   }
-  /* The shell learns who is on the server; this member publishes its public keys to the host. */
   let kqBuiltInNoted = false;
   function kqSyncRoster(members) {
     if (!kqReady() || !relay) return;
     emulator.kqRoster(relay.connected ? relay.memberId || 0 : 0, relay.connected ? members || [] : []);
     if (!relay.connected) return;
-    // Every visitor's lab seeds the built-in accounts, so their names can never be one
-    // person's: they publish no keys.
+    // Built-in names are seeded per visitor, so they can never be one person's: they publish no keys.
     if (isBuiltInUser(principal())) {
       if (!kqBuiltInNoted)
         appendKqLog("keys", "not published", `${principal()} is built in; register your own user to send and receive KeyQuorum files`);
@@ -425,7 +410,6 @@
       const path = document.getElementById("server-file-path")?.value.trim() || "";
       const user = document.getElementById("server-file-user")?.value.trim() || "";
       const cosigned = document.getElementById("server-file-kq")?.checked;
-      // One shell line, built only from a plain path and a user name.
       if (!/^[A-Za-z0-9._/-]{1,63}$/.test(path) || !core.guestUserNameOk(user)) {
         appendKqLog("send", "not sent", "a file in the lab shell and a user name are needed");
         return;
@@ -457,7 +441,6 @@
     }
     appendChat(`[file] ${event.from} sent ${event.name} (${event.bytes.length} bytes) — run \`server file accept\` to save it`);
   }
-  /* Answers `server file accept|decline` for the session's own user; others' files keep waiting. */
   async function answerWaitingFiles(accept) {
     const me = principal();
     const mine = waitingFiles.filter(f => f.to === me);
@@ -514,8 +497,7 @@
         appendChat("[relay] leave");
         return;
       }
-      // While lab-isolated the relay stays down: reconnecting here would bypass
-      // the isolation boundary the guest enforces.
+      // While lab-isolated the relay stays down: reconnecting here would bypass the isolation boundary.
       if (labIsolated && (event.op === "host" || event.op === "join" ||
                           event.op === "msg" || event.op === "announce")) {
         renderRelayStatus("Lab-isolated — real network dropped");
@@ -542,10 +524,7 @@
     }
   }
   function renderScreen(bytes) {
-    // Render the guest-owned 80x25 VGA text buffer at physical 0xb8000.
-    // This is a text-mode display, not a graphics-mode VGA implementation.
-    // Latch the diagnostic cell: SeaBIOS/empty dumps must not clear a later
-    // kernel frame, and they must not hide the placeholder on a fresh boot.
+    // Latch the diagnostic cell so an empty BIOS dump neither clears a kernel frame nor hides the placeholder.
     if (!core.validDiagnosticVga(bytes)) return;
     lastScreenBytes = bytes;
     document.documentElement.dataset.vgaCell = "F";
@@ -621,11 +600,11 @@
       renderRelayStatus(error.message || "Connection failed");
     }
   }
-  let guestInput = Promise.resolve();
+  // guestKeys orders guest input; guestExchange gives one caller the guest until its reply and password are done.
+  const guestKeys = core.createGuestInput();
+  const guestExchange = core.createExclusiveQueue();
   function enqueueGuest(work) {
-    const run = guestInput.then(work, work);
-    guestInput = run.catch(() => {});
-    return run;
+    return guestKeys.send(work);
   }
   function guestReady() {
     return emulator && typeof emulator.sendText === "function";
@@ -635,20 +614,31 @@
     await enqueueGuest(() => emulator.sendText(value));
     return true;
   }
-  async function sendGuestLines(script, patterns) {
+  // A secret step is sent only as the answer to its own command's prompt, never typed as a command.
+  function sendGuestLines(script, patterns) {
+    return guestExchange.run(() => driveGuestLines(script, patterns));
+  }
+  // The body of an exchange: call only from inside a guestExchange turn.
+  async function driveGuestLines(script, patterns) {
     if (!guestReady()) {
       text("account-status", "Guest is not ready — wait for Ready, then retry.");
       return false;
     }
-    const lines = String(script || "").split("\n");
-    if (lines[lines.length - 1] === "") lines.pop();
-    for (let i = 0; i < lines.length; i++) {
-      const from = serialTail.length;
-      if (!await sendGuest(`${lines[i]}\n`)) return false;
-      const pattern = (patterns && patterns[i]) || /SWITCHUSER user=|SESSION \d+ user=|Password:|unknown user|authentication failed|\bok\b|WHOAMI |@flintstone>|shell>/;
-      await waitSerial(pattern, 4000, from);
+    let steps = script;
+    if (!Array.isArray(steps)) {
+      const lines = String(script || "").split("\n");
+      if (lines[lines.length - 1] === "") lines.pop();
+      steps = lines.map(line => ({ line, secret: false }));
     }
-    return true;
+    return core.driveGuestSteps(steps, patterns, {
+      input: guestKeys,
+      ready: guestReady,
+      write: value => emulator.sendText(value),
+      mark: () => serialTail.length,
+      wait: (re, from) => waitSerial(re, 4000, from),
+      said: from => serialTail.slice(from),
+      status: message => text("account-status", message),
+    });
   }
   const controller = core.createController({
     marker: "FLINTSTONE_KERNEL_BOOT_OK", setState,
@@ -661,12 +651,7 @@
       sessions = { 1: "Flinstone" };
       extraUsers = [];
       renderSessions();
-      // The guest streams raw bytes one at a time, including multi-byte
-      // UTF-8 sequences (e.g. an em dash is 3 bytes). String.fromCharCode
-      // on each raw byte mangles those into mojibake; a streaming
-      // TextDecoder buffers an incomplete sequence across calls and only
-      // yields a character once it is complete, with no added delay for
-      // the ASCII bytes that make up most guest output.
+      // A streaming TextDecoder keeps a UTF-8 sequence split across reads from turning into mojibake.
       const serialDecoder = new TextDecoder("utf-8", { fatal: false });
       emulator = await config.createEmulator({ ...settings, serialByte: byte => {
         const ch = serialDecoder.decode(new Uint8Array([byte]), { stream: true });
@@ -792,14 +777,14 @@
       else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) ch = event.key;
       if (!ch) return false;
       event.preventDefault();
-      enqueueGuest(() => emulator.typeChar(ch)).catch(error => console.warn(error));
+      guestExchange.run(() => enqueueGuest(() => emulator.typeChar(ch))).catch(error => console.warn(error));
       return true;
     }
     if (!emulator || typeof emulator.sendKey !== "function") return false;
     const codes = window.FlintstoneQemuKeys && window.FlintstoneQemuKeys.qcodesForEvent(event);
     if (!codes) return false;
     event.preventDefault();
-    enqueueGuest(() => emulator.sendKey(codes)).catch(error => console.warn(error));
+    guestExchange.run(() => enqueueGuest(() => emulator.sendKey(codes))).catch(error => console.warn(error));
     return true;
   }
   screen.addEventListener("keydown", event => { sendKeyEventToGuest(event); });
@@ -818,16 +803,11 @@
     screen.focus();
   });
 
-  // MitM + RS lab panel: each button sends a `netlab ...` line to the shell,
-  // so the network system is driven without the CLI. The lab/live network
-  // switch rides the LAB_NETMODE token the guest emits (see applyNetmode).
+  // The MitM + RS panel drives netlab through the shell; the lab/live switch follows the LAB_NETMODE token.
   function netlabPod() {
     const sel = document.getElementById("netlab-pod");
     return (sel && sel.value) || "redteam-lab";
   }
-  // Reads a text field, trims it, and keeps only its first whitespace-
-  // delimited token (names/pods/victims are single shell words), falling
-  // back to a sane default so a blank field never sends a bare command.
   function netlabToken(id, fallback) {
     const el = document.getElementById(id);
     const first = (el && el.value || "").trim().split(/\s+/)[0];
@@ -839,7 +819,6 @@
       screen.focus();
     });
   }
-  // Like wireNetlab, but the command doesn't depend on the segment selector.
   function wireNetlabPlain(id, build) {
     document.getElementById(id)?.addEventListener("click", () => {
       void sendGuestLines(`${build()}\n`);
@@ -847,7 +826,6 @@
     });
   }
 
-  // Network segment: recon + MitM on the fabricated hosts.
   wireNetlab("netlab-hosts", pod => `netlab hosts ${pod}`);
   wireNetlab("netlab-scan", pod => `netlab scan ${pod}`);
   wireNetlab("netlab-wpa", pod => `netlab wpa ${pod}`);
@@ -855,20 +833,17 @@
   wireNetlab("netlab-arpdemo", pod => `netlab arp-demo ${pod}`);
   wireNetlab("netlab-capture", pod => `netlab capture ${pod}`);
 
-  // Pod (private group): membership and host succession.
   wireNetlabPlain("netlab-pod-create", () =>
     `netlab pod create ${netlabToken("netlab-session-pod", "redcell")}`);
   wireNetlabPlain("netlab-pod-join", () => "netlab pod join");
   wireNetlabPlain("netlab-pod-members", () => "netlab pod members");
   wireNetlabPlain("netlab-pod-leave", () => "netlab pod leave");
 
-  // Reverse shell (simulated): open/close against a named mock victim.
   wireNetlabPlain("netlab-rs-listen", () => "netlab listen");
   wireNetlabPlain("netlab-rs-accept", () => "netlab accept");
   wireNetlabPlain("netlab-rs-end", () => "netlab end");
   wireNetlabPlain("netlab-status", () => "netlab status");
 
-  // Network isolation and reference text.
   wireNetlabPlain("netlab-start", () => "netlab start");
   wireNetlabPlain("netlab-stop", () => "netlab stop");
   wireNetlabPlain("netlab-consent", () => "netlab consent");
@@ -877,37 +852,47 @@
 
   const form = document.getElementById("switch-user");
   if (form) {
+    const accountName = () => document.getElementById("account-name").value.trim();
+    const accountPassword = () => document.getElementById("account-secret")?.value || "";
+    // Each account action is one guestExchange turn; its steps are built inside it.
     form.addEventListener("submit", async event => {
       event.preventDefault();
-      const name = document.getElementById("account-name").value.trim();
-      const script = core.guestSwitchLines(name);
-      if (!script) return;
-      await sendGuestLines(script, [/SWITCHUSER user=|unknown user/]);
+      await guestExchange.run(async () => {
+        const steps = core.guestSwitchLines(accountName(), accountPassword(), principal());
+        if (!steps.length) return;
+        await driveGuestLines(steps, [/Password:|SWITCHUSER user=|unknown user/, /SWITCHUSER user=|authentication failed/]);
+      });
       screen.focus();
     });
     document.getElementById("account-new-session").onclick = async () => {
-      const name = document.getElementById("account-name").value.trim();
-      await sendGuestLines(core.guestNewSessionLines(name), [
+      await guestExchange.run(() => driveGuestLines(core.guestNewSessionLines(accountName(), accountPassword()), [
         /SESSION \d+ user=/,
-        /SWITCHUSER user=|unknown user/,
-      ]);
+        /Password:|SWITCHUSER user=|unknown user/,
+        /SWITCHUSER user=|authentication failed/,
+      ]));
       screen.focus();
     };
     document.getElementById("account-register")?.addEventListener("click", async () => {
-      const name = document.getElementById("account-name").value.trim();
-      const secret = document.getElementById("account-secret")?.value || name;
-      const script = core.guestRegisterLines(name, secret);
-      if (!script) return;
-      const from = serialTail.length;
-      const sent = await sendGuestLines(script, [
-        /SWITCHUSER user=Root|unknown user/,
-        /Password:|unknown command|need elevation|usage:/,
-        /\bok\b|authentication failed/,
-      ]);
-      const chunk = serialTail.slice(from);
-      if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
-        rememberUser(name);
-      renderSessions();
+      await guestExchange.run(async () => {
+        const name = accountName();
+        // Registering is Root's: the page asks for Root's password, as the guest does.
+        const rootPassword = document.getElementById("account-root-secret")?.value || "";
+        const steps = core.guestRegisterLines(name, accountPassword() || name, rootPassword, principal());
+        if (!steps.length) return;
+        const from = serialTail.length;
+        const patterns = steps.map(step => step.line.startsWith("switchuser ")
+          ? /Password:|SWITCHUSER user=Root|unknown user/
+          : step.line.startsWith("useradd ")
+            ? /Password:|unknown command|need elevation|usage:/
+            : /\bok\b|authentication failed|SWITCHUSER user=Root/);
+        const sent = await driveGuestLines(steps, patterns);
+        const chunk = serialTail.slice(from);
+        if (sent && /\bok\b/.test(chunk) && !/authentication failed/.test(chunk))
+          rememberUser(name);
+        if (!sent && /authentication failed/.test(chunk))
+          text("account-status", "That password was not accepted.");
+        renderSessions();
+      });
       screen.focus();
     });
   }
