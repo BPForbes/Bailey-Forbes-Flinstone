@@ -83,7 +83,7 @@ jobs:
       - name: Open pull request with synced locked + header
         id: cpr
         if: steps.prep.outputs.has_changes == 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
           commit-message: "chore(version): sync version/locked from entries after merge"
@@ -151,7 +151,7 @@ jobs:
       - name: Open pull request with the folded rows
         id: cpr
         if: steps.fold.outputs.folded == 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
           commit-message: "chore(version): fold re-released rows after merge to main"
