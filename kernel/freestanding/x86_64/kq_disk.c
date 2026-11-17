@@ -24,7 +24,10 @@
 #define CMD_WRITE 0x30u
 #define CMD_FLUSH 0xE7u
 #define CMD_IDENTIFY 0xECu
-#define POLL_MAX 4000000u
+/* Bound every ATA poll: 4e6 inb loops is fine on native hardware, but under Wasm QEMU each
+ * port I/O is a TCG trap. A floating secondary (browser lab has no index=2 disk) often reads
+ * status 0xFF with BSY set; burning millions of polls there stalls past the 90s Ready gate. */
+#define POLL_MAX 100000u
 #define SECTOR 512u
 #define REC_MAGIC 0x4b514c47u /* "GLQK" in memory: KeyQuorum log */
 #define HDR_NAME 16u
@@ -48,6 +51,8 @@ static void delay400(void) {
 static int wait_idle(void) {
     for (uint32_t i = 0; i < POLL_MAX; i++) {
         uint8_t s = fl_fs_inb((uint16_t)(ATA_IO + REG_STATUS));
+        if (s == 0xFFu) /* floating bus: every bit reads high; do not treat BSY as busy forever */
+            return 0xFF;
         if (!(s & ST_BSY))
             return s;
     }
@@ -57,6 +62,8 @@ static int wait_idle(void) {
 static int wait_drq(void) {
     for (uint32_t i = 0; i < POLL_MAX; i++) {
         uint8_t s = fl_fs_inb((uint16_t)(ATA_IO + REG_STATUS));
+        if (s == 0xFFu)
+            return -1;
         if (s & (ST_ERR | ST_DF))
             return -1;
         if (!(s & ST_BSY) && (s & ST_DRQ))
@@ -68,6 +75,7 @@ static int wait_drq(void) {
 static int identify(void) {
     uint16_t id[256];
     int s;
+    uint8_t st;
 
     fl_fs_outb((uint16_t)(ATA_IO + REG_DRIVE), 0xA0);
     delay400();
@@ -77,8 +85,9 @@ static int identify(void) {
     fl_fs_outb((uint16_t)(ATA_IO + REG_LBA2), 0);
     fl_fs_outb((uint16_t)(ATA_IO + REG_STATUS), CMD_IDENTIFY);
     delay400();
-    if (fl_fs_inb((uint16_t)(ATA_IO + REG_STATUS)) == 0)
-        return -1; /* no device answers */
+    st = fl_fs_inb((uint16_t)(ATA_IO + REG_STATUS));
+    if (st == 0 || st == 0xFFu)
+        return -1; /* no device, or floating bus (browser lab: no secondary disk) */
     s = wait_idle();
     if (s < 0 || s == 0xFF)
         return -1;

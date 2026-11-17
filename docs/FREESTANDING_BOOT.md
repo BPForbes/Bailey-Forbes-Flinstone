@@ -64,8 +64,9 @@ driver is built into both images now that the bss sits above 1 MiB.
 ## Data disk (FL-02 persistence)
 
 `kq_disk.c` drives ATA PIO on the secondary master (I/O `0x170`, control `0x376`), LBA28, one sector per command, polled
-with interrupts off and every wait bounded. `fl_fs_disk_init` runs IDENTIFY; a drive that does not answer, an ATAPI device
-or a disk with no sectors means no persistence. Records are the log described in `FILE_SHARING_KEYQUORUM.md`: a header
+with interrupts off and every wait bounded. `fl_fs_disk_init` runs IDENTIFY; a drive that does not answer, a floating bus
+(`0xFF`, as in the browser lab with no `index=2` disk), an ATAPI device, or a disk with no sectors means no persistence
+and returns without burning a long poll (Wasm QEMU makes each `inb` expensive). Records are the log described in `FILE_SHARING_KEYQUORUM.md`: a header
 sector with magic `GLQK`, kind, name, length and CRC-32, written last, then the data sectors. The log is read at boot before
 the accounts are enrolled.
 
