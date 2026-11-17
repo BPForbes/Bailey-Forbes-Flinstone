@@ -51,7 +51,8 @@ Run builds from the repository root.
 - x86_64 GAS build: `make ARCH=x86_64_gas`
 - x86_64 NASM build: `make ARCH=x86_64_nasm`
 - AArch64 cross build: `make ARCH=arm`
-- x86 bare-metal-style build: `make baremetal`
+- Bootable x86-64 image (MBR, long-mode loader, freestanding kernel; needs `nasm` and `cargo` with the `x86_64-unknown-none` target): `make baremetal` (same as `make browser-kernel`)
+- Bare-metal driver paths compiled into the hosted program (a compile check, not bootable): `make baremetal-drivers`
 - VM-enabled host build: `make vm`
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`
@@ -255,7 +256,7 @@ Prerequisites before running:
 
 For broad verification on a fully provisioned image:
 
-`make clean && make && make test_drivers && make test_core && make test_invariants && make baremetal && make ARCH=arm`
+`make clean && make && make test_drivers && make test_core && make test_invariants && make baremetal-drivers && make ARCH=arm`
 
 For VM work:
 
