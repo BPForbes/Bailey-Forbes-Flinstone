@@ -61,6 +61,14 @@ precision, `l`/`ll`/`z`; any other conversion returns -1).
 A build that sets `FL_SECFEAT` (the security-features image) has no fw_cfg path. Its entropy is RDRAND only. That was
 a size limit while the bss lived below `0x9f000`; since the bss moved above 1 MiB it is not, but the image is unchanged.
 
+## Data disk (FL-02 persistence)
+
+`kq_disk.c` drives ATA PIO on the secondary master (I/O `0x170`, control `0x376`), LBA28, one sector per command, polled
+with interrupts off and every wait bounded. `fl_fs_disk_init` runs IDENTIFY; a drive that does not answer, an ATAPI device
+or a disk with no sectors means no persistence. Records are the log described in `FILE_SHARING_KEYQUORUM.md`: a header
+sector with magic `GLQK`, kind, name, length and CRC-32, written last, then the data sectors. The log is read at boot before
+the accounts are enrolled.
+
 ## Entropy
 
 Entropy order, checked on every call:

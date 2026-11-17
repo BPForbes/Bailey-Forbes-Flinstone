@@ -131,6 +131,14 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
     if (fl_kq_driver_get())
         fl_fs_kq_bind_identity();
 #endif
+#ifdef FL_KQ_FILES
+    /* Before the accounts are enrolled (their sealed keys come back from the data disk) and before the
+     * self-test. No data disk is not an error: the image then keeps everything in memory. */
+    if (fl_kq_driver_get()) {
+        int records = fl_fs_kq_persist_load();
+        fl_fs_serial_puts(records >= 0 ? "CAP keyquorum-disk=present\r\n" : "CAP keyquorum-disk=absent\r\n");
+    }
+#endif
     fl_fs_identity_init();
     fl_fs_ramfs_init();
     fl_fs_labdisk_init();

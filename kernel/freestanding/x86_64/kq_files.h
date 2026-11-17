@@ -5,6 +5,7 @@
 
 #include "kq_keydir.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* kq_identity.c: the account keys. */
@@ -15,6 +16,12 @@ int fl_fs_kq_open_signing(const char *name, const char *password, uint8_t sec[32
 
 /* kq_platform.c: the CMOS clock as KeyQuorum's UTC text, "YYYY-MM-DDTHH:MM:SS.000Z"; -1 without a clock. */
 int fl_fs_utc_text(char out[25]);
+
+/* kq_identity.c: a sealed account restored from the data disk (before the accounts are enrolled). */
+void fl_fs_kq_restore_account(const char *name, const uint8_t *blob, size_t len);
+
+/* kq_files.c: the data disk (kq_disk.c). Loads every intact record at boot; 0 with records restored, -1 without a disk. */
+int fl_fs_kq_persist_load(void);
 
 /* kq_files.c: server file sign | log | verify, and the boot self-test. */
 void fl_fs_kq_files_init(void (*emit)(const char *line));

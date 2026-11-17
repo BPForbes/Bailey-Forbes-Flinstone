@@ -756,8 +756,16 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
     longer verify as that account's.
   At boot the image runs a self-test over a throwaway key (start, sign again, trusted, refused under a wrong key) and prints
   `CAP keyquorum-history=ok` or `=failed`. The driver's `head_author` op is now in the image too. The security-lab image has
-  no sealed keys, so it has neither the verbs nor the self-test. Histories live in memory and end with the session, and
-  co-signed delivery still runs in the WebAssembly shell. `make test-freestanding-kq-history` (and the browser-lab workflow's
+  no sealed keys, so it has neither the verbs nor the self-test. Co-signed delivery still runs in the WebAssembly shell.
+  **Persistence (FL-02, data disk).** Histories and sealed account keys are kept on the image's second IDE disk
+  (`kernel/freestanding/x86_64/kq_disk.c`, ATA PIO on the secondary master, QEMU `-drive ...,index=2`). The disk holds an
+  append-only log of records: a header sector (magic, kind, name, length, CRC-32 over name and data) written last, after the
+  data sectors, so a power cut before the header leaves no record. Kind 1 is a `.kqtf` container (its store path as name), kind 2
+  a sealed account key (its sealed key and public key). At boot the log is read before the accounts are enrolled, so the
+  default accounts keep their keys and histories signed before a reboot still verify; a damaged record ends the log there and
+  nothing after it is read. A blank or absent disk means nothing persists, and the image still runs (`CAP keyquorum-disk=present|absent`).
+  `make test-freestanding-kq-persist` checks the reboot, a damaged record and the no-disk boot. The security-lab image has no
+  data disk and no sealed keys. `make test-freestanding-kq-history` (and the browser-lab workflow's
   shell-probe step) drives it all under QEMU, including a wrong password, Root reading but not signing over Flinstone's head,
   and the old revision after `passwd`.
 - **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo

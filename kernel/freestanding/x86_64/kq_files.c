@@ -5,11 +5,13 @@
  * kq_identity.c holds); nothing here decides it. */
 #include "kq_files.h"
 
+#include "kq_disk.h"
 #include "identity.h"
 #include "ramfs.h"
 #include "fl/driver/keyquorum.h"
 #include "kq_checkpoint.h"
 #include "kq_mem_storage.h"
+#include "mem_domain.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -78,6 +80,41 @@ static int copy_in(int session, const char *path, const char *kpath)
     return st->write_atomic(st->ctx, kpath, (const uint8_t *)text, strlen(text));
 }
 
+/* The container beside a store path, written to the data disk as it now stands. */
+static int persist_container(const char *kpath)
+{
+    const fl_kq_storage_t *st = fl_kq_cp_storage();
+    char cpath[FL_KQ_MEM_PATH_MAX];
+    uint8_t *data = NULL;
+    size_t len = 0;
+    int rc = -1;
+
+    if (snprintf(cpath, sizeof cpath, "%s%s", kpath, FL_KQ_CONTAINER_SUFFIX) >= (int)sizeof cpath)
+        return -1;
+    if (st->read_file(st->ctx, cpath, FL_DISK_DATA_MAX, &data, &len) == 0)
+        rc = fl_fs_disk_append(FL_DISK_KIND_CONTAINER, cpath, data, len);
+    mem_domain_free(MEM_DOMAIN_FS, data);
+    return rc;
+}
+
+static void apply_record(void *ctx, uint8_t kind, const char *name, const uint8_t *data, size_t len)
+{
+    const fl_kq_storage_t *st = fl_kq_cp_storage();
+
+    (void)ctx;
+    if (kind == FL_DISK_KIND_CONTAINER)
+        (void)st->write_atomic(st->ctx, name, data, len); /* the newest record for a name wins */
+    else if (kind == FL_DISK_KIND_ACCOUNT)
+        fl_fs_kq_restore_account(name, data, len);
+}
+
+int fl_fs_kq_persist_load(void)
+{
+    if (fl_fs_disk_init() != 0)
+        return -1;
+    return fl_fs_disk_load(apply_record, NULL);
+}
+
 int fl_fs_kq_file_sign(int session, const char *path, const char *password)
 {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
@@ -108,9 +145,16 @@ int fl_fs_kq_file_sign(int session, const char *path, const char *password)
         cp = fl_kq_cp_sign_head_with(kpath, label, sec, at);
     drv->wipe(sec, sizeof sec);
     if (cp == FL_KQ_CP_OK && fl_kq_cp_head(kpath, rev) == FL_KQ_CP_OK) {
+        /* The disk write comes before the report, so a line the user sees means the write is done. */
+        int kept = fl_fs_disk_present() ? persist_container(kpath) == 0 : 0;
+
         rev_hex(rev, hex);
         say("server file sign: signed by ", label, NULL);
         say("revision ", hex, NULL);
+        if (kept)
+            say("server file sign: kept on the data disk", NULL, NULL);
+        else if (fl_fs_disk_present())
+            say("server file sign: not kept on the data disk (full or unreadable); it lasts until power-off", NULL, NULL);
         return 0;
     }
     say("server file sign: ",
@@ -225,6 +269,6 @@ int fl_fs_kq_selftest(void)
     drv->wipe(sec, sizeof sec);
     drv->wipe(other, sizeof other);
     fl_kq_buf_free(&lines);
-    fl_kq_storage_memory_reset();
+    /* The store is not cleared: containers restored from the data disk are already in it. */
     return ok ? 0 : -1;
 }

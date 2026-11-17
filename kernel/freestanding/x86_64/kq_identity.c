@@ -1,6 +1,7 @@
 /* Sealed account keys in the freestanding image: one sealed signing key per account; nothing stays open.
  * The public half is kept beside it: the image's key directory for KeyQuorum file histories. */
 #include "identity.h"
+#include "kq_disk.h"
 #include "kq_files.h"
 #include "fl/driver/keyquorum.h"
 #include "mem_domain.h"
@@ -10,10 +11,24 @@
 
 typedef struct {
     int used;
+    int restored; /* from the data disk: enroll keeps these keys instead of making new ones */
     char name[16];
     uint8_t sealed[FL_KQ_ACCOUNT_SEALED_LEN];
     uint8_t pub[32];
 } kqi_t;
+
+/* The record the data disk keeps for an account: its sealed key, then its public key. */
+#define KQI_BLOB_LEN (FL_KQ_ACCOUNT_SEALED_LEN + 32)
+
+static void kqi_persist(const kqi_t *k)
+{
+    uint8_t blob[KQI_BLOB_LEN];
+
+    mem_domain_copy(blob, k->sealed, FL_KQ_ACCOUNT_SEALED_LEN);
+    mem_domain_copy(blob + FL_KQ_ACCOUNT_SEALED_LEN, k->pub, 32);
+    (void)fl_fs_disk_append(FL_DISK_KIND_ACCOUNT, k->name, blob, sizeof blob);
+    mem_domain_secure_zero(blob, sizeof blob);
+}
 
 static kqi_t s_kqi[FL_FS_MAX_USERS];
 
@@ -72,8 +87,14 @@ static int kqi_enroll(const char *creator, const char *name, const char *pw)
     kqi_t *k = NULL;
 
     (void)creator;
-    if (!drv || !name || !name[0] || !pw || !pw[0] || kqi_find(name))
+    if (!drv || !name || !name[0] || !pw || !pw[0])
         return -1;
+    if ((k = kqi_find(name)) != NULL) {
+        if (!k->restored)
+            return -1;
+        k->restored = 0; /* the boot restored this account's sealed key: keep it */
+        return 0;
+    }
     for (int i = 0; i < FL_FS_MAX_USERS && !k; i++)
         if (!s_kqi[i].used)
             k = &s_kqi[i];
@@ -81,7 +102,27 @@ static int kqi_enroll(const char *creator, const char *name, const char *pw)
         return -1;
     copy_name(k->name, name, sizeof k->name);
     k->used = 1;
+    kqi_persist(k);
     return 0;
+}
+
+/* A sealed account read back from the data disk, before the accounts are enrolled at boot. */
+void fl_fs_kq_restore_account(const char *name, const uint8_t *blob, size_t len)
+{
+    kqi_t *k = name ? kqi_find(name) : NULL;
+
+    if (len != KQI_BLOB_LEN || !name || !name[0])
+        return;
+    for (int i = 0; i < FL_FS_MAX_USERS && !k; i++)
+        if (!s_kqi[i].used)
+            k = &s_kqi[i];
+    if (!k)
+        return;
+    k->used = 1;
+    k->restored = 1;
+    copy_name(k->name, name, sizeof k->name);
+    mem_domain_copy(k->sealed, blob, FL_KQ_ACCOUNT_SEALED_LEN);
+    mem_domain_copy(k->pub, blob + FL_KQ_ACCOUNT_SEALED_LEN, 32);
 }
 
 int fl_fs_kq_open_signing(const char *name, const char *pw, uint8_t sec[32])
@@ -121,6 +162,7 @@ static int kqi_change_password(const char *name, const char *pw)
     /* A new key: revisions signed with the old one no longer verify as this account's. */
     mem_domain_copy(k->sealed, fresh, sizeof fresh);
     mem_domain_copy(k->pub, pub, sizeof pub);
+    kqi_persist(k);
     return 0;
 }
 
