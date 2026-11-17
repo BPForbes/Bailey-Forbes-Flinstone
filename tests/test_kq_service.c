@@ -873,6 +873,37 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
         ASSERT(report_code_class(each_report, &code, &class_code) == 0);
         ASSERT(code == rows[i].code && class_code == rows[i].class_code);
     }
+    {
+        /* The checkpoint's own refusal picks the KQER code: only the listed causes are reported. */
+        static const struct {
+            fl_kq_cp_result_t cp;
+            uint16_t code;
+            uint8_t class_code;
+        } by_cp[] = {
+            {FL_KQ_CP_INVALID, 1u, 1u},          {FL_KQ_CP_UNTRUSTED, 2u, 2u},
+            {FL_KQ_CP_NOT_RECIPIENT, 2u, 2u},    {FL_KQ_CP_BAD_SIGNATURE, 3u, 3u},
+            {FL_KQ_CP_REPLAYED, 4u, 4u},         {FL_KQ_CP_NOT_NEWER, 5u, 4u},
+            {FL_KQ_CP_FORKED, 6u, 4u},           {FL_KQ_CP_BELOW_THRESHOLD, 7u, 5u},
+            {FL_KQ_CP_TOO_LARGE, 8u, 7u},        {FL_KQ_CP_NEEDS_EDITOR_PERMIT, 8u, 5u},
+        };
+        static const fl_kq_cp_result_t local[] = {FL_KQ_CP_OK, FL_KQ_CP_EXISTS, FL_KQ_CP_IO, FL_KQ_CP_NO_DRIVER};
+        size_t j;
+
+        for (j = 0; j < sizeof by_cp / sizeof by_cp[0]; j++) {
+            each.policy_hash[2] = (uint8_t)(0xC0 + j);
+            ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
+            ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, each_report, sizeof each_report) == 0);
+            fl_kq_report_refusal_cp_in(&each, by_cp[j].cp, &held);
+            ASSERT(report_code_class(each_report, &code, &class_code) == 0);
+            ASSERT(code == by_cp[j].code && class_code == by_cp[j].class_code);
+        }
+        each.policy_hash[2] = 0xD0;
+        ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
+        ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, each_report, sizeof each_report) == 0);
+        for (j = 0; j < sizeof local / sizeof local[0]; j++)
+            fl_kq_report_refusal_cp_in(&each, local[j], &held);
+        ASSERT(access(each_report, F_OK) != 0);
+    }
 /* A directory that cannot be written is audited as failed; the caller's refusal stands. */
     snprintf(missing, sizeof missing, "%s/no-such-dir", s_tmp);
     gone.fd = -1;

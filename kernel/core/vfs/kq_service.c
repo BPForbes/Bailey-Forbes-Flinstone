@@ -684,7 +684,7 @@ static const struct {
     {FL_RESULT_NOMEM, 8u, 7u},  /* too large: Denied, resource */
 };
 
-void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir) {
+static void report_refusal_code(const kq_file_offer_t *o, uint16_t code, uint8_t class_code, const fl_kq_dir_t *dir) {
     const char *me = fl_session_current_key_id();
     const char *who = me && me[0] ? me : "UNKNOWN";
     const char *event;
@@ -693,15 +693,9 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
     char at[40];
     kq_signing_mode_t mode = 0;
     fl_kq_cp_result_t cp;
-    size_t i;
 
     if (!o)
         return;
-    for (i = 0; i < sizeof s_refusal_codes / sizeof s_refusal_codes[0]; i++)
-        if (s_refusal_codes[i].why == why)
-            break;
-    if (i == sizeof s_refusal_codes / sizeof s_refusal_codes[0])
-        return; /* not a refusal of the letter */
     if (!dir) {
         fl_audit_identity_event(who, "kq-report-uncontained", "receive", NULL);
         return;
@@ -714,7 +708,7 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
         fl_kq_service_utc_now(at, sizeof at);
         cp = fl_kq_cp_offer_ref(o, ref) != FL_RESULT_OK
                  ? FL_KQ_CP_INVALID
-                 : fl_kq_cp_report_write_in(s_refusal_codes[i].code, s_refusal_codes[i].class_code,
+                 : fl_kq_cp_report_write_in(code, class_code,
                                             (uint8_t)FL_KQ_OP_RECEIVE, ref, me, at, key, dir);
         event = cp == FL_KQ_CP_OK          ? "kq-report"
                 : cp == FL_KQ_CP_EXISTS    ? "kq-report-exists"
@@ -723,6 +717,60 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
     }
     mem_domain_secure_zero(key, sizeof key); /* on every path, a failed lookup included */
     fl_audit_identity_event(who, event, "receive", NULL);
+}
+
+void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir) {
+    size_t i;
+
+    if (!o)
+        return;
+    for (i = 0; i < sizeof s_refusal_codes / sizeof s_refusal_codes[0]; i++)
+        if (s_refusal_codes[i].why == why) {
+            report_refusal_code(o, s_refusal_codes[i].code, s_refusal_codes[i].class_code, dir);
+            return;
+        }
+}
+
+/* The checkpoint's own refusal names the KQER code, so a bad signature, a replay or a fork is not reported as Denied. */
+void fl_kq_report_refusal_cp_in(const kq_file_offer_t *o, fl_kq_cp_result_t cp, const fl_kq_dir_t *dir) {
+    uint16_t code;
+    uint8_t class_code;
+
+    switch (cp) {
+    case FL_KQ_CP_INVALID:
+        code = 1u, class_code = 1u;
+        break;
+    case FL_KQ_CP_NO_KEY:
+    case FL_KQ_CP_UNTRUSTED:
+    case FL_KQ_CP_NOT_RECIPIENT:
+        code = 2u, class_code = 2u;
+        break;
+    case FL_KQ_CP_BAD_SIGNATURE:
+        code = 3u, class_code = 3u;
+        break;
+    case FL_KQ_CP_REPLAYED:
+        code = 4u, class_code = 4u;
+        break;
+    case FL_KQ_CP_NOT_NEWER:
+        code = 5u, class_code = 4u;
+        break;
+    case FL_KQ_CP_FORKED:
+        code = 6u, class_code = 4u;
+        break;
+    case FL_KQ_CP_BELOW_THRESHOLD:
+        code = 7u, class_code = 5u;
+        break;
+    case FL_KQ_CP_TOO_LARGE:
+        code = 8u, class_code = 7u;
+        break;
+    case FL_KQ_CP_NEEDS_EDITOR_PERMIT:
+        code = 8u, class_code = 5u;
+        break;
+    default:
+        return; /* OK, EXISTS, IO, NO_DRIVER: not a refusal of the letter */
+    }
+    if (o)
+        report_refusal_code(o, code, class_code, dir);
 }
 
 void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {
