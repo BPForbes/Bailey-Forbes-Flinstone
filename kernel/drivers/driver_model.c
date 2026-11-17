@@ -13,10 +13,12 @@
 #include <stdio.h>
 #endif
 /* KeyQuorum is an optional driver: only a build that links kq_driver.o and the KeyQuorum
- * archive defines FL_WITH_KEYQUORUM (Makefile, next to KQ_ID_LINK), and never bare metal.
- * The browser lab links the model and the driver with FL_LAB_KQ instead: it resolves the
- * driver here but never runs register_all. */
-#if (defined(FL_WITH_KEYQUORUM) || defined(FL_LAB_KQ)) && !defined(DRIVERS_BAREMETAL)
+ * archive defines FL_WITH_KEYQUORUM (Makefile, next to KQ_ID_LINK). Bare-metal still
+ * compiles those objects under FL_WITH_KEYQUORUM, so the model must define fl_kq_driver_get
+ * there too; register_all and bus enumeration keep KeyQuorum off until something registers
+ * it. The browser lab links the model and the driver with FL_LAB_KQ instead: it resolves
+ * the driver here but never runs register_all. */
+#if defined(FL_WITH_KEYQUORUM) || defined(FL_LAB_KQ)
 #define FL_MODEL_RESOLVES_KQ 1
 #include "fl/driver/keyquorum.h"
 #endif

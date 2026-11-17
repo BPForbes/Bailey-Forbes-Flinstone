@@ -37,14 +37,20 @@ RELEASE_DATE (merge finalize):
   If RELEASE_DATE is still absent where tooling expects it, scripts/gen_version_changelog.c
   may use the generator's local calendar date at generation time (see that script).
 
-PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
-  PRERELEASE and GM are binary flags: when the key is present, the value must be exactly
-  0 or 1 (CI scripts/ver_field_parse.sh and check_version_entries_semver_dev_unique.sh
+PRERELEASE / RERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
+  PRERELEASE, RERELEASE, and GM are binary flags: when the key is present, the value must be
+  exactly 0 or 1 (CI scripts/ver_field_parse.sh and check_version_entries_semver_dev_unique.sh
   reject any other value). At the root of version/entries/ (and version/locked/),
   GA-oriented rows omit PRERELEASE or set PRERELEASE=0. Optional DEV_VERSION on those rows
   counts develop-side iterations
   before preproduction. PRERELEASE=1 rows are authored at the version/entries/ root for
   same-repo automation (see below); never set GM=1 on a root *.ver file.
+  RERELEASE=1 (not PRERELEASE) reuses an existing (MAJOR, STANDARD, RELEASE, DEV_VERSION)
+  — same A.B.C + BUILD — without bumping RELEASE_VERSION. Exactly one original
+  (RERELEASE=0 or absent) per quadruple; RERELEASE=1 needs that original and never
+  carries GM=1. On merge, scripts/fold_rerelease_entries.sh appends the re-release
+  DESCRIPTION to the original and deletes the re-released file (version/locked rows
+  never carry RERELEASE; finalize_version_locked.sh drops it).
   When any .ver under version/entries/ has PRERELEASE=1 and GM=1, scripts/gen_version_def.sh
   sets VERSION_MAJOR/STANDARD/PATCH and VERSION from that row's MAJOR/STANDARD/RELEASE
   (RELEASE_VERSION maps to VERSION_PATCH) instead of only version/locked, and sets VERSION_LINE
@@ -56,10 +62,12 @@ PRERELEASE / GM / DEV_VERSION / preproduction directories (gen_version_def.sh):
   and the key is absent). With DEV_VERSION>=1, VERSION_LINE appends ", BUILD <n>" (comma, space, BUILD, space, n).
 
   Unique keys: every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/)
-  must have a unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple tree-wide.
-  Omitting DEV_VERSION= counts as DEV_VERSION 0 for this rule. Before assigning
-  DEV_VERSION for a given A.B.C, scan version/entries/ and that preproduction folder
-  and pick the smallest unused non-negative int. CI runs
+  must have a unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple tree-wide,
+  except RERELEASE=1 rows that reuse an existing key (exactly one original per
+  quadruple). Omitting DEV_VERSION= counts as DEV_VERSION 0 for this rule. Default:
+  before assigning DEV_VERSION for a given A.B.C, scan version/entries/ and that
+  preproduction folder and pick the smallest unused non-negative int. To keep the
+  same BUILD, set RERELEASE=1 with that DEV_VERSION. CI runs
   ./scripts/check_version_entries_semver_dev_unique.sh (O(kn) over dirs and files).
 
   PRERELEASE=1 marks an in-flight prerelease line. Author new *.ver rows at the

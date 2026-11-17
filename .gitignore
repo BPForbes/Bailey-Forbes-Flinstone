@@ -60,6 +60,7 @@ tests/test_fs_provider_bytes
 tests/test_hex
 tests/test_fs_identity
 tests/test_fs_bootmap
+tests/test_fs_vga_wrap
 tests/test_secret_compare
 tests/test_random
 tests/test_kq_mem_storage
