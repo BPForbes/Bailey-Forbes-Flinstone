@@ -138,11 +138,11 @@ make USE_ASM_ALLOC=1
 ```
 Replaces the system allocator for the process. Use for testing or bare-metal targets. Disable (`USE_ASM_ALLOC=0` or omit) if batch mode shows instability.
 
-**Bare-metal build** (for bootable kernel, not userspace):
+**Bare-metal driver build** (a hosted program, not a bootable kernel):
 ```bash
 make baremetal
 ```
-Uses port I/O and VGA directly. Requires bare-metal target.
+Builds the same hosted Linux program as `make` (`BPForbes_Flinstone_Shell`, dynamically linked against libc, SQLite and OpenSSL) with `-DDRIVERS_BAREMETAL=1` and `-no-pie`, so the port I/O, VGA, PIT and PIC driver paths are compiled in. It has no boot loader and no Multiboot/PVH header, and it depends on the Linux dynamic loader, so no firmware or boot loader can start it (QEMU `-kernel` refuses it). For a bootable image use `make browser-kernel`, which builds `dist/flintstone.img` (MBR, long-mode loader, freestanding kernel); see `docs/FREESTANDING_BOOT.md`.
 
 **Embedded x86 VM** (emulation-based hypervisor with CPU, RAM, GPU, timer, interrupts):
 ```bash

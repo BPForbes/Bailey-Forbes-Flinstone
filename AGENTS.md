@@ -51,7 +51,8 @@ Run builds from the repository root.
 - x86_64 GAS build: `make ARCH=x86_64_gas`
 - x86_64 NASM build: `make ARCH=x86_64_nasm`
 - AArch64 cross build: `make ARCH=arm`
-- x86 bare-metal-style build: `make baremetal`
+- Bare-metal driver build (a hosted program that compiles the port I/O, VGA, PIT and PIC paths; not bootable): `make baremetal`
+- Bootable x86-64 image (MBR, loader, freestanding kernel): `make browser-kernel`
 - VM-enabled host build: `make vm`
 - VM with SDL2 window: `make vm-sdl`
 - Build local third-party dependencies into `deps/install`: `make deps`

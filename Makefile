@@ -348,7 +348,8 @@ $(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES
 
 all: $(TARGET) $(FLINSTONE_PS_EXE) $(FLINSTONE_LINUX_NET_OUT)
 
-# Bare-metal: use port I/O and VGA (for kernel build, not userspace)
+# Bare-metal drivers: port I/O and VGA paths. This is still the hosted Linux program (dynamic libc, SQLite,
+# OpenSSL; no boot header), not a bootable kernel. `make browser-kernel` builds the bootable image (#423).
 baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
 baremetal: LDFLAGS += -no-pie
 baremetal: $(TARGET)

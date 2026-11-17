@@ -1,0 +1,7 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=13
+RERELEASE=1
+DESCRIPTION=make baremetal is documented for what it builds (#423). It produces the same hosted Linux program as plain make (BPForbes_Flinstone_Shell, dynamically linked against libc, SQLite and OpenSSL) compiled with -DDRIVERS_BAREMETAL=1 and -no-pie, so the port I/O, VGA, PIT and PIC driver paths are compiled in; it has no boot loader and no Multiboot or PVH header, and QEMU -kernel refuses it. The README, AGENTS.md, the Makefile comment and docs/ARCH.md now say so plainly and point to make browser-kernel, which builds the bootable dist/flintstone.img. No behaviour change.
