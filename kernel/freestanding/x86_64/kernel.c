@@ -14,7 +14,11 @@
 #include "fl/driver/keyquorum.h"
 #include "kq_heap.h"
 #ifndef FL_SECFEAT
+#ifdef FL_KQ_FILES
+#include "kq_files.h"
+#else
 void fl_fs_kq_bind_identity(void);
+#endif
 #endif
 #endif
 
@@ -138,6 +142,11 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
 #ifdef FL_WITH_KEYQUORUM
     /* The KeyQuorum library is linked and its ABI is the one the driver was written for. */
     fl_fs_serial_puts(fl_kq_driver_get() ? "CAP keyquorum=linked\r\n" : "CAP keyquorum=abi-mismatch\r\n");
+#endif
+#ifdef FL_KQ_FILES
+    /* A real history in the in-memory store: started, signed again, trusted, refused under a wrong key. */
+    fl_fs_serial_puts(fl_kq_driver_get() && fl_fs_kq_selftest() == 0 ? "CAP keyquorum-history=ok\r\n"
+                                                                      : "CAP keyquorum-history=failed\r\n");
 #endif
     fl_fs_serial_puts("FLINTSTONE_KERNEL_BOOT_OK\r\n");
     __asm__ volatile("sti");

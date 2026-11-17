@@ -44,7 +44,9 @@ kq_srcs=()
 # The checkpoints run over the in-memory storage table (FL-02 stage 2); kq_platform.c is their libc subset.
 [ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c" "${root}/kernel/core/vfs/kq_checkpoint.c" "${root}/kernel/core/vfs/kq_mem_storage.c")
 # Not in the SECFEAT image: its bss has no room.
-[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c")
+[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c" "${root}/kernel/freestanding/x86_64/kq_files.c")
+# KeyQuorum-signed file histories (kq_files.c) need the sealed account keys, so they follow kq_identity.c.
+[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && cflags+=(-DFL_KQ_FILES)
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
     "${root}/kernel/drivers/freestanding_x86_64/vga.c" \

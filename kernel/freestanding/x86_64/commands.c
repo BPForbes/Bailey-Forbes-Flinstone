@@ -8,6 +8,9 @@
 #ifdef FL_LAB_KQ
 #include "lab_kq.h" /* tools/browser-lab/wasm: KeyQuorum in the WebAssembly shell */
 #endif
+#ifdef FL_KQ_FILES
+#include "kq_files.h" /* KeyQuorum-signed histories in the QEMU image */
+#endif
 /* VERSION_LINE of the build: the same header the hosted shell uses, macros only. */
 #include "../../../userland/shell/version_def.h"
 
@@ -795,8 +798,13 @@ static int run_net(const char *verb, const char **cursor)
 #define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
 /* The Rust library is linked into this image but the delivery checkpoints are not: they
  * need a store that holds .kqtf containers (the ramfs holds 160 bytes a file) and a libc subset. */
+#ifdef FL_KQ_FILES
+#define FILE_KQ_ELSEWHERE \
+    "server file: this image keeps KeyQuorum-signed histories (server file sign|log|verify <path>); co-signed delivery runs in the lab's WebAssembly shell\r\n"
+#else
 #define FILE_KQ_ELSEWHERE \
     "server file: KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
+#endif
 #define FILE_USER_MAX 16
 
 static int file_user_ok(const char *s)
@@ -869,12 +877,30 @@ static int server_file_send(int session, const char **cursor)
         if (str_eq(word, "permit"))
             return fl_lab_kq_permit(session, target);
         return fl_lab_kq_log(session, target);
+#elif defined(FL_KQ_FILES)
+        if (str_eq(word, "log") && take_word(cursor, target, sizeof(target))) {
+            (void)fl_fs_kq_file_log(session, target);
+            return 1;
+        }
+        emit(str_eq(word, "log") ? "usage: server file log <path>\r\n" : FILE_KQ_ELSEWHERE);
+        return 1;
 #else
         (void)target;
         emit(FILE_KQ_ELSEWHERE);
         return 1;
 #endif
     }
+#ifdef FL_KQ_FILES
+    if (more && str_eq(word, "verify")) {
+        char target[FL_FS_RAMFS_PATH];
+        if (!take_word(cursor, target, sizeof(target))) {
+            emit("usage: server file verify <path>\r\n");
+            return 1;
+        }
+        (void)fl_fs_kq_file_verify(session, target);
+        return 1;
+    }
+#endif
     if (more && (str_eq(word, "cosign") || str_eq(word, "open"))) {
         char id[40];
         int has = take_word(cursor, id, sizeof(id));
@@ -2161,6 +2187,9 @@ void fl_fs_commands_init(void)
 {
 #ifdef FL_LAB_KQ
     fl_lab_kq_init(emit);
+#endif
+#ifdef FL_KQ_FILES
+    fl_fs_kq_files_init(emit);
 #endif
     s_redir[0] = 0;
     s_audit_n = 0;

@@ -281,7 +281,54 @@ HOSTED_VERBS = [
 ]
 
 
+def sign(path, password, expect, timeout=20):
+    start = len(buf)
+    send("server file sign " + path + "\n")
+    wait_from("Password:", start)
+    send(password + "\n")
+    wait_from(expect, start, timeout)
+
+
+def kq_history():
+    """FL-02 stage 2 (the default image only): a ramfs file's history, each revision signed by KeyQuorum
+    with the account's sealed key, judged by KeyQuorum under the keys the image holds."""
+    read_until("CAP keyquorum-history=ok", 4)  # the boot self-test: a signed history in the in-memory store
+    read_until("Flinstone@flintstone>", 4)
+    cwd = cmd("pwd").replace("\r", "").split("\n")[1].strip()
+    note = (cwd.rstrip("/") + "/kqnote.txt") if cwd.startswith("/") else "kqnote.txt"
+    cmd("write kqnote.txt first draft", expect="wrote")
+    cmd("server file log kqnote.txt", expect="no history for kqnote.txt")
+    cmd("server file verify kqnote.txt", expect="no history for kqnote.txt")
+    sign("kqnote.txt", "not-the-password", "authentication failed")
+    for draft in ("first draft", "second draft"):
+        cmd("write kqnote.txt " + draft, expect="wrote")
+        sign("kqnote.txt", "flinstone", "signed by Flinstone")
+    cmd("server file verify kqnote.txt", expect="signed by Flinstone")
+    history = cmd("server file log kqnote.txt", expect="Flinstone")
+    if history.count("by Flinstone") < 2:
+        raise SystemExit("test-freestanding-shell: server file log shows fewer than two signed revisions\n" + history)
+    start = len(buf)
+    send("switchuser root\n")
+    wait_from("Password:", start)
+    send("root\n")
+    wait_from("SWITCHUSER user=Root", start)
+    cmd("server file verify " + note, expect="signed by Flinstone")  # Root reads it under Flinstone's key
+    sign(note, "root", "the newest revision is another account's")  # and may not sign over it
+    # passwd gives Flinstone a new key: its earlier revisions no longer verify as Flinstone's.
+    start = len(buf)
+    send("passwd flinstone\n")
+    wait_from("Password:", start)
+    send("flinstone\n")
+    wait_from("ok", start, timeout=20)
+    cmd("server file verify " + note, expect="the newest revision is not trusted")
+
+
 try:
+    if os.environ.get("FL_KQ_HISTORY_ONLY") == "1":
+        read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
+        kq_history()
+        print("test-freestanding-shell: PASS (KeyQuorum-signed history in the default image)")
+        sys.exit(0)
     read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
     read_until("network=lab", 4)
     read_until("CAP keyquorum=linked", 4)  # the KeyQuorum library is linked and its ABI accepted (FL-02)

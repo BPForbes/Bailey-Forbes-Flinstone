@@ -166,7 +166,11 @@ jobs:
         # (built above, boot-probed, and published) stays lab-free.
         # The script builds the hosted shell it compares against when it is missing; a second command here
         # would be one more CodeQL cache-poisoning finding (the register, CQ-017, allows a fixed number).
-        run: FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
+        # The same step then boots the default image for its KeyQuorum-signed file histories (FL-02 stage 2):
+        # a new step here would be a new CodeQL finding (docs/SOC2_CODEQL.md, CQ-017/CQ-018).
+        run: |
+          FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
+          FL_KQ_HISTORY_ONLY=1 FL_BROWSER_KERNEL_IMAGE=dist/flintstone.img python3 ./scripts/test_freestanding_shell.py
 
       - name: Fetch pinned QEMU Wasm runtime
         run: python3 ./scripts/fetch_browser_runtime.py

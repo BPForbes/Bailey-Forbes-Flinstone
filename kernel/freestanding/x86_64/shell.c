@@ -6,6 +6,9 @@
 #include "pit.h"
 #include "serial.h"
 #include "vga.h"
+#ifdef FL_KQ_FILES
+#include "kq_files.h"
+#endif
 
 #define LINE 128
 #define HIST_MAX 16
@@ -18,6 +21,7 @@
 #define MODE_SUDO_I 6
 #define MODE_PASSWD 7
 #define MODE_SWITCHUSER 8
+#define MODE_FILE_SIGN 9
 
 struct perspective {
     int valid;
@@ -47,6 +51,13 @@ static int str_eq(const char *a, const char *b)
         ++b;
     }
     return *a == *b;
+}
+
+static void wipe(char *p, unsigned n)
+{
+    volatile char *v = p;
+    while (n--)
+        *v++ = 0;
 }
 
 static void str_copy(char *dst, const char *src, unsigned cap)
@@ -297,6 +308,14 @@ static void finish_password(int session, const char *password)
     int mode = s_mode[session];
     int before = fl_fs_identity_user_index(session);
     s_mode[session] = MODE_CMD;
+#ifdef FL_KQ_FILES
+    if (mode == MODE_FILE_SIGN) {
+        /* The password opens the account's key for this one signature; kq_files.c reports the outcome. */
+        (void)fl_fs_kq_file_sign(session, s_pending[session], password);
+        s_pending[session][0] = 0;
+        return;
+    }
+#endif
     if (mode == MODE_LOGIN)
         ok = fl_fs_identity_login(session, s_pending[session], password);
     else if (mode == MODE_SU)
@@ -507,6 +526,23 @@ static void run_command(int session, char *line)
         }
         return;
     }
+#ifdef FL_KQ_FILES
+    if (str_eq(verb, "server")) {
+        /* server file sign <path> asks for the account's password first, like su. */
+        const char *look = cursor;
+        char w1[8], w2[8], target[LINE];
+        if (take_word(&look, w1, sizeof(w1)) && str_eq(w1, "file") && take_word(&look, w2, sizeof(w2)) &&
+            str_eq(w2, "sign")) {
+            if (!take_word(&look, target, sizeof(target))) {
+                emit("usage: server file sign <path>\r\n");
+                return;
+            }
+            str_copy(s_pending[session], target, sizeof(s_pending[session]));
+            s_mode[session] = MODE_FILE_SIGN;
+            return;
+        }
+    }
+#endif
     if (fl_fs_commands_run(session, verb, &cursor))
         return;
     emit("unknown command; try help\r\n");
@@ -542,10 +578,13 @@ void fl_fs_shell_input(char c)
          * the completed command into the next session's line buffer. */
         s_len[session] = 0;
         s_line[session][0] = 0;
-        if (s_mode[session] != MODE_CMD)
+        if (s_mode[session] != MODE_CMD) {
             finish_password(session, line);
-        else
+            wipe(line, sizeof(line)); /* a password: neither copy outlives its use */
+            wipe(s_line[session], sizeof(s_line[session]));
+        } else {
             run_command(session, line);
+        }
         prompt();
         return;
     }

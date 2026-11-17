@@ -4,6 +4,7 @@
 #include "fl/mem_asm.h"
 #include "ioport.h"
 #include "kq_heap.h"
+#include "kq_files.h"
 #include "mem_domain.h"
 #include "serial.h"
 
@@ -215,6 +216,51 @@ fl_result_t fl_time_wall_sec(int64_t *out_sec)
         return FL_RESULT_ERR;
     *out_sec = unix_days(y, mo, d) * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + s;
     return FL_RESULT_OK;
+}
+
+static void put_digits(char *out, unsigned v, int n)
+{
+    while (n--) {
+        out[n] = (char)('0' + v % 10u);
+        v /= 10u;
+    }
+}
+
+/* The wall clock as KeyQuorum's UTC text (kq_files.h); days to a civil date by H. Hinnant's algorithm. */
+int fl_fs_utc_text(char out[25])
+{
+    int64_t sec, days, z, era, doe, yoe, doy, mp, y;
+    unsigned d, m, rem;
+
+    if (!out || fl_time_wall_sec(&sec) != FL_RESULT_OK || sec < 0)
+        return -1;
+    days = sec / 86400;
+    rem = (unsigned)(sec % 86400);
+    z = days + 719468;
+    era = z / 146097;
+    doe = z - era * 146097;
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp = (5 * doy + 2) / 153;
+    d = (unsigned)(doy - (153 * mp + 2) / 5 + 1);
+    m = (unsigned)(mp < 10 ? mp + 3 : mp - 9);
+    y = yoe + era * 400 + (m <= 2);
+    put_digits(out, (unsigned)y, 4);
+    out[4] = '-';
+    put_digits(out + 5, m, 2);
+    out[7] = '-';
+    put_digits(out + 8, d, 2);
+    out[10] = 'T';
+    put_digits(out + 11, rem / 3600u, 2);
+    out[13] = ':';
+    put_digits(out + 14, rem / 60u % 60u, 2);
+    out[16] = ':';
+    put_digits(out + 17, rem % 60u, 2);
+    out[19] = '.';
+    put_digits(out + 20, 0, 3);
+    out[23] = 'Z';
+    out[24] = '\0';
+    return 0;
 }
 
 /* libc symbols the compiler and Rust archive call under -nostdlib; built so none calls itself. */

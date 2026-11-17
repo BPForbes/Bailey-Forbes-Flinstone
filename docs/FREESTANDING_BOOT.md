@@ -22,6 +22,9 @@ side is in [browser-kernel-lab.md](browser-kernel-lab.md) and [LAB_KQ_SHELL.md](
   zeroes the bss before any C check runs. Otherwise the loader stops (`FLINTSTONE_BOOT_FAIL kernel-size` or
   `FLINTSTONE_BOOT_FAIL bss-memory`).
 - The boot info reserves the loaded image and the bss as two ranges, so the KeyQuorum heap starts past the bss.
+- The kernel stack is `FL_KERNEL_STACK_BOTTOM` (`0xa000`) to `FL_KERNEL_STACK_TOP` (`0x10000`), 24 KiB with no guard page: it
+  starts above stage 2, which is dead once the kernel runs. The KeyQuorum history checkpoints and the Rust verification under
+  them run on it; the boot self-test peaks near 12 KiB, measured under QEMU by filling the stack with a marker.
 - Stage 2 itself is `FL_STAGE2_SECTORS` (8) sectors read from LBA 1.
 
 ## Boot handoff and the KeyQuorum heap (`kernel.c`, `bootmap.c`, `kq_heap.[ch]`)
@@ -44,7 +47,9 @@ side is in [browser-kernel-lab.md](browser-kernel-lab.md) and [LAB_KQ_SHELL.md](
 The image provides the four embedder hooks of `keyquorum_identity.h`, the `mem_domain_*` allocators the driver calls,
 a UTC clock, and the libc symbols the compiler and the Rust archive expect under `-nostdlib`. The symbols are built
 with `-fno-builtin` and `-fno-tree-loop-distribute-patterns`, so none of them calls itself. `rep movsb` and `stosb`
-are used for the byte primitives, which needs no SSE.
+are used for the byte primitives, which needs no SSE. For the KeyQuorum checkpoints (FL-02 stage 2) the file also defines
+`strcmp`, `strnlen`, `strrchr`, `strtoul` and a small `vsnprintf`/`snprintf` (`%s %c %d %i %u %x %X`, the `-` and `0` flags, width,
+precision, `l`/`ll`/`z`; any other conversion returns -1).
 
 | Hook | Behaviour |
 |------|-----------|
@@ -72,7 +77,8 @@ The browser worker's part of this setup is in [browser-kernel-lab.md](browser-ke
 
 The UTC clock comes from the CMOS real-time clock. The code waits for the update-in-progress flag to
 clear, converts BCD if the RTC is in BCD mode, and converts the 12-hour form to 24-hour before it computes days from
-the civil date.
+the civil date. `fl_fs_utc_text` turns it back into KeyQuorum's revision timestamp (`YYYY-MM-DDTHH:MM:SS.000Z`) for the
+signed file histories.
 
 ## Names in the freestanding identity
 

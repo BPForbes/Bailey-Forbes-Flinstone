@@ -679,9 +679,8 @@ changes that.
 - Co-signed delivery is built (above). Redistribution, time-bound access, public offers and
   the chained edit log are not.
 - The browser lab runs co-signed delivery with in-memory keys and first-seen key publication
-  (above). The freestanding QEMU kernel links the KeyQuorum library and the driver (FL-02 stage 1,
-  below) but does not run the delivery checkpoints (stage 2: the binary in-memory storage table exists and is tested on the host,
-  `kq_mem_storage.c`, but the checkpoints are not linked into the image).
+  (above). The freestanding QEMU kernel links the KeyQuorum library and the driver (FL-02 stage 1) and runs the
+  checkpoints over its in-memory storage table for signed file histories (stage 2, below), but not co-signed delivery.
 - The 16 MiB limit, the ring sizes and the relay TTL are KeyQuorum defaults, not measured for
   Flinstone's workload.
 - **Refusal reports (KQER, KQ-12).** When `server file` refuses a released delivery, the recipient's shell calls
@@ -713,7 +712,7 @@ changes that.
   file each delivery was for, for the life of the process. Hosts that predate the opcode ignore it. The browser lab has no key service and
   writes no report.
 
-## The freestanding image (FL-02, stage 1)
+## The freestanding image (FL-02)
 
 `scripts/build_freestanding_browser_kernel.sh` builds `libkeyquorum_identity.a` for `x86_64-unknown-none`
 (`cargo build --locked --release --no-default-features`, run from the submodule so its `.cargo/config.toml`
@@ -723,10 +722,11 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
 (`FL_KQ_ABI_VERSION` 7), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
 (`fl_fs_kq_bind_identity`) only when that same check passes; on a mismatch the plain demo accounts stay.
 
-- **Size.** The image is 913 sectors (about 456 KiB; 945 with the security lab; gate 1024). The loaded bytes end at `0x82118`
-  (`0x86160` with the security lab), below `0x9f000`, the end of conventional memory the build script allows, which leaves about 115 KiB
-  (99 KiB) for code. The bss (about 85 KiB) is linked at 1 MiB and never loaded (`docs/FREESTANDING_BOOT.md`). The account sealing below
-  (`kq_identity.c`) and the `fw_cfg` entropy driver are still **left out of the security-lab image**, as before the bss moved.
+- **Size.** The image is 982 sectors (about 491 KiB; 955 with the security lab; gate 1024). The loaded bytes end at `0x8aa60`
+  (`0x87440` with the security lab), below `0x9f000`, the end of conventional memory the build script allows, which leaves about 82 KiB
+  (95 KiB) for code. The bss (about 90 KiB) is linked at 1 MiB and never loaded (`docs/FREESTANDING_BOOT.md`). The kernel stack is
+  24 KiB (`0xa000` to `0x10000`): the boot self-test peaks near 12 KiB. The account sealing below (`kq_identity.c`), the signed file
+  histories and the `fw_cfg` entropy driver are still **left out of the security-lab image**.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
   needs at least 64 MiB, which is what the page requests.
@@ -738,12 +738,28 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
   shell test scripts use `os.urandom` / `head -c 4096 /dev/urandom`); the image cannot tell a reused file from a fresh one and a reused file repeats
   keys. `-cpu max` also works (RDRAND), in native QEMU and in QEMU Wasm. The security-lab image has neither and so can verify and open but not generate.
 - **Clock.** `fl_time_wall_sec` reads the CMOS real-time clock (UTC under QEMU's default).
-- **Stage 2 (partly built): the checkpoints in the image.** They need a store for `.kqtf` containers and
-  sealed letters and the libc calls `kq_checkpoint.c` makes (`stdio`, `stdlib`, `errno`, `sys/stat`, `unistd`). The store exists:
-  `kernel/core/vfs/kq_mem_storage.c` is a binary in-memory `fl_kq_storage_t` (a ramfs file holds only 160 bytes of text, 16 files in all, so
-  it cannot be used), tested on the host with the real checkpoints and compiled with the image's own flags (5 KB of text, 8 KB of bss). The
-  libc calls are not provided, the checkpoints are not linked, and the image has about 16 KB of conventional-memory room, so `server file` in the
-  image still says delivery runs in the WebAssembly shell.
+- **Stage 2: signed file histories in the image.** The checkpoints (`kq_checkpoint.c`) run in the default image over
+  `kernel/core/vfs/kq_mem_storage.c`, the binary in-memory `fl_kq_storage_t` that is the image's default table (a ramfs file
+  holds only 160 bytes of text, so the store keeps its own copy and the `.kqtf` beside it). The placement layer, the shared
+  folder's quarantine gate and the container mutex are hosted-only (`FL_FREESTANDING`); the image runs every checkpoint from its
+  one shell context. `kq_platform.c` supplies the libc calls they make (`strcmp`, `strnlen`, `strrchr`, `strtoul`, a small
+  `snprintf`) and the clock as KeyQuorum's UTC text (`fl_fs_utc_text`). `fl_fs_join_path` and the reserved-suffix check are
+  header inlines both builds share. `kernel/freestanding/x86_64/kq_files.c` adds three shell verbs:
+  - `server file sign <path>` asks for the account's password, opens its sealed key (`fl_fs_kq_open_signing`, wiped after
+    the one signature) and signs the ramfs file's content as a revision: the first one starts the history
+    (`fl_kq_cp_track_with`), later ones extend it (`fl_kq_cp_sign_head_with`, only over the account's own head). The typed
+    password is wiped from the shell's buffers.
+  - `server file log <path>` prints the history (`fl_kq_cp_history`, the shared formatter).
+  - `server file verify <path>` asks KeyQuorum whether the head is trusted under the file's policy and the account keys the
+    image holds (`fl_kq_cp_head_trusted_with`): `kq_identity.c` now keeps each account's signing public key beside its sealed
+    key as the image's key directory (`fl_fs_kq_keydir`). `passwd` seals a new key, so revisions signed with the old one no
+    longer verify as that account's.
+  At boot the image runs a self-test over a throwaway key (start, sign again, trusted, refused under a wrong key) and prints
+  `CAP keyquorum-history=ok` or `=failed`. The driver's `head_author` op is now in the image too. The security-lab image has
+  no sealed keys, so it has neither the verbs nor the self-test. Histories live in memory and end with the session, and
+  co-signed delivery still runs in the WebAssembly shell. `make test-freestanding-kq-history` (and the browser-lab workflow's
+  shell-probe step) drives it all under QEMU, including a wrong password, Root reading but not signing over Flinstone's head,
+  and the old revision after `passwd`.
 - **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo
   accounts are seeded. A new account's signing key and box key are sealed with the driver's `account_seal`,
   and the password is not kept in the account table; login, `su` and `sudo` open that seal. `switchuser`
@@ -785,8 +801,7 @@ the driver registry exists (`fl_kq_service_start`) and ended only by an orderly 
   head author, sign) and runs the sweep as a protected periodic item: skip while a signature is recent, skip and audit a
   forked history, audit and retry next period when the author is not signed in, sign with a copy of the author's own key
   and wipe it. The head author is KeyQuorum's (KQ-20, `kq_file_head_author`, ABI 5) through the driver's `head_author`
-  op (hosted builds only: the freestanding image has no checkpoint storage, so the op is NULL there and the call
-  answers NO_DRIVER) and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
+  op (also in the freestanding image since FL-02 stage 2) and `fl_kq_cp_head_author` (the container beside a path; FORKED with two heads). `fl_kq_autosign_head_author` is the
   production callback (ctx an `fl_kq_autosign_file_t`): a fork answers BUSY, so the sweep audits `kq-autosign-forked` and
   signs nothing. The other two callbacks are production too: `fl_kq_autosign_last_signature` (the newest successful
   `RevisionSigned` or `CountersignatureAdded` in the file's history, `fl_kq_cp_last_signature`) and `fl_kq_autosign_sign`

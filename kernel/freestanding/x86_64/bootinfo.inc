@@ -16,7 +16,7 @@
 %define FL_STAGE2_ADDR               0x7e00
 %define FL_STAGE2_SECTORS            8
 %define FL_STAGE2_MAGIC              0x32534c46 ; "FLS2", the last 4 bytes of stage 2
-%define FL_KERNEL_STACK_BOTTOM       0xc000
+%define FL_KERNEL_STACK_BOTTOM       0xa000 ; 24 KiB: the KeyQuorum history checkpoints and Rust verify run on it
 %define FL_KERNEL_STACK_TOP          0x10000
 %define FL_KERNEL_LOAD_ADDR          0x10000
 %define FL_LOW_BUDGET                0x9f000

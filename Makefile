@@ -399,7 +399,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-browser-kq test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
+.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-browser-kq test-freestanding-entry test-freestanding-shell test-freestanding-kq-history browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
@@ -434,6 +434,10 @@ test-freestanding-entry:
 # still validates the lab-free default image.
 test-freestanding-shell: $(TARGET) test-browser-kernel browser-kernel-secfeat
 	@FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
+
+# FL-02 stage 2: KeyQuorum-signed file histories live in the default image (the SECFEAT one has no sealed keys).
+test-freestanding-kq-history: test-browser-kernel
+	@FL_KQ_HISTORY_ONLY=1 FL_BROWSER_KERNEL_IMAGE=dist/flintstone.img python3 ./scripts/test_freestanding_shell.py
 
 gen-session-wire-js:
 	@python3 ./scripts/gen_session_wire_js.py

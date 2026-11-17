@@ -1,5 +1,7 @@
-/* Sealed account keys in the freestanding image: one sealed signing key per account; nothing stays open. */
+/* Sealed account keys in the freestanding image: one sealed signing key per account; nothing stays open.
+ * The public half is kept beside it: the image's key directory for KeyQuorum file histories. */
 #include "identity.h"
+#include "kq_files.h"
 #include "fl/driver/keyquorum.h"
 #include "mem_domain.h"
 
@@ -10,6 +12,7 @@ typedef struct {
     int used;
     char name[16];
     uint8_t sealed[FL_KQ_ACCOUNT_SEALED_LEN];
+    uint8_t pub[32];
 } kqi_t;
 
 static kqi_t s_kqi[FL_FS_MAX_USERS];
@@ -48,9 +51,10 @@ static kqi_t *kqi_find(const char *name)
     return NULL;
 }
 
-static int seal_new(const fl_kq_driver_t *drv, const char *pw, uint8_t out[FL_KQ_ACCOUNT_SEALED_LEN])
+static int seal_new(const fl_kq_driver_t *drv, const char *pw, uint8_t out[FL_KQ_ACCOUNT_SEALED_LEN],
+                    uint8_t pub[32])
 {
-    uint8_t sec[32], pub[32];
+    uint8_t sec[32];
     size_t n = 0;
     int rc = -1;
 
@@ -73,23 +77,35 @@ static int kqi_enroll(const char *creator, const char *name, const char *pw)
     for (int i = 0; i < FL_FS_MAX_USERS && !k; i++)
         if (!s_kqi[i].used)
             k = &s_kqi[i];
-    if (!k || seal_new(drv, pw, k->sealed) != 0)
+    if (!k || seal_new(drv, pw, k->sealed, k->pub) != 0)
         return -1;
     copy_name(k->name, name, sizeof k->name);
     k->used = 1;
     return 0;
 }
 
-static int kqi_unlock(const char *name, const char *pw)
+int fl_fs_kq_open_signing(const char *name, const char *pw, uint8_t sec[32])
 {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     kqi_t *k = name ? kqi_find(name) : NULL;
+
+    if (!drv || !k || !pw || !sec)
+        return -1;
+    if (drv->account_open(pw, k->sealed, FL_KQ_ACCOUNT_SEALED_LEN, sec) == FL_KQ_ACCOUNT_OK)
+        return 0;
+    drv->wipe(sec, 32);
+    return -1;
+}
+
+static int kqi_unlock(const char *name, const char *pw)
+{
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
     uint8_t sec[32];
     int ok;
 
-    if (!drv || !k || !pw)
+    if (!drv)
         return 0;
-    ok = drv->account_open(pw, k->sealed, FL_KQ_ACCOUNT_SEALED_LEN, sec) == FL_KQ_ACCOUNT_OK;
+    ok = fl_fs_kq_open_signing(name, pw, sec) == 0;
     drv->wipe(sec, sizeof sec); /* nothing stays open */
     return ok;
 }
@@ -98,11 +114,13 @@ static int kqi_change_password(const char *name, const char *pw)
 {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     kqi_t *k = name ? kqi_find(name) : NULL;
-    uint8_t fresh[FL_KQ_ACCOUNT_SEALED_LEN];
+    uint8_t fresh[FL_KQ_ACCOUNT_SEALED_LEN], pub[32];
 
-    if (!drv || !k || !pw || !pw[0] || seal_new(drv, pw, fresh) != 0)
+    if (!drv || !k || !pw || !pw[0] || seal_new(drv, pw, fresh, pub) != 0)
         return -1;
+    /* A new key: revisions signed with the old one no longer verify as this account's. */
     mem_domain_copy(k->sealed, fresh, sizeof fresh);
+    mem_domain_copy(k->pub, pub, sizeof pub);
     return 0;
 }
 
@@ -121,6 +139,36 @@ static const fl_fs_identity_kq_ops_t s_ops = {
     .change_password = kqi_change_password,
     .forget = kqi_forget,
 };
+
+/* The key directory the checkpoints read: an account's label is its name, its key the one sealed here. */
+static const char *kd_resolve(const fl_kq_keydir_t *dir, const char *who)
+{
+    kqi_t *k = who ? kqi_find(who) : NULL;
+
+    (void)dir;
+    return k ? k->name : NULL;
+}
+
+static const unsigned char *kd_signing(const fl_kq_keydir_t *dir, const char *label)
+{
+    kqi_t *k = label ? kqi_find(label) : NULL;
+
+    (void)dir;
+    return k ? k->pub : NULL;
+}
+
+static const unsigned char *kd_box(const fl_kq_keydir_t *dir, const char *label)
+{
+    (void)dir, (void)label;
+    return NULL; /* the image seals no box key: it delivers nothing */
+}
+
+static const fl_kq_keydir_t s_keydir = { kd_resolve, kd_signing, kd_box };
+
+const fl_kq_keydir_t *fl_fs_kq_keydir(void)
+{
+    return &s_keydir;
+}
 
 void fl_fs_kq_bind_identity(void)
 {

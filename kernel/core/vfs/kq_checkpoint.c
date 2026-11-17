@@ -29,8 +29,13 @@
 /* Largest file a co-signed delivery carries: half the letter cap, leaving room for the
  * container's ancestors and proofs. */
 #define KQ_CONTENT_MAX (FL_KQ_LETTER_MAX / 2u)
-/* Most labels a trust table holds (authors, signers, the owner). */
+/* Most labels a trust table holds (authors, signers, the owner). The image holds at most
+ * FL_FS_MAX_USERS (8) accounts, and its kernel stack is 24 KiB: 8 entries hold every signer it knows. */
+#ifdef FL_FREESTANDING
+#define KQ_TRUST_MAX 8u
+#else
 #define KQ_TRUST_MAX 32u
+#endif
 /* Most (revision, root) pairs remembered per file. */
 /* Accepted (revision, history root) pairs kept in <file>.kqseen (newest KQ_SEEN_KEEP only).
  * Dropping old pairs never lets an old revision back in: decode refuses it separately. */
@@ -107,7 +112,7 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 
 /* Write through a sibling and rename, so a reader never sees half a file. */
 #ifdef FL_FREESTANDING
-#define KQ_PATH_MAX FL_KQ_MEM_PATH_MAX /* the image's stack is 16 KiB; its paths are the table's */
+#define KQ_PATH_MAX FL_KQ_MEM_PATH_MAX /* the image's stack is 24 KiB; its paths are the table's */
 #else
 #define KQ_PATH_MAX FL_FS_PATH_MAX
 #endif
@@ -358,6 +363,53 @@ static void trust_build(const fl_kq_driver_t *drv, const fl_kq_keydir_t *keys,
 
 /* ---- checkpoints -------------------------------------------------------- */
 
+/* Reads path, starts its history when may_start (else refuses one that has none: IO) or loads it,
+ * and checks the content in as a revision signed by author. The caller stores next. */
+static fl_kq_cp_result_t checkin_core(const fl_kq_driver_t *drv, const char *path, const char *author,
+                                      const uint8_t secret[32], const char *created_at_utc, int may_start,
+                                      char *container_path, size_t cap, fl_kq_buf_t *next, uint8_t rev[32]) {
+    const fl_kq_storage_t *store = fl_kq_cp_storage();
+    fl_kq_buf_t content = {0}, container = {0};
+    fl_kq_cp_result_t rc = FL_KQ_CP_OK;
+    int have_container, st;
+
+    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, cap) != 0)
+        return FL_KQ_CP_INVALID;
+    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
+    if (st == -2)
+        return FL_KQ_CP_TOO_LARGE;
+    if (st != 0)
+        return FL_KQ_CP_IO;
+    /* A container that cannot be looked at is an error, never a reason to start a new history. */
+    have_container = store->exists(store->ctx, container_path);
+    if (have_container < 0 || (have_container == 0 && !may_start)) {
+        rc = FL_KQ_CP_IO;
+        goto done;
+    }
+    if (have_container == 0) {
+        uint8_t file_id[16];
+
+        if (fl_random_bytes(file_id, sizeof file_id) != 0 ||
+            drv->file_new(file_id, fl_fs_basename(path), author, &container) != KQ_FILE_OK) {
+            rc = FL_KQ_CP_IO;
+            goto done;
+        }
+    } else if (store->read_file(store->ctx, container_path, FL_KQ_LETTER_MAX, &container.data,
+                                &container.len) != 0 ||
+               drv->verify(&container, NULL) != KQ_FILE_OK) {
+        /* A damaged history is refused, never silently replaced by a new one. */
+        rc = FL_KQ_CP_INVALID;
+        goto done;
+    }
+    st = drv->check_in(&container, author, created_at_utc, content.data, content.len, secret, next, rev);
+    if (st != KQ_FILE_OK)
+        rc = st == KQ_FILE_FORKED ? FL_KQ_CP_FORKED : FL_KQ_CP_INVALID;
+done:
+    fl_kq_buf_free(&content);
+    fl_kq_buf_free(&container);
+    return rc;
+}
+
 static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *keys, const char *sender_key,
                                        const uint8_t sender_signing_secret[32],
                                        const char *recipient_key,
@@ -365,16 +417,12 @@ static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *key
                                        const char *created_at_utc, fl_kq_encoded_t *out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *sender_box;
-    char container_path[4096];
-    fl_kq_buf_t content = {0};
-    fl_kq_buf_t container = {0};
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t next = {0};
     trust_table_t table;
     kq_file_trust_t trust;
     uint8_t rev[32];
-    fl_kq_cp_result_t rc = FL_KQ_CP_OK;
-    const fl_kq_storage_t *store;
-    int have_container;
+    fl_kq_cp_result_t rc;
     int st;
 
     if (!out || !keys || !sender_key || !sender_signing_secret || !recipient_key ||
@@ -386,47 +434,10 @@ static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *key
     sender_box = keys->box_public(keys, sender_key);
     if (!sender_box || !keys->signing_public(keys, sender_key))
         return FL_KQ_CP_NO_KEY;
-    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
-        return FL_KQ_CP_INVALID;
-
-    store = fl_kq_cp_storage();
-    st = store->read_file(store->ctx, path, KQ_CONTENT_MAX, &content.data, &content.len);
-    if (st == -2)
-        return FL_KQ_CP_TOO_LARGE;
-    if (st != 0)
-        return FL_KQ_CP_IO;
-    /* A container that cannot be looked at is an error, never a reason to start a new history. */
-    have_container = store->exists(store->ctx, container_path);
-    if (have_container < 0) {
-        rc = FL_KQ_CP_IO;
+    rc = checkin_core(drv, path, sender_key, sender_signing_secret, created_at_utc, 1, container_path,
+                      sizeof container_path, &next, rev);
+    if (rc != FL_KQ_CP_OK)
         goto done;
-    }
-    if (have_container == 0) {
-        uint8_t file_id[16];
-
-        if (fl_random_bytes(file_id, sizeof file_id) != 0 ||
-            drv->file_new(file_id, fl_fs_basename(path), sender_key, &container) != KQ_FILE_OK) {
-            rc = FL_KQ_CP_IO;
-            goto done;
-        }
-    } else if (store->read_file(store->ctx, container_path, FL_KQ_LETTER_MAX, &container.data,
-                                &container.len) != 0 ||
-               drv->verify(&container, NULL) != KQ_FILE_OK) {
-        /* A damaged history is refused, never silently replaced by a new one. */
-        rc = FL_KQ_CP_INVALID;
-        goto done;
-    }
-
-    st = drv->check_in(&container, sender_key, created_at_utc, content.data, content.len,
-                       sender_signing_secret, &next, rev);
-    if (st == KQ_FILE_FORKED) {
-        rc = FL_KQ_CP_FORKED;
-        goto done;
-    }
-    if (st != KQ_FILE_OK) {
-        rc = FL_KQ_CP_INVALID;
-        goto done;
-    }
     if (drv->offer(&next, rev, &out->offer) != KQ_FILE_OK) {
         rc = FL_KQ_CP_BAD_SIGNATURE;
         goto done;
@@ -451,10 +462,91 @@ static fl_kq_cp_result_t fl_kq_cp_encode_with_unlocked(const fl_kq_keydir_t *key
 done:
     if (rc != FL_KQ_CP_OK)
         fl_kq_encoded_free(out);
-    fl_kq_buf_free(&content);
-    fl_kq_buf_free(&container);
     fl_kq_buf_free(&next);
     return rc;
+}
+
+/* A first signed revision for path, kept beside it: EXISTS when it already has a history. */
+static fl_kq_cp_result_t fl_kq_cp_track_with_unlocked(const fl_kq_keydir_t *keys, const char *path,
+                                                      const char *author_key, const uint8_t signing_secret[32],
+                                                      const char *created_at_utc, uint8_t rev_out[32]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    const fl_kq_storage_t *store = fl_kq_cp_storage();
+    char container_path[KQ_PATH_MAX];
+    fl_kq_buf_t next = {0};
+    uint8_t rev[32];
+    fl_kq_cp_result_t rc;
+
+    if (!keys || !path || !author_key || !signing_secret || !created_at_utc)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    if (!keys->signing_public(keys, author_key))
+        return FL_KQ_CP_NO_KEY;
+    if (sidecar(path, FL_KQ_CONTAINER_SUFFIX, container_path, sizeof container_path) != 0)
+        return FL_KQ_CP_INVALID;
+    switch (store->exists(store->ctx, container_path)) {
+    case 0:
+        break;
+    case 1:
+        return FL_KQ_CP_EXISTS;
+    default:
+        return FL_KQ_CP_IO;
+    }
+    rc = checkin_core(drv, path, author_key, signing_secret, created_at_utc, 1, container_path,
+                      sizeof container_path, &next, rev);
+    if (rc == FL_KQ_CP_OK)
+        rc = store_container(container_path, &next);
+    if (rc == FL_KQ_CP_OK && rev_out)
+        memcpy(rev_out, rev, 32);
+    fl_kq_buf_free(&next);
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_track_with(const fl_kq_keydir_t *keys, const char *path, const char *author_key,
+                                      const uint8_t signing_secret[32], const char *created_at_utc,
+                                      uint8_t rev_out[32]) {
+    fl_kq_cp_result_t rc;
+
+    KQ_LOCK();
+    rc = fl_kq_cp_track_with_unlocked(keys, path, author_key, signing_secret, created_at_utc, rev_out);
+    KQ_UNLOCK();
+    return rc;
+}
+
+fl_kq_cp_result_t fl_kq_cp_head_trusted_with(const fl_kq_keydir_t *keys, const char *path, uint8_t rev[32]) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    char container_path[KQ_PATH_MAX];
+    fl_kq_buf_t c = {0};
+    trust_table_t table;
+    kq_file_trust_t trust;
+    uint8_t head[32];
+    fl_kq_cp_result_t rc;
+    int st;
+
+    if (!keys || !path || !rev)
+        return FL_KQ_CP_INVALID;
+    if (!drv)
+        return FL_KQ_CP_NO_DRIVER;
+    rc = load_container(path, container_path, sizeof container_path, &c);
+    if (rc != FL_KQ_CP_OK)
+        return rc;
+    if (drv->verify(&c, NULL) != KQ_FILE_OK) {
+        fl_kq_buf_free(&c);
+        return FL_KQ_CP_INVALID;
+    }
+    st = drv->head(&c, head);
+    if (st != KQ_FILE_OK) {
+        fl_kq_buf_free(&c);
+        return st == KQ_FILE_FORKED ? FL_KQ_CP_FORKED : FL_KQ_CP_INVALID;
+    }
+    /* The head as the one candidate: select_read returns it only when the policy trusts it. */
+    trust_build(drv, keys, &c, NULL, NULL, &table, &trust);
+    st = drv->select_read(&c, &trust, (const uint8_t(*)[32])head, 1, rev);
+    fl_kq_buf_free(&c);
+    if (st == KQ_FILE_OK && drv->equal(rev, head, 32))
+        return FL_KQ_CP_OK;
+    return st == KQ_FILE_FORKED ? FL_KQ_CP_FORKED : FL_KQ_CP_UNTRUSTED;
 }
 
 fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *sender_key,
@@ -795,7 +887,7 @@ size_t fl_kq_cp_for_each_event(const fl_kq_buf_t *lines, fl_kq_cp_event_fn fn, v
 
 fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t c = {0};
     fl_kq_cp_result_t loaded;
     int rc;
@@ -817,7 +909,7 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines) {
 /* The head beside path: its revision id, or its author's label (empty for a fork). */
 static fl_kq_cp_result_t head_of(const char *path, uint8_t *rev, char *author, size_t cap) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t c = {0};
     fl_kq_cp_result_t out;
     int rc;
@@ -856,7 +948,7 @@ fl_kq_cp_result_t fl_kq_cp_reseal_with(const fl_kq_keydir_t *keys, const char *s
                                        const uint8_t rev[32], fl_kq_encoded_t *out) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *sender_box;
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t container = {0};
     trust_table_t table;
     kq_file_trust_t trust;
@@ -909,7 +1001,7 @@ static fl_kq_cp_result_t fl_kq_cp_permit_with_unlocked(const fl_kq_keydir_t *key
                                        const uint8_t supervisor_secret[32], const char *path,
                                        const uint8_t rev[32]) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t c = {0};
     fl_kq_buf_t next = {0};
     trust_table_t table;
@@ -1112,7 +1204,7 @@ fl_kq_cp_result_t fl_kq_cp_report_read_in(const fl_kq_dir_t *dir, const uint8_t 
 static fl_kq_cp_result_t fl_kq_cp_inject_report_bytes_unlocked(const uint8_t reporter_public[32], const uint8_t *kqer_bytes,
                                                size_t kqer_len, const uint8_t ref[32], const char *path) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t c = {0}, next = {0};
     fl_kq_buf_t kqer;
     fl_kq_cp_result_t out;
@@ -1269,7 +1361,7 @@ fl_kq_cp_result_t fl_kq_cp_last_signature(const char *path, int64_t *sec_out) {
 static fl_kq_cp_result_t fl_kq_cp_sign_head_with_unlocked(const char *path, const char *author_key,
                                           const uint8_t signing_secret[32], const char *created_at_utc) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
-    char container_path[4096], head[FL_HERITAGE_KEY_ID_MAX];
+    char container_path[KQ_PATH_MAX], head[FL_HERITAGE_KEY_ID_MAX];
     fl_kq_buf_t content = {0}, container = {0}, next = {0};
     uint8_t rev[32];
     fl_kq_cp_result_t rc;
@@ -1330,7 +1422,7 @@ fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, cons
                                                 const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17) {
     const fl_kq_driver_t *drv = fl_kq_driver_get();
     const unsigned char *host_box, *requester_box;
-    char container_path[4096];
+    char container_path[KQ_PATH_MAX];
     fl_kq_buf_t c = {0}, ev = {0};
     fl_kq_encoded_t sealed;
     uint8_t rev[32], did[16];
