@@ -70,6 +70,7 @@ make_fake_repo() {
   # Always copy the lib helper (sourced by relocate script)
   cp "$REPO_ROOT/scripts/lib/ver_release_date_stamp.sh" "$tmp/scripts/lib/"
   cp "$REPO_ROOT/scripts/lib/ver_field_parse.sh" "$tmp/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/ver_locked_form.sh" "$tmp/scripts/lib/"
   # Copy requested scripts
   local s
   for s in "$@"; do
@@ -766,6 +767,41 @@ test_main_policy_rerelease_rejected() {
     fail "main_policy: RERELEASE on main should fail"
   else
     ok "main_policy: RERELEASE on main is rejected"
+  fi
+  cleanup "$d"
+}
+
+# finalize_version_locked.sh publishes a RERELEASE=1 row as RERELEASE=0; the subset check agrees.
+test_finalize_rerelease_locked_as_zero() {
+  require_proc_sub "finalize: RERELEASE=1 is locked as RERELEASE=0" || return 0
+  local d
+  d="$(make_fake_repo finalize_version_locked.sh check_version_locked_subset_of_entries.sh)"
+  write_ver_rerelease "$d/version/entries/5_3_0_a.ver" 5 3 0 13 0
+  write_ver_rerelease "$d/version/entries/5_3_0_b.ver" 5 3 0 13 1
+  printf 'notes\nRERELEASE=1\n' >"$d/version/entries/ABOUT.txt"
+  REPO_ROOT="$d" bash "$d/scripts/finalize_version_locked.sh" >/dev/null 2>&1
+  if grep -qx 'RERELEASE=0' "$d/version/locked/5_3_0_b.ver" && ! grep -qx 'RERELEASE=1' "$d/version/locked/5_3_0_b.ver" &&
+     grep -qx 'RERELEASE=1' "$d/version/entries/5_3_0_b.ver" &&
+     cmp -s "$d/version/entries/5_3_0_a.ver" "$d/version/locked/5_3_0_a.ver" &&
+     cmp -s "$d/version/entries/ABOUT.txt" "$d/version/locked/ABOUT.txt" &&
+     bash "$d/scripts/check_version_locked_subset_of_entries.sh" >/dev/null 2>&1; then
+    ok "finalize: RERELEASE=1 locked as RERELEASE=0, other files unchanged, subset check passes"
+  else
+    fail "finalize: RERELEASE=1 should be locked as RERELEASE=0 with the subset check passing"
+  fi
+  cleanup "$d"
+}
+
+test_locked_subset_refuses_rerelease_one() {
+  require_proc_sub "subset: a locked RERELEASE=1 is refused" || return 0
+  local d
+  d="$(make_fake_repo check_version_locked_subset_of_entries.sh)"
+  write_ver_rerelease "$d/version/entries/5_3_0_b.ver" 5 3 0 13 1
+  cp "$d/version/entries/5_3_0_b.ver" "$d/version/locked/5_3_0_b.ver"
+  if bash "$d/scripts/check_version_locked_subset_of_entries.sh" 2>/dev/null; then
+    fail "subset: a locked copy keeping RERELEASE=1 should fail"
+  else
+    ok "subset: a locked copy keeping RERELEASE=1 is refused"
   fi
   cleanup "$d"
 }
@@ -2350,6 +2386,8 @@ test_unique_rerelease_needs_dev_version
 test_unique_rerelease_gm_rejected
 test_unique_rerelease_flag_must_be_binary
 test_main_policy_rerelease_rejected
+test_finalize_rerelease_locked_as_zero
+test_locked_subset_refuses_rerelease_one
 test_unique_dev_version_numeric_suffix_rejected
 test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected
