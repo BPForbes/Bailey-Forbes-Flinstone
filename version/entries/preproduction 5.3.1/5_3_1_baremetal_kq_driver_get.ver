@@ -4,3 +4,5 @@ RELEASE_VERSION=1
 PRERELEASE=1
 DEV_VERSION=13
 DESCRIPTION=Fix make baremetal link failure for fl_kq_driver_get (#421). Hosted bare-metal builds still compile KeyQuorum checkpoint objects under FL_WITH_KEYQUORUM, but driver_model.c gated FL_MODEL_RESOLVES_KQ behind !DRIVERS_BAREMETAL, so fl_kq_driver_get was undefined while kq_checkpoint.o and fl_kq_driver_get_or_register still called it. The model now resolves KeyQuorum whenever FL_WITH_KEYQUORUM or FL_LAB_KQ is set; bus enumeration and register_all still skip KeyQuorum under DRIVERS_BAREMETAL.
+
+RELEASE_DATE=2026-11-17
