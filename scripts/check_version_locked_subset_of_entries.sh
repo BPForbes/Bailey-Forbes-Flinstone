@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Every file under version/locked must exist under version/entries with identical content.
 # version/entries may contain extra files not yet copied to version/locked.
+# "Identical" is against the locked form (scripts/lib/ver_locked_form.sh): RERELEASE=1 in entries
+# is RERELEASE=0 in locked.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/ver_locked_form.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib/ver_locked_form.sh"
 ENT="$ROOT/version/entries"
 LCK="$ROOT/version/locked"
 if [[ ! -d "$ENT" ]]; then
@@ -28,7 +32,7 @@ while IFS= read -r -d '' lf; do
     rc=1
     continue
   fi
-  if ! cmp -s "$lf" "$ef"; then
+  if ! cmp -s "$lf" <(ver_locked_form "$ef"); then
     echo "error: locked and entries differ for $rel (run finalize_version_locked.sh to copy entries → locked, or align entries)" >&2
     rc=1
   fi
