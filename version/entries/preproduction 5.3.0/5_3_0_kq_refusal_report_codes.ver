@@ -1,8 +1,0 @@
-MAJOR_VERSION=5
-STANDARD_VERSION=3
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=13
-DESCRIPTION=KeyQuorum refusal reports stay coarse and the recipient's audit names the cause. The receive path in server file passes the checkpoint's own result to fl_kq_report_refusal_cp_in. The signed KQER report, which is carried to the sender, keeps the coarse class through fl_kq_cp_to_result (malformed as Framing, a missing key as Untrusted, too large as Denied/resource, every signature, trust, replay, freshness, fork, threshold or permit refusal as Denied/policy), so a report is not an oracle for the sender (KeyQuorum #169). The precise cause (cause=bad-signature, cause=replayed, cause=forked and the rest) is written only to the recipient's local audit line. Local problems (the destination exists, an I/O error, no driver) are still not reported. fl_kq_report_refusal_in and the checkpoint form share one writer. test_kq_service covers every cause, checks that a replay and a bad signature sign the same code and class, and checks the unreported results.
-
-RELEASE_DATE=2026-11-17

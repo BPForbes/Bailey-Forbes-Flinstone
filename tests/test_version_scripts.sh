@@ -673,6 +673,103 @@ VER
   cleanup "$d"
 }
 
+# RERELEASE=1: a row that reuses another row's quadruple (a stacked PR).
+write_ver_rerelease() {
+  local f="$1" major="$2" std="$3" rel="$4" dv="$5" rr="$6" gm="${7:-}"
+  {
+    printf 'MAJOR_VERSION=%s\nSTANDARD_VERSION=%s\nRELEASE_VERSION=%s\nPRERELEASE=1\n' "$major" "$std" "$rel"
+    printf 'DEV_VERSION=%s\nRERELEASE=%s\n' "$dv" "$rr"
+    [[ -n "$gm" ]] && printf 'GM=%s\n' "$gm"
+    printf 'DESCRIPTION=Test rerelease\n'
+  } >"$f"
+}
+
+expect_unique() {
+  local want="$1" name="$2" d="$3"
+  if bash "$(unique_script "$d")" >/dev/null 2>&1; then
+    [[ "$want" == pass ]] && ok "$name" || fail "$name (passed, should fail)"
+  else
+    [[ "$want" == fail ]] && ok "$name" || fail "$name (failed, should pass)"
+  fi
+  cleanup "$d"
+}
+
+test_unique_rerelease_reuses_original() {
+  require_proc_sub "unique: RERELEASE=1 reuses an original's quadruple" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  mkdir -p "$d/version/entries/preproduction 5.3.0"
+  write_ver_rerelease "$d/version/entries/preproduction 5.3.0/a.ver" 5 3 0 13 0
+  write_ver_rerelease "$d/version/entries/b.ver" 5 3 0 13 1
+  write_ver_rerelease "$d/version/entries/c.ver" 5 3 0 13 1
+  expect_unique pass "unique: RERELEASE=1 rows share the original's quadruple" "$d"
+}
+
+test_unique_rerelease_absent_counts_as_original() {
+  require_proc_sub "unique: absent RERELEASE is an original" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_prerelease "$d/version/entries/a.ver" 5 3 0 13
+  write_ver_rerelease "$d/version/entries/b.ver" 5 3 0 13 1
+  expect_unique pass "unique: a row without RERELEASE is the original" "$d"
+}
+
+test_unique_rerelease_two_originals_rejected() {
+  require_proc_sub "unique: two originals rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_rerelease "$d/version/entries/a.ver" 5 3 0 13 0
+  write_ver_prerelease "$d/version/entries/b.ver" 5 3 0 13
+  expect_unique fail "unique: RERELEASE=0 and an absent RERELEASE are two originals" "$d"
+}
+
+test_unique_rerelease_without_original_rejected() {
+  require_proc_sub "unique: RERELEASE=1 needs an original" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_rerelease "$d/version/entries/a.ver" 5 3 0 14 1
+  write_ver_prerelease "$d/version/entries/b.ver" 5 3 0 13
+  expect_unique fail "unique: RERELEASE=1 with no original row is rejected" "$d"
+}
+
+test_unique_rerelease_needs_dev_version() {
+  require_proc_sub "unique: RERELEASE=1 needs DEV_VERSION" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/a.ver" 5 3 0
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=x\n' >"$d/version/entries/b.ver"
+  expect_unique fail "unique: RERELEASE=1 without DEV_VERSION is rejected" "$d"
+}
+
+test_unique_rerelease_gm_rejected() {
+  require_proc_sub "unique: RERELEASE=1 with GM=1 rejected" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_rerelease "$d/version/entries/a.ver" 5 3 0 13 0
+  write_ver_rerelease "$d/version/entries/b.ver" 5 3 0 13 1 1
+  expect_unique fail "unique: RERELEASE=1 cannot carry GM=1" "$d"
+}
+
+test_unique_rerelease_flag_must_be_binary() {
+  require_proc_sub "unique: RERELEASE must be 0 or 1" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_rerelease "$d/version/entries/a.ver" 5 3 0 13 2
+  expect_unique fail "unique: RERELEASE=2 is rejected" "$d"
+}
+
+test_main_policy_rerelease_rejected() {
+  local d
+  d="$(make_fake_repo check_version_main_prerelease_policy.sh)"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=0\nDESCRIPTION=x\n' >"$d/version/entries/5_3_0_x.ver"
+  if bash "$(main_policy_script "$d")" 2>/dev/null; then
+    fail "main_policy: RERELEASE on main should fail"
+  else
+    ok "main_policy: RERELEASE on main is rejected"
+  fi
+  cleanup "$d"
+}
+
 # ── Tests: bump_dev_version.sh ────────────────────────────────────────────────
 
 BUMP="$REPO_ROOT/scripts/bump_dev_version.sh"
@@ -2245,6 +2342,14 @@ test_unique_two_ga_same_semver_rejected
 test_unique_same_semver_distinct_dev_passes
 test_unique_duplicate_dev_rejected
 test_unique_malformed_dev_version_rejected
+test_unique_rerelease_reuses_original
+test_unique_rerelease_absent_counts_as_original
+test_unique_rerelease_two_originals_rejected
+test_unique_rerelease_without_original_rejected
+test_unique_rerelease_needs_dev_version
+test_unique_rerelease_gm_rejected
+test_unique_rerelease_flag_must_be_binary
+test_main_policy_rerelease_rejected
 test_unique_dev_version_numeric_suffix_rejected
 test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected

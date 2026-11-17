@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/) must have a
-# unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple for the whole tree.
+# unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple for the whole tree, except
+# re-releases: RERELEASE=1 marks a row that reuses the quadruple of an original row
+# (RERELEASE=0 or absent), for example a PR stacked on another PR. Per quadruple there
+# must be exactly one original; RERELEASE=1 needs DEV_VERSION>=1 and cannot carry GM=1.
 #
 # O(kn): one linear pass over all entry .ver files (k top-level dirs × n files, plus
 # preproduction trees); one sort + linear duplicate scan.
 #
 # DEV_VERSION omitted counts as 0 for this key (GA-oriented rows). When DEV_VERSION=
 # is present, the value must be a non-negative integer (non-integer values exit 1).
-# PRERELEASE and GM, when present, must be exactly 0 or 1 (binary flags).
+# PRERELEASE, GM and RERELEASE, when present, must be exactly 0 or 1 (binary flags).
 # Semver fields must likewise be non-negative integers with no trailing junk (1abc fails).
 # Authors: before assigning DEV_VERSION for a given A.B.C, scan version/entries and
 # version/entries/preproduction A.B.C/ and pick the smallest unused non-negative int.
@@ -24,7 +27,8 @@ trap 'rm -f "$tmp"' EXIT
 
 while IFS= read -r -d '' f; do
   ver_parse_flag_field PRERELEASE "$f" >/dev/null
-  ver_parse_flag_field GM "$f" >/dev/null
+  gm=$(ver_parse_flag_field GM "$f")
+  rr=$(ver_parse_flag_field RERELEASE "$f")
   m=$(ver_parse_nonneg_int_field MAJOR_VERSION "$f")
   [[ -n "$m" ]] || m=$(ver_parse_nonneg_int_field VERSION_MAJOR "$f")
   s=$(ver_parse_nonneg_int_field STANDARD_VERSION "$f")
@@ -37,22 +41,54 @@ while IFS= read -r -d '' f; do
     exit 1
   fi
   d=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
+  if [[ "$rr" == "1" ]] && [[ -z "$d" || "$d" == "0" ]]; then
+    echo "check_version_entries_semver_dev_unique: RERELEASE=1 needs DEV_VERSION>=1 — $f" >&2
+    exit 1
+  fi
+  if [[ "$rr" == "1" && "$gm" == "1" ]]; then
+    echo "check_version_entries_semver_dev_unique: RERELEASE=1 cannot carry GM=1 — $f" >&2
+    exit 1
+  fi
   [[ -n "$d" ]] || d=0
-  printf '%s\t%s\t%s\t%s\t%s\n' "$m" "$s" "$r" "$d" "$f"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$m" "$s" "$r" "$d" "$rr" "$f"
 done < <(find "$ENT" -type f -name '*.ver' -print0 | sort -z) >"$tmp"
 
 err=0
-p1="" p2="" p3="" p4="" pf=""
-while IFS=$'\t' read -r m s r d p; do
-  [[ -n "$p" ]] || continue
-  if [[ -n "$pf" && "$m" == "$p1" && "$s" == "$p2" && "$r" == "$p3" && "$d" == "$p4" ]]; then
-    echo "check_version_entries_semver_dev_unique: duplicate (MAJOR=$m STANDARD=$s RELEASE=$r DEV_VERSION=$d):" >&2
-    echo "  $pf" >&2
-    echo "  $p" >&2
+# Per quadruple: originals (RERELEASE=0) must number exactly one; re-releases need that original.
+flush_group() {
+  local key="$1"
+  [[ -n "$key" ]] || return 0
+  if (( ${#originals[@]} > 1 )); then
+    echo "check_version_entries_semver_dev_unique: duplicate ($key):" >&2
+    printf '  %s\n' "${originals[@]}" >&2
+    echo "  (a row that reuses this version on purpose sets RERELEASE=1)" >&2
     err=1
   fi
-  p1=$m p2=$s p3=$r p4=$d pf=$p
-done < <(sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n -k5,5 "$tmp")
+  if (( ${#originals[@]} == 0 && ${#rereleases[@]} > 0 )); then
+    echo "check_version_entries_semver_dev_unique: RERELEASE=1 with no original row ($key):" >&2
+    printf '  %s\n' "${rereleases[@]}" >&2
+    err=1
+  fi
+}
+prev=""
+originals=()
+rereleases=()
+while IFS=$'\t' read -r m s r d rr p; do
+  [[ -n "$p" ]] || continue
+  key="MAJOR=$m STANDARD=$s RELEASE=$r DEV_VERSION=$d"
+  if [[ "$key" != "$prev" ]]; then
+    flush_group "$prev"
+    originals=()
+    rereleases=()
+    prev=$key
+  fi
+  if [[ "$rr" == "1" ]]; then
+    rereleases+=("$p")
+  else
+    originals+=("$p")
+  fi
+done < <(sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n -k6,6 "$tmp")
+flush_group "$prev"
 
 if (( err )); then
   exit 1

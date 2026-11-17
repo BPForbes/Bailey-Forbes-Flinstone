@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Main-line policy: no preproduction/* directories, no PRERELEASE=1, no GM=1, and no
-# DEV_VERSION= lines in any .ver under version/entries or version/locked.
+# DEV_VERSION= or RERELEASE= lines in any .ver under version/entries or version/locked.
 # Run scripts/promote_preproduction_for_main.sh before merging develop → main when promoting
 # a prerelease line to GA.
 set -euo pipefail
@@ -25,6 +25,10 @@ while IFS= read -r -d '' f; do
   fi
   if grep -qE '^[[:space:]]*(int[[:space:]]+)?DEV_VERSION=' "$f"; then
     echo "check_version_main_prerelease_policy: DEV_VERSION must not appear in $f on main." >&2
+    err=1
+  fi
+  if grep -qE '^[[:space:]]*(int[[:space:]]+)?RERELEASE=' "$f"; then
+    echo "check_version_main_prerelease_policy: RERELEASE must not appear in $f on main." >&2
     err=1
   fi
 done < <(find "$ROOT/version/entries" "$ROOT/version/locked" -type f -name '*.ver' -print0 2>/dev/null)

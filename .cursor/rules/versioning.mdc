@@ -54,7 +54,8 @@ When combining agent branches (for example **`cursor/*`**, **`claude/*`**, **`co
 ## CI prepare-version-entries (date stamp + `version_def.h`)
 
 - **`.github/actions/prepare-version-entries`:** **`relocate_root_prerelease_ver_to_preproduction.sh`**, **`promote_preproduction_for_main.sh --normalize-gm-only`**, **`promote_preproduction_for_main.sh`** (GA promote when **`GM=1`** is present), then **`stamp_version_entries_release_date.sh`** (entries root **`*.ver`** and every **`preproduction <A>.<B>.<C>/`** tree), then **`gen_version_def.sh`** reads **`version/entries/**/*.ver`** (including **`preproduction */`**).
-- **`PRERELEASE`** and **`GM`:** when present, values must be exactly **`0`** or **`1`** (**`scripts/lib/ver_field_parse.sh`**; **`check_version_entries_semver_dev_unique.sh`**).
+- **`RERELEASE`:** optional, after **`DEV_VERSION`**. **`0`** or omitted is the original row for its quadruple; **`1`** reuses an original's **`(MAJOR, STANDARD, RELEASE, DEV_VERSION)`** on purpose (a PR stacked on another PR takes its base's **`DEV_VERSION`** with **`RERELEASE=1`**, in its own **`.ver`** file). One original per quadruple; **`RERELEASE=1`** needs **`DEV_VERSION>=1`**, never carries **`GM=1`**, and never reaches **`main`**.
+- **`PRERELEASE`**, **`GM`** and **`RERELEASE`:** when present, values must be exactly **`0`** or **`1`** (**`scripts/lib/ver_field_parse.sh`**; **`check_version_entries_semver_dev_unique.sh`**).
 
 ## AI / Cursor agent PRs — `version/entries` only
 
