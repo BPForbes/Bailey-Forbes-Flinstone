@@ -573,7 +573,7 @@
         waiter.resolve(true);
       }
     }
-    if (ch === "\n" || ch === " ") void flushRelayChat();
+    if (ch === "\n" || ch === " ") void flushGuestRelayWork();
   }
   function waitSerial(re, timeoutMs, from) {
     const start = from == null ? 0 : from;
@@ -622,30 +622,41 @@
     await enqueueGuest(() => emulator.sendText(value));
     return true;
   }
-  /* Inbound relay chat is typed only at an idle command prompt (same rule as filerecv / dnsack). */
+  /* Seat arming and inbound relay chat are typed only at an idle command prompt
+   * (same rule as filerecv / dnsack) so neither can land in a Password: field. */
   const pendingRelayChat = [];
+  let pendingSeat = null; /* null = no change; true/false = desired seat once idle */
   let relayChatFlushing = false;
   function atCommandPrompt() {
     const tail = serialTail.replace(/\r/g, "");
     return /(?:@flintstone>|shell>) $/.test(tail);
   }
   async function armGuestRelaySeat(on) {
-    if (!guestReady()) return;
-    await sendGuest(on ? "server seat\n" : "server unseat\n");
+    pendingSeat = Boolean(on);
+    if (!on) pendingRelayChat.length = 0;
+    await flushGuestRelayWork();
   }
   async function deliverRelayChat(chatText) {
     const line = core.relayRecvLine(chatText);
     if (!line) return;
     pendingRelayChat.push(line);
     if (pendingRelayChat.length > 32) pendingRelayChat.shift();
-    await flushRelayChat();
+    await flushGuestRelayWork();
   }
-  async function flushRelayChat() {
-    if (relayChatFlushing || !pendingRelayChat.length || !guestReady()) return;
+  async function flushGuestRelayWork() {
+    if (relayChatFlushing || !guestReady()) return;
+    if (pendingSeat === null && !pendingRelayChat.length) return;
     if (!atCommandPrompt()) return;
     relayChatFlushing = true;
     try {
       await guestExchange.run(async () => {
+        if (pendingSeat !== null && atCommandPrompt() && guestReady()) {
+          const on = pendingSeat;
+          pendingSeat = null;
+          const from = serialTail.length;
+          await enqueueGuest(() => emulator.sendText(on ? "server seat\n" : "server unseat\n"));
+          await waitSerial(/(?:@flintstone>|shell>) /, 2000, from);
+        }
         while (pendingRelayChat.length && atCommandPrompt() && guestReady()) {
           const line = pendingRelayChat.shift();
           const from = serialTail.length;
