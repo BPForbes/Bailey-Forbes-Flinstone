@@ -4,6 +4,19 @@
 
 #include <unistd.h>
 
+/* No reference to KeyQuorum here: the KeyQuorum build registers its ops. */
+static fl_syscall_kq_ops_t s_kq;
+static int s_kq_set;
+
+void fl_syscall_set_kq_ops(const fl_syscall_kq_ops_t *ops) {
+    if (ops) {
+        s_kq = *ops;
+        s_kq_set = 1;
+    } else {
+        s_kq_set = 0;
+    }
+}
+
 void fl_sys_bootstrap(void) {
     vrt_init();
 }
@@ -93,6 +106,14 @@ long fl_syscall_dispatch(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr
             vrt_free(h);
             return 0;
         }
+        case FL_SYS_KQ_CHECK:
+            return (s_kq_set && s_kq.check && a0) ? s_kq.check((const char *)a0, (unsigned)a1) : -1;
+        case FL_SYS_KQ_VERIFY:
+            return (s_kq_set && s_kq.verify && a0) ? s_kq.verify((const char *)a0) : -1;
+        case FL_SYS_KQ_HISTORY:
+            return (s_kq_set && s_kq.history && a0 && a1 && a2)
+                       ? s_kq.history((const char *)a0, (uint8_t *)a1, (size_t)a2)
+                       : -1;
         default:
             return -1;
     }

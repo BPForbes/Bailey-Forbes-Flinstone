@@ -753,6 +753,32 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
   open, opened only to check the password) unless it is the security-lab image; sealing the two demo accounts at boot adds about 1.5 s. The
   public image keeps its demo accounts (`FL_SEED_DEFAULT_ACCOUNTS` stays 1).
 
+## System calls (FL-03)
+
+Three queries let a process ask the KeyQuorum monitor (`kernel/include/fl/syscall.h`). The numbers are append
+only; 1 to 9 are unchanged.
+
+| No. | Name | Arguments | Returns |
+| --- | --- | --- | --- |
+| 10 | `FL_SYS_KQ_CHECK` | a0 path, a1 `fl_kq_op_t` (1 to 6) | 0, else a refusal |
+| 11 | `FL_SYS_KQ_VERIFY` | a0 path | 0, else a refusal |
+| 12 | `FL_SYS_KQ_HISTORY` | a0 path, a1 out buffer, a2 cap | bytes written, else a refusal |
+
+`-1` is a bad call: a NULL path, buffer or zero cap, or no KeyQuorum hook registered. A refusal by KeyQuorum is
+`-(100 + fl_kq_cp_result_t)` (`FL_SYS_KQ_ERR_BASE`), so it never equals `-1`. A history larger than the buffer is
+`TOO_LARGE`; nothing is partly written.
+
+`syscall.c` holds only a function-pointer table (`fl_syscall_set_kq_ops`, the same pattern as
+`fl_net_server_set_kq_hook`) and has no reference to KeyQuorum. `kernel/core/vfs/kq_syscall.c`
+(`fl_kq_syscall_install`, called from the shell's `main`) maps the calls onto the existing checkpoints
+(`fl_kq_cp_verify`, new and path-based over the driver's `verify`, and `fl_kq_cp_history`); the decisions stay in
+KeyQuorum. The calls change nothing. `FL_SYS_KQ_CHECK` validates the operation and the container; the issue's
+`fl_kq_pre_mutation` gate is declared in `fl/kq.h` but not defined yet (FL-09), and replaces that check when it lands.
+The VM bridge (`VM/devices/vm_io.c`) translates the guest path (`vm_sys_arg_to_host_cstr`, at most `VM_SYS_PATH_MAX`
+bytes, refused when unterminated or outside guest RAM) and output buffer. Whether the VM jail applies to a path a
+guest names is not settled here (FL-09). Tests: `test_kq_syscalls` in `tests/test_kq_checkpoint.c`, and the guest path
+case in `tests/test_vm_syscall_bridge.c`. The freestanding image has no syscall table and calls `fl_kq_*` directly.
+
 ## The key service (FL-20, absorbs FL-24)
 
 `kernel/core/vfs/kq_service.[ch]` is the resident holder of signing keys. It is started by the hosted shell after

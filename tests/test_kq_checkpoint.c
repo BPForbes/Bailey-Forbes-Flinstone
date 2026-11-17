@@ -3,6 +3,8 @@
 #include "fs_events.h"
 #include "fs_facade.h"
 #include "fs_provider.h"
+#include "fl/kq.h"
+#include "fl/syscall.h"
 #include "kq_storage_facade.h"
 #include "fl/mem_asm.h"
 #include "mem_domain.h"
@@ -1263,6 +1265,63 @@ static int test_reports_are_held_and_capped(void) {
     return 0;
 }
 
+
+/* FL_SYS_KQ_*: a NULL hook refuses, bad arguments are refused, a real checkpoint result is carried. */
+static long kq_sys(fl_syscall_no_t no, uintptr_t a0, uintptr_t a1, uintptr_t a2) {
+    return fl_syscall_dispatch(no, a0, a1, a2, 0);
+}
+
+static int test_kq_syscalls(void) {
+    world_t w;
+    fl_kq_encoded_t enc;
+    fl_kq_buf_t lines = {0};
+    char src[PATH_MAX], bare[PATH_MAX], out[4096], small[4];
+    uint8_t sig[64];
+
+    ASSERT(setup(&w) == 0);
+    path_in(src, sizeof src, "sys.txt");
+    path_in(bare, sizeof bare, "sys-untracked.txt");
+    ASSERT(prepare(&w, src, "v1\n", T1, &enc, sig) == 0);
+    fl_kq_encoded_free(&enc);
+    ASSERT(kq_test_write_text(bare, "x\n") == 0);
+
+    /* No hook registered: every call is a bad call. */
+    fl_syscall_set_kq_ops(NULL);
+    ASSERT(kq_sys(FL_SYS_KQ_CHECK, (uintptr_t)src, FL_KQ_OP_WRITE, 0) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_VERIFY, (uintptr_t)src, 0, 0) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)src, (uintptr_t)out, sizeof out) == -1);
+
+    fl_kq_syscall_install();
+    /* Bad arguments. */
+    ASSERT(kq_sys(FL_SYS_KQ_CHECK, 0, FL_KQ_OP_WRITE, 0) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_VERIFY, 0, 0, 0) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, 0, (uintptr_t)out, sizeof out) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)src, 0, sizeof out) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)src, (uintptr_t)out, 0) == -1);
+    ASSERT(kq_sys(FL_SYS_KQ_CHECK, (uintptr_t)src, 0, 0) == -(FL_SYS_KQ_ERR_BASE + FL_KQ_CP_INVALID));
+    ASSERT(kq_sys(FL_SYS_KQ_CHECK, (uintptr_t)src, FL_KQ_OP_RECEIVE + 1, 0) ==
+           -(FL_SYS_KQ_ERR_BASE + FL_KQ_CP_INVALID));
+
+    /* Real results: a tracked file verifies, an untracked one carries the checkpoint's refusal. */
+    ASSERT(kq_sys(FL_SYS_KQ_VERIFY, (uintptr_t)src, 0, 0) == 0);
+    ASSERT(kq_sys(FL_SYS_KQ_CHECK, (uintptr_t)src, FL_KQ_OP_WRITE, 0) == 0);
+    ASSERT(kq_sys(FL_SYS_KQ_VERIFY, (uintptr_t)bare, 0, 0) == -(FL_SYS_KQ_ERR_BASE + (int)fl_kq_cp_verify(bare)));
+    ASSERT(fl_kq_cp_verify(bare) != FL_KQ_CP_OK);
+
+    /* History bytes equal the checkpoint's own. */
+    ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK && lines.len > 0 && lines.len < sizeof out);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)src, (uintptr_t)out, sizeof out) == (long)lines.len);
+    ASSERT(memcmp(out, lines.data, lines.len) == 0);
+    fl_kq_buf_free(&lines);
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)src, (uintptr_t)small, sizeof small) ==
+           -(FL_SYS_KQ_ERR_BASE + FL_KQ_CP_TOO_LARGE));
+    ASSERT(kq_sys(FL_SYS_KQ_HISTORY, (uintptr_t)bare, (uintptr_t)out, sizeof out) <= -(FL_SYS_KQ_ERR_BASE));
+
+    fl_syscall_set_kq_ops(NULL);
+    teardown(&w);
+    return 0;
+}
+
 static int test_reasons_and_results(void) {
     ASSERT(strcmp(fl_kq_cp_reason(FL_KQ_CP_FORKED), "file forked; merge required") == 0);
     ASSERT(fl_kq_cp_to_result(FL_KQ_CP_OK) == FL_RESULT_OK);
@@ -1309,6 +1368,7 @@ int main(void) {
     RUN(test_refusal_report_is_verified_and_injected);
     RUN(test_offer_wire_layout_is_fixed);
     RUN(test_reports_are_held_and_capped);
+    RUN(test_kq_syscalls);
     RUN(test_reasons_and_results);
     kq_test_rmrf(s_dir);
     if (rc == 0)

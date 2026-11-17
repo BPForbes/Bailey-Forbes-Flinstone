@@ -72,6 +72,12 @@ fl_kq_cp_result_t fl_kq_cp_history(const char *path, fl_kq_buf_t *lines);
 
 fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]);
 
+/* The container beside path passes the driver's verify; INVALID when it does not. */
+fl_kq_cp_result_t fl_kq_cp_verify(const char *path);
+
+/* Registers FL_SYS_KQ_* with the syscall layer (kernel/core/vfs/kq_syscall.c). */
+void fl_kq_syscall_install(void);
+
 /* FORKED with two heads; INVALID for no revision or a label over cap - 1. */
 fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap);
 

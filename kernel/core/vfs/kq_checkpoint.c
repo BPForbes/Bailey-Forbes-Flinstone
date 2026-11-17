@@ -814,6 +814,25 @@ fl_kq_cp_result_t fl_kq_cp_head(const char *path, uint8_t rev[32]) {
     return path && rev ? head_of(path, rev, NULL, 0) : FL_KQ_CP_INVALID;
 }
 
+fl_kq_cp_result_t fl_kq_cp_verify(const char *path) {
+    const fl_kq_driver_t *drv = fl_kq_driver_get();
+    char container_path[4096];
+    uint8_t root[32];
+    fl_kq_buf_t c = {0};
+    fl_kq_cp_result_t out;
+
+    if (!path)
+        return FL_KQ_CP_INVALID;
+    if (!drv || !drv->verify)
+        return FL_KQ_CP_NO_DRIVER;
+    out = load_container(path, container_path, sizeof container_path, &c);
+    if (out != FL_KQ_CP_OK)
+        return out;
+    out = drv->verify(&c, root) == KQ_FILE_OK ? FL_KQ_CP_OK : FL_KQ_CP_INVALID;
+    fl_kq_buf_free(&c);
+    return out;
+}
+
 fl_kq_cp_result_t fl_kq_cp_head_author(const char *path, char *out, size_t cap) {
     return path && out && cap ? head_of(path, NULL, out, cap) : FL_KQ_CP_INVALID;
 }

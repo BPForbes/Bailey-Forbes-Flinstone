@@ -43,6 +43,8 @@ static long read_sys_ret(void) {
     return (long)(intptr_t)(((uintptr_t)hi << 32) | lo);
 }
 
+static long stub_verify(const char *path) { return strcmp(path, "guest.txt") == 0 ? 0 : -101; }
+
 int main(void) {
     uint8_t ram[256] = {0};
     vm_mem_t mem = { .ram = ram, .size = sizeof(ram) };
@@ -101,6 +103,27 @@ int main(void) {
     write_sys_arg64(2, 8);
     vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
     assert(read_sys_ret() == -1);
+
+    /* FL-03: a guest path is translated and bounded; an unterminated one is refused. */
+    {
+        fl_syscall_kq_ops_t ops = { NULL, stub_verify, NULL };
+        fl_syscall_set_kq_ops(&ops);
+        memcpy(ram + 100, "guest.txt", 10);
+        vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_KQ_VERIFY, 4);
+        write_sys_arg64(0, 100);
+        vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+        assert(read_sys_ret() == 0);
+        memset(ram + 200, 'a', 56); /* no NUL before the end of guest RAM */
+        vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_KQ_VERIFY, 4);
+        write_sys_arg64(0, 200);
+        vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+        assert(read_sys_ret() == -1);
+        vm_io_out(&mem, VM_SYS_PORT_NO, FL_SYS_KQ_VERIFY, 4);
+        write_sys_arg64(0, 300); /* past guest RAM */
+        vm_io_out(&mem, VM_SYS_PORT_CALL, 0, 4);
+        assert(read_sys_ret() == -1);
+        fl_syscall_set_kq_ops(NULL);
+    }
 
     vm_io_out(NULL, VM_SYS_PORT_NO, FL_SYS_CLOSE, 4);
     write_sys_arg64(0, (uintptr_t)mq);

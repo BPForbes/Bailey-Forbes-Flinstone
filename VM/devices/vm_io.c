@@ -96,6 +96,24 @@ static uintptr_t vm_sys_arg_to_host_ptr(vm_mem_t *mem, uintptr_t arg, size_t len
     return (uintptr_t)(mem->ram + (size_t)arg);
 }
 
+#define VM_SYS_PATH_MAX 4096u
+
+/* Guest offset of a NUL-terminated string to a host pointer; 0 unless the NUL falls inside
+ * guest RAM within max bytes. */
+static uintptr_t vm_sys_arg_to_host_cstr(vm_mem_t *mem, uintptr_t arg, size_t max) {
+    size_t room;
+
+    if (!mem || !mem->ram || arg >= mem->size)
+        return 0;
+    room = mem->size - (size_t)arg;
+    if (room > max)
+        room = max;
+    for (size_t i = 0; i < room; i++)
+        if (mem->ram[(size_t)arg + i] == '\0')
+            return (uintptr_t)(mem->ram + (size_t)arg);
+    return 0;
+}
+
 static void vm_translate_sys_args(vm_mem_t *mem, uintptr_t args[4]) {
     switch ((fl_syscall_no_t)s_sys_no) {
         case FL_SYS_WRITE:
@@ -106,6 +124,14 @@ static void vm_translate_sys_args(vm_mem_t *mem, uintptr_t args[4]) {
         case FL_SYS_PIPE_WRITE:
         case FL_SYS_MSGQ_SEND:
         case FL_SYS_MSGQ_RECV:
+            args[1] = vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
+            break;
+        case FL_SYS_KQ_CHECK:
+        case FL_SYS_KQ_VERIFY:
+            args[0] = vm_sys_arg_to_host_cstr(mem, args[0], VM_SYS_PATH_MAX);
+            break;
+        case FL_SYS_KQ_HISTORY:
+            args[0] = vm_sys_arg_to_host_cstr(mem, args[0], VM_SYS_PATH_MAX);
             args[1] = vm_sys_arg_to_host_ptr(mem, args[1], (size_t)args[2]);
             break;
         default:

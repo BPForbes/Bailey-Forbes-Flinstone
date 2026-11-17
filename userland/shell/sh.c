@@ -8,6 +8,7 @@
 #include "threadpool.h"
 #include "bg_jobs.h"
 #include "kq_service.h"
+#include "kq_checkpoint.h"
 #include "interpreter.h"
 #include "terminal.h"
 #include "disk.h"
@@ -193,6 +194,7 @@ int main(int argc, char *argv[]) {
         (void)setenv("FL_USERS_LAB_DEFAULTS", "0", 0);
     /* Prompt-aware print hooks, so background output does not glue onto "shell> ". */
     fl_shell_io_init();
+    fl_kq_syscall_install();
     srand((unsigned) time(NULL));
 
     argc = parse_vm_args(argc, argv);

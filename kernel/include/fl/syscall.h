@@ -39,7 +39,32 @@ typedef enum {
     FL_SYS_MSGQ_SEND = 7,
     FL_SYS_MSGQ_RECV = 8,
     FL_SYS_CLOSE = 9,
+
+    /* KeyQuorum monitor queries (FL-03). Append only; the work is done by the KeyQuorum
+     * driver through the hook below, never by the kernel. Every call returns -1 for a bad
+     * call (NULL argument, zero cap, no hook registered) and -(FL_SYS_KQ_ERR_BASE + result)
+     * for a refusal by KeyQuorum, so the two never collide (fl_kq_cp_result_t starts at 1).
+     * Paths are NUL-terminated host pointers (the VM bridge translates guest offsets). */
+
+    /* a0: path, a1: fl_kq_op_t -> 0 ok, else -(100 + fl_kq_cp_result_t). Changes nothing. */
+    FL_SYS_KQ_CHECK = 10,
+    /* a0: path -> 0 ok, else -(100 + fl_kq_cp_result_t). */
+    FL_SYS_KQ_VERIFY = 11,
+    /* a0: path, a1: out buffer, a2: cap -> bytes written, else -(100 + result). */
+    FL_SYS_KQ_HISTORY = 12,
 } fl_syscall_no_t;
+
+#define FL_SYS_KQ_ERR_BASE 100
+
+/* Registered by the KeyQuorum build (kernel/core/vfs/kq_syscall.c) like
+ * fl_net_server_set_kq_hook; NULL, or a NULL member, makes the call return -1. */
+typedef struct {
+    long (*check)(const char *path, unsigned op);
+    long (*verify)(const char *path);
+    long (*history)(const char *path, uint8_t *out, size_t cap);
+} fl_syscall_kq_ops_t;
+
+void fl_syscall_set_kq_ops(const fl_syscall_kq_ops_t *ops);
 
 void fl_sys_bootstrap(void);
 void fl_sys_shutdown(void);
