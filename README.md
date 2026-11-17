@@ -138,11 +138,17 @@ make USE_ASM_ALLOC=1
 ```
 Replaces the system allocator for the process. Use for testing or bare-metal targets. Disable (`USE_ASM_ALLOC=0` or omit) if batch mode shows instability.
 
-**Bare-metal build** (for bootable kernel, not userspace):
+**Bare-metal build** (a bootable kernel image):
 ```bash
 make baremetal
 ```
-Uses port I/O and VGA directly. Requires bare-metal target.
+Builds `dist/flintstone.img`: an MBR, a stage 2 long-mode loader and the freestanding kernel (the same image as `make browser-kernel`; see `docs/FREESTANDING_BOOT.md`). It needs `nasm`, `gcc`, `ld`, `objcopy`, `python3` and `cargo` with the `x86_64-unknown-none` target. Boot it under QEMU with `-drive file=dist/flintstone.img,format=raw,if=ide` (and `-m 64M`, with a `fw_cfg` entropy file when the CPU has no RDRAND).
+
+**Bare-metal driver paths** (a hosted program, not a bootable kernel):
+```bash
+make baremetal-drivers
+```
+Builds the hosted Linux program (`BPForbes_Flinstone_Shell`, dynamically linked against libc, SQLite and OpenSSL) with `-DDRIVERS_BAREMETAL=1` and `-no-pie`, so the port I/O, VGA, PIT, PIC and ATA driver paths are compiled in. It has no boot loader and no Multiboot/PVH header, so nothing can boot it; use it as a compile check of those paths.
 
 **Embedded x86 VM** (emulation-based hypervisor with CPU, RAM, GPU, timer, interrupts):
 ```bash

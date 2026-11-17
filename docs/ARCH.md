@@ -62,7 +62,7 @@ Recorded from source comments removed in PR #416 (2026-11).
 `kernel/core/mm/mem_domain.[ch]` is the one allocator interface. Its behaviour depends on the build:
 
 - **Host builds** wrap libc `malloc`, `calloc`, `realloc` and `free`.
-- **Bare-metal drivers builds** (`DRIVERS_BAREMETAL`) give each domain a static arena in BSS: kernel 64 KiB,
+- **Bare-metal drivers builds** (`DRIVERS_BAREMETAL`; `make baremetal-drivers` compiles these paths into the hosted program, which cannot boot; the bootable image is `make baremetal`, the same as `make browser-kernel`) give each domain a static arena in BSS: kernel 64 KiB,
   driver 64 KiB, file system 128 KiB, user 32 KiB. Allocation bumps a pointer; a freed block goes on a
   per-domain first-fit free list. Each block carries a `size_t` header, and every block is 8-byte aligned.
 - A free of a block that is not inside its domain's arena spins forever. The free list is never linked
