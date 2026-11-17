@@ -38,7 +38,6 @@ static int have_rdrand(void)
     return (c >> 30) & 1u;
 }
 
-#ifndef FL_SECFEAT
 /* fw_cfg entropy, used only without RDRAND: each byte is handed out once; running out fails closed. */
 #include "fwcfg.h"
 
@@ -53,15 +52,6 @@ static int fw_cfg_fill(uint8_t *buf, size_t len)
     s_fw_used += (uint32_t)len;
     return 0;
 }
-#else
-/* The SECFEAT image: RDRAND only (fw_cfg is left out for want of room below 0x9f000). */
-static int fw_cfg_fill(uint8_t *buf, size_t len)
-{
-    (void)buf;
-    (void)len;
-    return 1;
-}
-#endif
 
 int kq_platform_random(uint8_t *buf, size_t len)
 {

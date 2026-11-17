@@ -58,8 +58,8 @@ precision, `l`/`ll`/`z`; any other conversion returns -1).
 | `kq_platform_panic` | prints `FLINTSTONE_KQ_PANIC` and halts for good (`cli; hlt` loop) |
 | `mem_domain_*` | the same heap; `mem_domain_secure_zero` is `asm_mem_secure_zero`; `mem_domain_equal` is constant time |
 
-A build that sets `FL_SECFEAT` (the security-features image) has no fw_cfg path. Its entropy is RDRAND only. That was
-a size limit while the bss lived below `0x9f000`; since the bss moved above 1 MiB it is not, but the image is unchanged.
+A build that sets `FL_SECFEAT` (the security-features image) has the same entropy path: RDRAND, else fw_cfg. The fw_cfg
+driver is built into both images now that the bss sits above 1 MiB.
 
 ## Data disk (FL-02 persistence)
 

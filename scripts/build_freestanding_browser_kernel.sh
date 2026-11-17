@@ -43,10 +43,10 @@ objects=("${build}/entry.o")
 kq_srcs=()
 # The checkpoints run over the in-memory storage table (FL-02 stage 2); kq_platform.c is their libc subset.
 [ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c" "${root}/kernel/core/vfs/kq_checkpoint.c" "${root}/kernel/core/vfs/kq_mem_storage.c")
-# Not in the SECFEAT image: its bss has no room.
-[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c" "${root}/kernel/freestanding/x86_64/kq_files.c" "${root}/kernel/freestanding/x86_64/kq_disk.c")
+# Both images: the bss sits above 1 MiB, so the security-lab image has the room too (FL-02).
+[ "${kq_on}" = "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c" "${root}/kernel/freestanding/x86_64/kq_files.c" "${root}/kernel/freestanding/x86_64/kq_disk.c")
 # KeyQuorum-signed file histories (kq_files.c) need the sealed account keys, so they follow kq_identity.c.
-[ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && cflags+=(-DFL_KQ_FILES)
+[ "${kq_on}" = "1" ] && cflags+=(-DFL_KQ_FILES)
 for src in \
     "${root}/kernel/drivers/freestanding_x86_64/serial.c" \
     "${root}/kernel/drivers/freestanding_x86_64/vga.c" \
@@ -85,7 +85,9 @@ ld_extra=()
 ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${objects[@]}" ${ld_extra[@]+"${ld_extra[@]}"} -o "${build}/kernel.elf"
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
-(( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
+# The loader reads from load_addr up to the low budget (bootinfo.inc); that is the limit, not a separate gate.
+kernel_max_sectors=$(( (low_budget - load_addr) / 512 ))
+(( sectors > 0 && sectors <= kernel_max_sectors )) || { echo "payload is outside the BIOS load budget (max ${kernel_max_sectors} sectors below ${low_budget}): ${sectors} sectors" >&2; exit 1; }
 # The loaded image stays below FL_LOW_BUDGET (0x9f000, under the EBDA at 0x9fc00) and VGA at 0xa0000;
 # the bss is linked at FL_KERNEL_BSS_ADDR above 1 MiB and is never read from disk.
 image_end=$(nm "${build}/kernel.elf" | awk '$3=="__image_end"{print "0x"$1}')

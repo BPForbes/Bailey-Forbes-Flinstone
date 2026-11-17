@@ -722,11 +722,11 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
 (`FL_KQ_ABI_VERSION` 7), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
 (`fl_fs_kq_bind_identity`) only when that same check passes; on a mismatch the plain demo accounts stay.
 
-- **Size.** The image is 982 sectors (about 491 KiB; 955 with the security lab; gate 1024). The loaded bytes end at `0x8aa60`
-  (`0x87440` with the security lab), below `0x9f000`, the end of conventional memory the build script allows, which leaves about 82 KiB
-  (95 KiB) for code. The bss (about 90 KiB) is linked at 1 MiB and never loaded (`docs/FREESTANDING_BOOT.md`). The kernel stack is
-  24 KiB (`0xa000` to `0x10000`): the boot self-test peaks near 12 KiB. The account sealing below (`kq_identity.c`), the signed file
-  histories and the `fw_cfg` entropy driver are still **left out of the security-lab image**.
+- **Size.** The image is 990 sectors (about 495 KiB; 1027 with the security lab; the loader limit is 1144 sectors below 0x9f000). The loaded bytes end at `0x8bb60`
+  (`0x90488` with the security lab), below `0x9f000`, the end of conventional memory the build script allows, which leaves about 82 KiB
+  (about 60 KiB) for code. The bss (about 90 KiB) is linked at 1 MiB and never loaded (`docs/FREESTANDING_BOOT.md`). The kernel stack is
+  24 KiB (`0xa000` to `0x10000`): the boot self-test peaks near 12 KiB. The security-lab image has the same code, sealed keys,
+  signed file histories, the data disk and `fw_cfg` entropy (`FL_SECFEAT` no longer excludes them).
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
   needs at least 64 MiB, which is what the page requests. Measured under QEMU (TCG, no data disk): the image fails at
@@ -765,8 +765,9 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
   a sealed account key (its sealed key and public key). At boot the log is read before the accounts are enrolled, so the
   default accounts keep their keys and histories signed before a reboot still verify; a damaged record ends the log there and
   nothing after it is read. A blank or absent disk means nothing persists, and the image still runs (`CAP keyquorum-disk=present|absent`).
-  `make test-freestanding-kq-persist` checks the reboot, a damaged record and the no-disk boot. The security-lab image has no
-  data disk and no sealed keys. `make test-freestanding-kq-history` (and the browser-lab workflow's
+  `make test-freestanding-kq-persist` checks the reboot, a damaged record and the no-disk boot. The security-lab image (`SECFEAT=1`)
+  has the same KeyQuorum code, sealed keys, data disk and fw_cfg entropy: it was held out only while the bss had no room below
+  0x9f000, and the bss now sits above 1 MiB. Its payload is 1027 sectors (image end 0x90488). `make test-freestanding-kq-history` (and the browser-lab workflow's
   shell-probe step) drives it all under QEMU, including a wrong password, Root reading but not signing over Flinstone's head,
   and the old revision after `passwd`.
 - **Account passwords (FL-14).** The WebAssembly lab installs `fl_fs_identity_kq_ops_t` before the demo

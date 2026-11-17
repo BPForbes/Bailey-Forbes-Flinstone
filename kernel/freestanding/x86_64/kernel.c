@@ -13,12 +13,10 @@
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
 #include "kq_heap.h"
-#ifndef FL_SECFEAT
 #ifdef FL_KQ_FILES
 #include "kq_files.h"
 #else
 void fl_fs_kq_bind_identity(void);
-#endif
 #endif
 #endif
 
@@ -126,7 +124,7 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
     fl_fs_pic_init();
     fl_fs_pit_init();
     fl_fs_kbd_init();
-#if defined(FL_WITH_KEYQUORUM) && !defined(FL_SECFEAT)
+#if defined(FL_WITH_KEYQUORUM)
     /* Only with a driver whose ABI probe passes: otherwise the demo accounts stay as they are. */
     if (fl_kq_driver_get())
         fl_fs_kq_bind_identity();

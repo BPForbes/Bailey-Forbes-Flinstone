@@ -170,6 +170,7 @@ jobs:
         # a new step here would be a new CodeQL finding (docs/SOC2_CODEQL.md, CQ-017/CQ-018).
         run: |
           FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_shell.py
+          FL_BROWSER_KERNEL_IMAGE=dist/flintstone-secfeat.img python3 ./scripts/test_freestanding_kq_persist.py
           FL_KQ_HISTORY_ONLY=1 FL_BROWSER_KERNEL_IMAGE=dist/flintstone.img python3 ./scripts/test_freestanding_shell.py
           FL_BROWSER_KERNEL_IMAGE=dist/flintstone.img python3 ./scripts/test_freestanding_kq_persist.py
 
