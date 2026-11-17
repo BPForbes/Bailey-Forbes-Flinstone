@@ -1,0 +1,7 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=13
+RERELEASE=1
+DESCRIPTION=Bare-metal / browser-lab relay chat now prints in the guest terminal (#426), and cat/type can no longer forge lab control lines from received or written files (#427). The page types a length-limited `relayrecv <from> <hex>` line at an idle command prompt for each peer message (local echo stays on the SERVER_RELAY path only); the kernel requires an armed server seat (`server host|join` or the page's quiet `server seat` / `server unseat` on connect/leave), refuses under lab isolation, and prints `[relay] <from>: <text>` with only bytes 0x20-0x7E (everything else `?`). The same printable-only path backs `cat` / `type` behind a fixed `[file] ` prefix per logical line so SWITCHUSER, SERVER_*, and LAB_NETMODE in file content never match parseGuestLine. lab-core.js exports relayRecvLine; browser-lab tests and test-freestanding-shell cover the sanitize and seat rules; README documents the round trip.

@@ -177,6 +177,23 @@
     const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
     return lines || "filerecv none\n";
   }
+  /* One inbound chat line for the guest (#426). Hex keeps the body off the typed
+   * command's control characters; the guest prints "[relay] from: text" sanitized. */
+  const RELAY_RECV_HEX_MAX = 96;
+  function relayRecvLine(chatText) {
+    const raw = String(chatText || "");
+    if (!raw) return "";
+    const match = /^([^:]+): (.*)$/.exec(raw);
+    let from = match ? match[1].trim() : "peer";
+    let body = match ? match[2] : raw;
+    if (!guestUserNameOk(from)) {
+      from = "peer";
+      body = raw;
+    }
+    const bytes = new TextEncoder().encode(body).slice(0, RELAY_RECV_HEX_MAX / 2);
+    const line = `relayrecv ${from} ${bytesToHex(bytes)}`;
+    return line.length < 128 ? `${line}\n` : "";
+  }
   function labDnsNameOk(name) {
     return typeof name === "string" && name.length > 0 && name.length <= 253 &&
       /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[A-Za-z0-9]$/.test(name);
@@ -279,5 +296,5 @@
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine };
 });

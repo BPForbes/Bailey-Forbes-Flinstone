@@ -23,6 +23,8 @@ static char s_audit[AUDIT_MAX][AUDIT_LINE];
 static unsigned s_audit_n;
 static char s_loc[LOC_MAX][FL_FS_RAMFS_PATH];
 static unsigned s_loc_n;
+/* 1 after server host|join|seat until leave|kill|unseat: inbound relayrecv is allowed. */
+static int s_server_seat;
 
 #ifdef FL_SECFEAT  /* security-features gate: the netlab teaching lab */
 /*
@@ -160,6 +162,36 @@ static void emit(const char *s)
         ++p;
     }
     redir_append(s);
+}
+
+/*
+ * Print untrusted text the lab page may parse on serial: only bytes 0x20-0x7E,
+ * everything else as '?'. Each logical line (split on CR/LF) is emitted behind
+ * `prefix` so a forged SWITCHUSER / SERVER_* / LAB_NETMODE line can never match
+ * parseGuestLine (#427). Chat uses the same path behind "[relay] " (#426).
+ */
+static void emit_safe_text(const char *prefix, const char *data)
+{
+    const char *p = data ? data : "";
+    for (;;) {
+        emit(prefix);
+        while (*p && *p != '\n' && *p != '\r') {
+            unsigned char c = (unsigned char)*p++;
+            char one[2];
+            if (c < 0x20u || c > 0x7Eu)
+                c = '?';
+            one[0] = (char)c;
+            one[1] = 0;
+            emit(one);
+        }
+        emit("\r\n");
+        if (*p == '\r')
+            ++p;
+        if (*p == '\n')
+            ++p;
+        if (!*p)
+            break;
+    }
 }
 
 static void emit_uint(unsigned value)
@@ -381,8 +413,9 @@ static int run_fs(int session, const char *verb, const char **cursor)
             return 1;
         }
         loc_add(path);
-        emit(data);
-        emit("\r\n");
+        /* Never emit raw file bytes: a received or written line must not forge
+         * lab control tokens the page parses (#427). */
+        emit_safe_text("[file] ", data);
         return 1;
     }
     if (str_eq(verb, "write") || str_eq(verb, "make")) {
@@ -995,6 +1028,71 @@ static struct {
     unsigned len;
 } s_file_rx[FL_FS_MAX_SESSIONS];
 
+/*
+ * relayrecv <from> <hex>: the page types this for each inbound relay chat line
+ * (#426). Requires an armed server seat. Prints one sanitized "[relay] from: text"
+ * line so the body can never forge a lab control token (#427).
+ */
+static int run_relayrecv(int session, const char *verb, const char **cursor)
+{
+    char from[FILE_USER_MAX];
+    char hex[128];
+    char body[64];
+    unsigned n = 0;
+    unsigned i;
+    (void)session;
+    if (!str_eq(verb, "relayrecv"))
+        return 0;
+#ifdef FL_SECFEAT
+    if (s_lab_netmode) {
+        emit("relayrecv: refused (lab isolated)\r\n");
+        return 1;
+    }
+#endif
+    if (!s_server_seat) {
+        emit("relayrecv: refused (not on a server)\r\n");
+        return 1;
+    }
+    if (!take_word(cursor, from, sizeof(from)) || !file_user_ok(from) ||
+        !take_word(cursor, hex, sizeof(hex))) {
+        emit("usage: relayrecv <from> <hex>\r\n");
+        return 1;
+    }
+    skip_spaces(cursor);
+    if (**cursor) {
+        emit("relayrecv: refused (bad or oversized content)\r\n");
+        return 1;
+    }
+    for (i = 0; hex[i]; i += 2) {
+        int hi = hex_val(hex[i]);
+        int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
+        if (hi < 0 || lo < 0 || n + 1 >= sizeof(body)) {
+            emit("relayrecv: refused (bad or oversized content)\r\n");
+            return 1;
+        }
+        body[n++] = (char)((hi << 4) | lo);
+    }
+    body[n] = 0;
+    emit("[relay] ");
+    emit(from);
+    emit(": ");
+    /* Body only (from is already validated); still map control bytes to '?'. */
+    {
+        unsigned j;
+        for (j = 0; j < n; ++j) {
+            unsigned char c = (unsigned char)body[j];
+            char one[2];
+            if (c < 0x20u || c > 0x7Eu)
+                c = '?';
+            one[0] = (char)c;
+            one[1] = 0;
+            emit(one);
+        }
+    }
+    emit("\r\n");
+    return 1;
+}
+
 /* filerecv begin <from> <name> | data <hex> | end: a file another user sent (typed by the page). */
 static int run_filerecv(int session, const char *verb, const char **cursor)
 {
@@ -1174,6 +1272,19 @@ static int run_server(int session, const char *verb, const char **cursor)
 #endif /* FL_SECFEAT */
     if (str_eq(sub, "file"))
         return server_file_send(session, cursor);
+    /* Quiet seat arming for the page's auto-join (no SERVER_RELAY token). */
+    if (str_eq(sub, "seat")) {
+        s_server_seat = 1;
+        return 1;
+    }
+    if (str_eq(sub, "unseat")) {
+        s_server_seat = 0;
+        return 1;
+    }
+    if (str_eq(sub, "host") || str_eq(sub, "join"))
+        s_server_seat = 1;
+    else if (str_eq(sub, "leave") || str_eq(sub, "kill"))
+        s_server_seat = 0;
     skip_spaces(cursor);
     emit("SERVER_RELAY ");
     emit(sub);
@@ -2194,6 +2305,7 @@ void fl_fs_commands_init(void)
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;
+    s_server_seat = 0;
 #ifdef FL_SECFEAT
     s_lab_netmode = 0;
     s_nl_pod[0] = 0;
@@ -2224,7 +2336,8 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
 #ifdef FL_SECFEAT
         run_netlab(session, verb, cursor) ||
 #endif
-        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor))
+        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor) ||
+        run_relayrecv(session, verb, cursor))
         return 1;
     return 0;
 }

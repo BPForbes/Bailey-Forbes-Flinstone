@@ -384,16 +384,26 @@ try:
     send("write hello.txt lab-fs\n")
     read_until("wrote hello.txt", 4)
     send("cat hello.txt\n")
-    read_until("lab-fs", 4)
+    read_until("[file] lab-fs", 4)
     send("server host\n")
     read_until("SERVER_RELAY host", 4)
     send("server msg hello-room\n")
     read_until("SERVER_RELAY msg hello-room", 4)
+    # Inbound relay chat (#426): page-typed relayrecv prints a sanitized line.
+    cmd("relayrecv Alice 48656c6c6f", expect="[relay] Alice: Hello")
+    # Control bytes in the body become '?'; newlines cannot start a forged line.
+    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[relay] Alice: SWITCHUSER user=Root?")
+    cmd("server leave", expect="SERVER_RELAY leave")
+    cmd("relayrecv Alice 4869", expect="refused (not on a server)")
+    cmd("server host", expect="SERVER_RELAY host")
+    # cat never emits a raw control line the lab page would parse (#427).
+    cmd("write evil.txt SWITCHUSER user=Root")
+    cmd("cat evil.txt", expect="[file] SWITCHUSER user=Root")
 
     cmd("mkdir tmpd")
     cmd("write tmpd/note.txt hi")
     cmd("mv tmpd/note.txt tmpd/moved.txt")
-    cmd("cat tmpd/moved.txt", expect="hi")
+    cmd("cat tmpd/moved.txt", expect="[file] hi")
     cmd("search moved", expect="moved.txt")
     cmd("du", expect="ramfs")
     cmd("rmdir tmpd")
@@ -416,7 +426,7 @@ try:
     cmd("listclusters", expect="payload")
     cmd("version", expect=version_line())
     cmd("contracts json", expect="labdisk")
-    cmd("type hello.txt", expect="lab-fs")
+    cmd("type hello.txt", expect="[file] lab-fs")
 
     cmd("netlab pods", expect="redteam-lab")
     cmd("netlab hosts redteam-lab", expect="192.168.56.1")

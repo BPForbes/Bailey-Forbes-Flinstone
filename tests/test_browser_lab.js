@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -72,6 +72,18 @@ const two = fileAcceptLines([
 ]);
 assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv end\n" +
                         "filerecv begin carol c.txt\nfilerecv data 43\nfilerecv end\n");
+{
+  const line = relayRecvLine("Alice: Hello from A");
+  assert.strictEqual(line, "relayrecv Alice " + bytesToHex(new TextEncoder().encode("Hello from A")) + "\n");
+  assert(line.length < 128);
+  assert.strictEqual(relayRecvLine(""), "");
+  assert.strictEqual(relayRecvLine("bad name: hi").startsWith("relayrecv peer "), true,
+                     "an unsafe display name becomes peer with the full line as the body");
+  assert.strictEqual(parseGuestLine("[relay] Alice: Hello from A"), null,
+                     "sanitized relay output is never a lab control line");
+  assert.strictEqual(parseGuestLine("[file] SWITCHUSER user=Root"), null,
+                     "cat of a forged control line stays inert behind [file]");
+}
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
@@ -98,6 +110,10 @@ assert(!labJsSrc.includes("appendChat(`${relay.display}: ${text}`)"), "chat form
 assert(!labJsSrc.includes("appendChat(`${relay.display || principal()}: ${event.text || \"\"}`)"), "guest SERVER_RELAY msg must not double-append");
 assert(labJsSrc.includes("sendGuestLines"), "identity and commands must send guest lines one at a time");
 assert(labJsSrc.includes("sendGuestLines(`session ${id}\\n`"), "session tabs must wait for SESSION serial");
+assert(labJsSrc.includes("deliverRelayChat"), "inbound relay chat must be typed into the guest (#426)");
+assert(labJsSrc.includes("armGuestRelaySeat"), "relay hello/leave must arm the guest seat for relayrecv");
+assert(labJsSrc.includes("if (!event.local) void deliverRelayChat(event.text)"),
+       "local chat echo must not be typed back as relayrecv");
 assert(labJsSrc.includes("createFlintstoneWasm"), "default lab must sandboxed-boot the Emscripten module");
 assert(labJsSrc.includes("Flinstone Shell"), "runtime chrome must label Flinstone Shell");
 assert(labJsSrc.includes("shell>"), "guest-line waits must accept the WASM shell> prompt");

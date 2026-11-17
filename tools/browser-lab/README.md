@@ -49,6 +49,11 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   8767` uses the Node hub. If the hub is down, the page falls back to a
   same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
   emits it once (the sender's local echo is the same event path as peer delivery).
+  Peer messages are also typed into the guest at an idle command prompt as
+  `relayrecv <from> <hex>`, which prints `[relay] <from>: <text>` with only
+  printable bytes (anything else becomes `?`), so a bare-metal user can follow
+  chat without the page panel. The page arms a quiet `server seat` on connect
+  (and `server unseat` on leave) so `relayrecv` is refused when not on a server.
 - `server file -user <name> <path>` sends a ramfs file to another user on the
   server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
   as one frame of the lab opcode `0x72` (`who_len`, `who`, `name_len`, `name`, a
@@ -64,8 +69,10 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   The file is saved in the current directory and the shell prints `received <name>
   from <user>`. A file is never saved over an existing one, names are a single
   plain component, lab files are text of at most 159 bytes, and at most 16 files
-  wait at once (the oldest is dropped, with a note). Lab isolation (`netlab start`)
-  stops files as well as chat.
+  wait at once (the oldest is dropped, with a note). `cat` / `type` print file
+  content behind a `[file] ` prefix with the same printable-only filter, so a
+  received file cannot forge `SWITCHUSER`, `SERVER_*`, or `LAB_NETMODE` lines the
+  page would act on. Lab isolation (`netlab start`) stops files as well as chat.
 - KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
   <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
   retry). The file is signed by its sender and sealed to the recipient; the session hosting

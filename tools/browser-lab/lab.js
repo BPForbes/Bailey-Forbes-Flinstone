@@ -208,11 +208,14 @@
       if (event.type === "hello") {
         renderRelayStatus(`Connected as ${event.display} (#${event.memberId})`);
         appendChat(`[relay] joined as ${event.display}`);
+        void armGuestRelaySeat(true);
         if (!core.isFormTypingTarget(document.activeElement)) screen.focus();
       } else if (event.type === "announcement") {
         appendChat(`[announce] ${event.text}`);
       } else if (event.type === "message") {
         appendChat(event.text);
+        // Local echo already left the guest as SERVER_RELAY msg; only peers need relayrecv (#426).
+        if (!event.local) void deliverRelayChat(event.text);
       } else if (event.type === "roster") {
         renderRoster(event.members);
         kqSyncRoster(event.members);
@@ -229,6 +232,7 @@
         appendChat(`[error] ${event.text}`);
       } else if (event.type === "closed") {
         renderRelayStatus("Disconnected");
+        void armGuestRelaySeat(false);
       }
     });
     let connecting = null;
@@ -264,6 +268,7 @@
       renderRelayStatus("Disconnected");
       renderRoster([]);
       kqSyncRoster([]);
+      void armGuestRelaySeat(false);
     });
     let sendingMsg = false;
     document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
@@ -495,6 +500,8 @@
         renderRoster([]);
         kqSyncRoster([]);
         appendChat("[relay] leave");
+        // Guest already cleared its seat via leave/kill; keep page queue empty.
+        pendingRelayChat.length = 0;
         return;
       }
       // While lab-isolated the relay stays down: reconnecting here would bypass the isolation boundary.
@@ -566,6 +573,7 @@
         waiter.resolve(true);
       }
     }
+    if (ch === "\n" || ch === " ") void flushRelayChat();
   }
   function waitSerial(re, timeoutMs, from) {
     const start = from == null ? 0 : from;
@@ -613,6 +621,41 @@
     if (!guestReady()) return false;
     await enqueueGuest(() => emulator.sendText(value));
     return true;
+  }
+  /* Inbound relay chat is typed only at an idle command prompt (same rule as filerecv / dnsack). */
+  const pendingRelayChat = [];
+  let relayChatFlushing = false;
+  function atCommandPrompt() {
+    const tail = serialTail.replace(/\r/g, "");
+    return /(?:@flintstone>|shell>) $/.test(tail);
+  }
+  async function armGuestRelaySeat(on) {
+    if (!guestReady()) return;
+    await sendGuest(on ? "server seat\n" : "server unseat\n");
+  }
+  async function deliverRelayChat(chatText) {
+    const line = core.relayRecvLine(chatText);
+    if (!line) return;
+    pendingRelayChat.push(line);
+    if (pendingRelayChat.length > 32) pendingRelayChat.shift();
+    await flushRelayChat();
+  }
+  async function flushRelayChat() {
+    if (relayChatFlushing || !pendingRelayChat.length || !guestReady()) return;
+    if (!atCommandPrompt()) return;
+    relayChatFlushing = true;
+    try {
+      await guestExchange.run(async () => {
+        while (pendingRelayChat.length && atCommandPrompt() && guestReady()) {
+          const line = pendingRelayChat.shift();
+          const from = serialTail.length;
+          await enqueueGuest(() => emulator.sendText(line));
+          await waitSerial(/\[relay\] |relayrecv: |(?:@flintstone>|shell>) /, 2000, from);
+        }
+      });
+    } finally {
+      relayChatFlushing = false;
+    }
   }
   // A secret step is sent only as the answer to its own command's prompt, never typed as a command.
   function sendGuestLines(script, patterns) {
