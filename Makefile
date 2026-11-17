@@ -45,9 +45,11 @@ CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
 # links driver_model.o from this build must link kq_driver.o and $(KQ_ID_LINK) (bus.o only
 # needs the flag, not the driver). After adding the flag, `make clean`: a stale bus.o or
 # driver_model.o built without it is not rebuilt.
-# Bare metal ignores it (driver_model.c and bus.c test DRIVERS_BAREMETAL); the browser lab
-# (build_wasm_lab.sh) builds the driver model with FL_LAB_KQ instead, so the model resolves
-# the driver there too, but never runs register_all or the bus.
+# Bare metal still links KeyQuorum objects under this flag: driver_model resolves
+# fl_kq_driver_get, while bus enumeration and register_all skip the synthetic device
+# (DRIVERS_BAREMETAL). The browser lab (build_wasm_lab.sh) builds the driver model with
+# FL_LAB_KQ instead, so the model resolves the driver there too, but never runs
+# register_all or the bus.
 CFLAGS += -DFL_WITH_KEYQUORUM
 
 # The Wi-Fi host layer can drive the host's own tools (wpa_cli, nmcli, iw, the Flinstone helper). That

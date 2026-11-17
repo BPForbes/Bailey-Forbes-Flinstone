@@ -2,9 +2,9 @@
 # Promote preproduction A.B.C/ directories that contain GM=1 .ver rows:
 #   - If several GM=1 rows exist, select the one with the highest DEV_VERSION
 #     and rewrite lower DEV_VERSION GM rows to GM=0.
-#   - Build one new root GA .ver (basename from the GM=1 file) whose DESCRIPTION is
+#   - Build one new root GA .ver (basename from the GM=1 file) whose description is
 #     copied only from that GM=1 file (not a roll-up of other rows), with no PRERELEASE,
-#     GM, or DEV_VERSION keys.
+#     RERELEASE, GM, or DEV_VERSION keys.
 #   - Remove every *.ver in the preproduction directory, then remove the directory.
 #
 # finalize_version_locked.sh does not copy preproduction */ into locked; locked may lack
