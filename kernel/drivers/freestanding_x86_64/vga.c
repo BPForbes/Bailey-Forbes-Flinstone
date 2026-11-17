@@ -5,7 +5,12 @@
 #define VGA_ROWS 25
 #define DIAG_GLYPH ((uint16_t)(0x0700u | 'F'))
 
+#if defined(FL_FS_VGA_HOST_TEST)
+static uint16_t s_vga_mem[VGA_COLS * VGA_ROWS];
+static volatile uint16_t *s_vga = s_vga_mem;
+#else
 static volatile uint16_t *const s_vga = (volatile uint16_t *)(uintptr_t)0xb8000;
+#endif
 static int s_row = 1;
 static int s_col = 0;
 
@@ -67,8 +72,7 @@ void fl_fs_vga_putc(char c)
     }
     if (c == '\n' || s_col >= VGA_COLS) {
         s_col = 0;
-        if (c == '\n')
-            ++s_row;
+        ++s_row;
         if (s_row >= VGA_ROWS) {
             for (int row = 1; row < VGA_ROWS - 1; ++row) {
                 for (int col = 0; col < VGA_COLS; ++col)

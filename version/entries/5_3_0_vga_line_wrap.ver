@@ -1,0 +1,6 @@
+MAJOR_VERSION=5
+STANDARD_VERSION=3
+RELEASE_VERSION=0
+PRERELEASE=1
+DEV_VERSION=13
+DESCRIPTION=Fix freestanding VGA console wrap (#419). fl_fs_vga_putc in kernel/drivers/freestanding_x86_64/vga.c now advances the row (and scrolls when needed) when a line reaches 80 columns, instead of resetting only the column and overwriting the same row. New make test_fs_vga_wrap covers wrap, bottom-row scroll, and newline. Serial output was already correct.
