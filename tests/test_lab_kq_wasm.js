@@ -187,7 +187,7 @@ function registered(t, user) {
   assert.match(bt, /decode checkpoint ok/);
   assert.match(bt, /note\.txt from alice decoded and verified/);
   bob.run("cat note.txt");
-  assert.match(bob.text(), /\nhello bob\n/);
+  assert.match(bob.text(), /\n\[file\] hello bob\n/);
   assert(bob.events.some(e => e.kind === "received" && e.a === "note.txt"));
 
   assert(!relay.carried.some(b => b.includes(Buffer.from("hello bob"))), "plaintext crossed the relay");
@@ -202,7 +202,7 @@ function registered(t, user) {
   bob.run(`server file cosign ${reqCase.a}`);
   relay.drain();
   bob.run("cat case.txt");
-  assert.match(bob.text(), /\nany case\n/);
+  assert.match(bob.text(), /\n\[file\] any case\n/);
 
   alice.run("server file send -t note.txt -user nobody");
   relay.drain();
@@ -218,7 +218,7 @@ function registered(t, user) {
   relay.drain();
   assert.match(bob.text(), /decode checkpoint refused\n  a newer copy needs the editor's supervisor/);
   bob.run("cat note.txt");
-  assert.match(bob.text(), /cat note\.txt\nhello bob\n/, "bob keeps the copy he holds");
+  assert.match(bob.text(), /cat note\.txt\n\[file\] hello bob\n/, "bob keeps the copy he holds");
 
   alice.run("server file permit /kq/alice/out/note.txt"); // the tracked copy the send staged
   assert.match(alice.text(), /permitted the head of note\.txt as alice/);
@@ -229,7 +229,7 @@ function registered(t, user) {
   bob.run(`server file cosign ${reqPermitted.a}`);
   relay.drain();
   bob.run("cat note.txt");
-  assert.match(bob.text(), /\nhello again\n/);
+  assert.match(bob.text(), /\n\[file\] hello again\n/);
 
   // Only the recipient can co-sign; the host refuses other signatures and releases nothing.
   alice.run("write other.txt for bob only");
