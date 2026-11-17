@@ -112,6 +112,7 @@ assert(labJsSrc.includes("sendGuestLines"), "identity and commands must send gue
 assert(labJsSrc.includes("sendGuestLines(`session ${id}\\n`"), "session tabs must wait for SESSION serial");
 assert(labJsSrc.includes("deliverRelayChat"), "inbound relay chat must be typed into the guest (#426)");
 assert(labJsSrc.includes("armGuestRelaySeat"), "relay hello/leave must arm the guest seat for relayrecv");
+assert(labJsSrc.includes("cancelGuestRelayWork"), "power-off/reset must cancel pending seat and chat flushes");
 assert(labJsSrc.includes("if (!event.local) void deliverRelayChat(event.text)"),
        "local chat echo must not be typed back as relayrecv");
 assert(labJsSrc.includes("createFlintstoneWasm"), "default lab must sandboxed-boot the Emscripten module");

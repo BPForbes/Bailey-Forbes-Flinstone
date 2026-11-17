@@ -627,9 +627,16 @@
   const pendingRelayChat = [];
   let pendingSeat = null; /* null = no change; true/false = desired seat once idle */
   let relayChatFlushing = false;
+  let relayWorkGen = 0; /* bumped on power-off / reset so in-flight flushes stop */
   function atCommandPrompt() {
     const tail = serialTail.replace(/\r/g, "");
     return /(?:@flintstone>|shell>) $/.test(tail);
+  }
+  function cancelGuestRelayWork() {
+    pendingRelayChat.length = 0;
+    pendingSeat = null;
+    relayWorkGen++;
+    relayChatFlushing = false;
   }
   async function armGuestRelaySeat(on) {
     pendingSeat = Boolean(on);
@@ -647,25 +654,33 @@
     if (relayChatFlushing || !guestReady()) return;
     if (pendingSeat === null && !pendingRelayChat.length) return;
     if (!atCommandPrompt()) return;
+    const gen = relayWorkGen;
     relayChatFlushing = true;
     try {
       await guestExchange.run(async () => {
+        if (gen !== relayWorkGen || !guestReady()) return;
         if (pendingSeat !== null && atCommandPrompt() && guestReady()) {
           const on = pendingSeat;
           pendingSeat = null;
           const from = serialTail.length;
-          await enqueueGuest(() => emulator.sendText(on ? "server seat\n" : "server unseat\n"));
+          const seatLine = on ? "server seat\n" : "server unseat\n";
+          if (gen !== relayWorkGen || !guestReady()) return;
+          await enqueueGuest(() => emulator.sendText(seatLine));
+          if (gen !== relayWorkGen || !guestReady()) return;
           await waitSerial(/(?:@flintstone>|shell>) /, 2000, from);
         }
         while (pendingRelayChat.length && atCommandPrompt() && guestReady()) {
+          if (gen !== relayWorkGen) return;
           const line = pendingRelayChat.shift();
           const from = serialTail.length;
+          if (gen !== relayWorkGen || !guestReady()) return;
           await enqueueGuest(() => emulator.sendText(line));
+          if (gen !== relayWorkGen || !guestReady()) return;
           await waitSerial(/\[relay\] |relayrecv: |(?:@flintstone>|shell>) /, 2000, from);
         }
       });
     } finally {
-      relayChatFlushing = false;
+      if (gen === relayWorkGen) relayChatFlushing = false;
     }
   }
   // A secret step is sent only as the answer to its own command's prompt, never typed as a command.
@@ -699,6 +714,7 @@
     postReady: () => window.parent.postMessage({ source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: info.shortCommit }, config.parentOrigin),
     createEmulator: async (settings) => {
       if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
+      cancelGuestRelayWork();
       serial.textContent = "";
       serialTail = "";
       activeSession = 1;
@@ -808,7 +824,11 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
-      if (id === "boot" || id === "reset" || id === "poweroff") clearLabIsolation();
+      if (id === "boot" || id === "reset" || id === "poweroff") {
+        clearLabIsolation();
+        // Drop queued seat/chat work so an in-flight flush cannot keep a QEMU worker alive.
+        cancelGuestRelayWork();
+      }
       try { await action(); } catch (error) {
         if (id === "pause" || id === "resume") {
           const node = document.getElementById("status");
