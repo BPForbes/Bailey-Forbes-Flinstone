@@ -8,13 +8,23 @@
 #include "mem_domain.h"
 #include "net_endian.h"
 
-#include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef FL_FREESTANDING
+/* The image: no placement layer or shared folder; the in-memory table is the default, and every
+ * checkpoint runs from the one shell context, so the container lock is not needed. */
+#include "kq_mem_storage.h"
+#define KQ_LOCK() ((void)0)
+#define KQ_UNLOCK() ((void)0)
+#else
+#include <errno.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#define KQ_LOCK() pthread_mutex_lock(&s_container_mu)
+#define KQ_UNLOCK() pthread_mutex_unlock(&s_container_mu)
+#endif
 
 /* Largest file a co-signed delivery carries: half the letter cap, leaving room for the
  * container's ancestors and proofs. */
@@ -96,7 +106,13 @@ void fl_kq_encoded_free(fl_kq_encoded_t *enc) {
 /* ---- local files -------------------------------------------------------- */
 
 /* Write through a sibling and rename, so a reader never sees half a file. */
+#ifdef FL_FREESTANDING
+#define KQ_PATH_MAX FL_KQ_MEM_PATH_MAX /* the image's stack is 16 KiB; its paths are the table's */
+#else
 #define KQ_PATH_MAX FL_FS_PATH_MAX
+#endif
+
+#ifndef FL_FREESTANDING
 
 /* The default storage table; the checkpoints never open a path themselves. */
 static int def_read_file(void *ctx, const char *path, size_t max, uint8_t **data, size_t *len) {
@@ -173,14 +189,29 @@ static const fl_kq_storage_t s_default_storage = {
     def_dir_close, def_dir_read,      def_dir_exists,     def_dir_read_tail, def_dir_commit,
 };
 
-static const fl_kq_storage_t *s_storage = NULL;
-
 const fl_kq_storage_t *fl_kq_storage_default(void) {
     return &s_default_storage;
 }
 
+/* The share's quarantine gate applies to a landing as to the share's own. */
+static int quarantined(const char *a, const char *b) {
+    return fl_server_shared_path_is_expired_quarantine(a) || fl_server_shared_path_is_expired_quarantine(b);
+}
+#else
+const fl_kq_storage_t *fl_kq_storage_default(void) {
+    return fl_kq_storage_memory();
+}
+
+static int quarantined(const char *a, const char *b) {
+    (void)a, (void)b;
+    return 0; /* the image has no shared folder */
+}
+#endif
+
+static const fl_kq_storage_t *s_storage = NULL;
+
 const fl_kq_storage_t *fl_kq_cp_storage(void) {
-    return s_storage ? s_storage : &s_default_storage;
+    return s_storage ? s_storage : fl_kq_storage_default();
 }
 
 const fl_kq_storage_t *fl_kq_cp_set_storage(const fl_kq_storage_t *storage) {
@@ -245,8 +276,10 @@ static int land_exists(const kq_land_t *l, const char *name) {
     return l->st->dir_exists(l->st->ctx, &l->dir, name);
 }
 
+#ifndef FL_FREESTANDING
 /* Serializes every container read-modify-write, so a later write never drops an earlier revision. */
 static pthread_mutex_t s_container_mu = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 static int sidecar(const char *path, const char *suffix, char *out, size_t cap) {
     return snprintf(out, cap, "%s%s", path, suffix) < (int)cap ? 0 : -1;
@@ -431,9 +464,9 @@ fl_kq_cp_result_t fl_kq_cp_encode_with(const fl_kq_keydir_t *keys, const char *s
                                        const char *created_at_utc, fl_kq_encoded_t *out) {
     fl_kq_cp_result_t rc;
 
-    pthread_mutex_lock(&s_container_mu);
+    KQ_LOCK();
     rc = fl_kq_cp_encode_with_unlocked(keys, sender_key, sender_signing_secret, recipient_key, recipient_box_public, path, created_at_utc, out);
-    pthread_mutex_unlock(&s_container_mu);
+    KQ_UNLOCK();
     return rc;
 }
 
@@ -660,9 +693,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_with(const fl_kq_keydir_t *keys, const char *s
         return FL_KQ_CP_NO_DRIVER;
     if (land_split(dest_path, land_dir, sizeof land_dir, &leaf) != 0)
         return FL_KQ_CP_INVALID;
-    /* The quarantine gate applies here as on the share's own landings. */
-    if (fl_server_shared_path_is_expired_quarantine(land_dir) ||
-        fl_server_shared_path_is_expired_quarantine(dest_path))
+    if (quarantined(land_dir, dest_path))
         return FL_KQ_CP_IO;
     if (land_open(&land, land_dir) != 0)
         return FL_KQ_CP_IO;
@@ -688,8 +719,7 @@ fl_kq_cp_result_t fl_kq_cp_decode_in_with(const fl_kq_keydir_t *keys, const char
         return FL_KQ_CP_NO_DRIVER;
     if (fl_fs_join_path(dest, sizeof dest, dir->dir, leaf) != 0)
         return FL_KQ_CP_INVALID;
-    if (fl_server_shared_path_is_expired_quarantine(dir->dir) ||
-        fl_server_shared_path_is_expired_quarantine(dest))
+    if (quarantined(dir->dir, dest))
         return FL_KQ_CP_IO;
     /* The caller's handle: used, never closed here, never opened again by path. */
     land.st = fl_kq_cp_storage();
@@ -914,9 +944,9 @@ fl_kq_cp_result_t fl_kq_cp_permit_with(const fl_kq_keydir_t *keys, const char *s
                                        const uint8_t rev[32]) {
     fl_kq_cp_result_t rc;
 
-    pthread_mutex_lock(&s_container_mu);
+    KQ_LOCK();
     rc = fl_kq_cp_permit_with_unlocked(keys, supervisor_key, supervisor_secret, path, rev);
-    pthread_mutex_unlock(&s_container_mu);
+    KQ_UNLOCK();
     return rc;
 }
 
@@ -1036,9 +1066,9 @@ fl_kq_cp_result_t fl_kq_cp_report_write_in(uint16_t code, uint8_t class_code, ui
                                            const fl_kq_dir_t *dir) {
     fl_kq_cp_result_t rc;
 
-    pthread_mutex_lock(&s_container_mu);
+    KQ_LOCK();
     rc = report_write_in_unlocked(code, class_code, step, ref, actor, occurred_at, secret, dir);
-    pthread_mutex_unlock(&s_container_mu);
+    KQ_UNLOCK();
     return rc;
 }
 
@@ -1112,9 +1142,9 @@ fl_kq_cp_result_t fl_kq_cp_inject_report_bytes(const uint8_t reporter_public[32]
                                                size_t kqer_len, const uint8_t ref[32], const char *path) {
     fl_kq_cp_result_t rc;
 
-    pthread_mutex_lock(&s_container_mu);
+    KQ_LOCK();
     rc = fl_kq_cp_inject_report_bytes_unlocked(reporter_public, kqer_bytes, kqer_len, ref, path);
-    pthread_mutex_unlock(&s_container_mu);
+    KQ_UNLOCK();
     return rc;
 }
 
@@ -1287,9 +1317,9 @@ fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_k
                                           const uint8_t signing_secret[32], const char *created_at_utc) {
     fl_kq_cp_result_t rc;
 
-    pthread_mutex_lock(&s_container_mu);
+    KQ_LOCK();
     rc = fl_kq_cp_sign_head_with_unlocked(path, author_key, signing_secret, created_at_utc);
-    pthread_mutex_unlock(&s_container_mu);
+    KQ_UNLOCK();
     return rc;
 }
 

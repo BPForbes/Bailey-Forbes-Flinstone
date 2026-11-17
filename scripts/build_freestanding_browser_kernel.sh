@@ -36,12 +36,13 @@ if [ "${kq_on}" = "1" ]; then
     command -v cargo >/dev/null || { echo "cargo is needed to link KeyQuorum into the image (or set KQ_FREESTANDING=0)" >&2; exit 1; }
     (cd "${kq}" && cargo build --locked --release --no-default-features --target x86_64-unknown-none >&2)
     kqlib="${kq}/target/x86_64-unknown-none/release/libkeyquorum_identity.a"
-    cflags+=(-I"${kq}/include" -I"${root}/kernel/core/mm" -DFL_WITH_KEYQUORUM)
+    cflags+=(-I"${kq}/include" -I"${root}/kernel/core/mm" -I"${root}/kernel/core/vfs" -I"${root}/kernel/core/net" -DFL_WITH_KEYQUORUM)
 fi
 [ "${secfeat}" = "1" ] && cflags+=(-DFL_SECFEAT)
 objects=("${build}/entry.o")
 kq_srcs=()
-[ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c")
+# The checkpoints run over the in-memory storage table (FL-02 stage 2); kq_platform.c is their libc subset.
+[ "${kq_on}" = "1" ] && kq_srcs=("${root}/kernel/freestanding/x86_64/kq_platform.c" "${root}/kernel/freestanding/x86_64/kq_heap.c" "${root}/kernel/drivers/keyquorum/kq_driver.c" "${root}/kernel/core/vfs/kq_checkpoint.c" "${root}/kernel/core/vfs/kq_mem_storage.c")
 # Not in the SECFEAT image: its bss has no room.
 [ "${kq_on}" = "1" ] && [ "${secfeat}" != "1" ] && kq_srcs+=("${root}/kernel/freestanding/x86_64/kq_identity.c" "${root}/kernel/drivers/freestanding_x86_64/fwcfg.c")
 for src in \
@@ -69,6 +70,7 @@ do
     # kq_platform.c defines memcpy and friends: nothing in it may turn into a call to itself.
     case "${src}" in
         */kq_platform.c) extra=(-fno-builtin -fno-tree-loop-distribute-patterns) ;;
+        */kq_checkpoint.c) extra=(-D_POSIX_C_SOURCE=200809L) ;; # strnlen; the body comes from kq_platform.c
         */bootmap.c) extra=(-Os) ;; # runs once per boot: small beats fast while the code lives below 0x9f000
     esac
     gcc "${cflags[@]}" ${extra[@]+"${extra[@]}"} "${src}" -o "${obj}"

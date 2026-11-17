@@ -267,3 +267,180 @@ size_t strlen(const char *s)
         n++;
     return n;
 }
+
+/* The string and format calls the KeyQuorum checkpoints make (kq_checkpoint.c, fl/path.h). */
+
+int strcmp(const char *a, const char *b)
+{
+    while (*a && *a == *b)
+        a++, b++;
+    return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
+size_t strnlen(const char *s, size_t max)
+{
+    size_t n = 0;
+
+    while (n < max && s[n])
+        n++;
+    return n;
+}
+
+char *strrchr(const char *s, int c)
+{
+    const char *last = 0;
+
+    do {
+        if (*s == (char)c)
+            last = s;
+    } while (*s++);
+    return (char *)last;
+}
+
+/* Bases 0, 8, 10 and 16; no locale, no errno: an overflow saturates at ULONG_MAX. */
+unsigned long strtoul(const char *s, char **end, int base)
+{
+    const char *p = s;
+    unsigned long v = 0;
+    int any = 0;
+
+    while (*p == ' ' || (*p >= '\t' && *p <= '\r'))
+        p++;
+    if (*p == '+')
+        p++;
+    if ((base == 0 || base == 16) && p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+        p += 2, base = 16;
+    else if (base == 0)
+        base = p[0] == '0' ? 8 : 10;
+    for (;; p++) {
+        unsigned d = *p >= '0' && *p <= '9'   ? (unsigned)(*p - '0')
+                     : *p >= 'a' && *p <= 'z' ? (unsigned)(*p - 'a' + 10)
+                     : *p >= 'A' && *p <= 'Z' ? (unsigned)(*p - 'A' + 10)
+                                              : 99u;
+
+        if (d >= (unsigned)base)
+            break;
+        v = v > (~0ul - d) / (unsigned)base ? ~0ul : v * (unsigned)base + d;
+        any = 1;
+    }
+    if (end)
+        *end = (char *)(any ? p : s);
+    return v;
+}
+
+typedef struct {
+    char *out;
+    size_t cap, n;
+} fmt_t;
+
+static void fmt_put(fmt_t *f, char c)
+{
+    if (f->n + 1 < f->cap)
+        f->out[f->n] = c;
+    f->n++;
+}
+
+static void fmt_pad(fmt_t *f, int count, char c)
+{
+    while (count-- > 0)
+        fmt_put(f, c);
+}
+
+/* %s %c %d %i %u %x %X %%, flags '-' and '0', width and precision (or '*'), lengths l, ll, z. */
+int vsnprintf(char *out, size_t cap, const char *fmt, __builtin_va_list ap)
+{
+    fmt_t f = {out, cap, 0};
+
+    for (; *fmt; fmt++) {
+        int left = 0, zero = 0, width = 0, prec = -1, lng = 0, len;
+        char digits[24];
+        const char *str;
+
+        if (*fmt != '%') {
+            fmt_put(&f, *fmt);
+            continue;
+        }
+        for (fmt++; *fmt == '-' || *fmt == '0'; fmt++)
+            *fmt == '-' ? (left = 1) : (zero = 1);
+        if (*fmt == '*')
+            width = __builtin_va_arg(ap, int), fmt++;
+        else
+            for (; *fmt >= '0' && *fmt <= '9'; fmt++)
+                width = width * 10 + (*fmt - '0');
+        if (width < 0)
+            left = 1, width = -width;
+        if (*fmt == '.') {
+            prec = 0;
+            if (*++fmt == '*')
+                prec = __builtin_va_arg(ap, int), fmt++;
+            else
+                for (; *fmt >= '0' && *fmt <= '9'; fmt++)
+                    prec = prec * 10 + (*fmt - '0');
+        }
+        for (; *fmt == 'l' || *fmt == 'z'; fmt++)
+            lng = 1;
+        switch (*fmt) {
+        case 's':
+            str = __builtin_va_arg(ap, const char *);
+            if (!str)
+                str = "(null)";
+            len = (int)strnlen(str, prec < 0 ? (size_t)-1 : (size_t)prec);
+            break;
+        case 'c':
+            digits[0] = (char)__builtin_va_arg(ap, int);
+            str = digits, len = 1;
+            break;
+        case 'd':
+        case 'i':
+        case 'u':
+        case 'x':
+        case 'X': {
+            unsigned long long v;
+            int neg = 0, i = (int)sizeof digits;
+            unsigned base = *fmt == 'x' || *fmt == 'X' ? 16u : 10u;
+            const char *set = *fmt == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+
+            if (*fmt == 'd' || *fmt == 'i') {
+                long long s = lng ? __builtin_va_arg(ap, long long) : __builtin_va_arg(ap, int);
+
+                neg = s < 0;
+                v = neg ? 0ull - (unsigned long long)s : (unsigned long long)s;
+            } else {
+                v = lng ? __builtin_va_arg(ap, unsigned long long) : __builtin_va_arg(ap, unsigned);
+            }
+            do
+                digits[--i] = set[v % base];
+            while ((v /= base) != 0);
+            if (neg)
+                digits[--i] = '-';
+            str = digits + i, len = (int)sizeof digits - i;
+            break;
+        }
+        case '%':
+            str = "%", len = 1;
+            break;
+        default:
+            return -1; /* a format this subset does not know: refuse rather than guess */
+        }
+        if (!left)
+            fmt_pad(&f, width - len, zero && *fmt != 's' ? '0' : ' ');
+        for (int i = 0; i < len; i++)
+            fmt_put(&f, str[i]);
+        if (left)
+            fmt_pad(&f, width - len, ' ');
+    }
+    if (cap)
+        out[f.n < cap ? f.n : cap - 1] = '\0';
+    return (int)f.n;
+}
+
+int snprintf(char *out, size_t cap, const char *fmt, ...)
+{
+    __builtin_va_list ap;
+    int n;
+
+    __builtin_va_start(ap, fmt);
+    n = vsnprintf(out, cap, fmt, ap);
+    __builtin_va_end(ap);
+    return n;
+}
