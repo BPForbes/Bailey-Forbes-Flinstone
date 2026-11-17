@@ -88,7 +88,7 @@ implements long mode.
 
 ## Traced execution paths
 
-Current `make baremetal` path:
+Current `make baremetal-drivers` path (the hosted program built with the bare-metal driver branches):
 
 ```text
 Linux ELF interpreter -> C runtime _start -> userland/shell/sh.c main()
@@ -97,8 +97,8 @@ Linux ELF interpreter -> C runtime _start -> userland/shell/sh.c main()
 ```
 
 The privileged table and port operations cannot run as a normal Linux process.
-The `baremetal` name currently means “select hardware driver branches,” not
-“produce a bootable kernel.”
+`make baremetal-drivers` selects the hardware driver branches in that hosted program; it does not
+produce a bootable kernel. `make baremetal` builds the bootable image (the same as `make browser-kernel`).
 
 Current in-process VM path:
 

@@ -348,11 +348,15 @@ $(VERSION_DEF): scripts/gen_version_def.sh $(VER_LOCKED_FILES) $(VERSION_ENTRIES
 
 all: $(TARGET) $(FLINSTONE_PS_EXE) $(FLINSTONE_LINUX_NET_OUT)
 
-# Bare-metal drivers: port I/O and VGA paths. This is still the hosted Linux program (dynamic libc, SQLite,
-# OpenSSL; no boot header), not a bootable kernel. `make browser-kernel` builds the bootable image (#423).
-baremetal: CFLAGS += -DDRIVERS_BAREMETAL=1
-baremetal: LDFLAGS += -no-pie
-baremetal: $(TARGET)
+# Bootable x86-64 image: MBR, long-mode loader and the freestanding kernel, the same build as browser-kernel
+# (dist/flintstone.img). `make baremetal` used to build the hosted program below, which cannot boot (#423).
+baremetal: browser-kernel
+
+# Bare-metal driver paths (port I/O, VGA, PIT, PIC, ATA) compiled into the hosted Linux program (dynamic libc,
+# SQLite, OpenSSL; no boot header). A compile check of those paths, not a kernel.
+baremetal-drivers: CFLAGS += -DDRIVERS_BAREMETAL=1
+baremetal-drivers: LDFLAGS += -no-pie
+baremetal-drivers: $(TARGET)
 
 # With embedded x86 VM: make vm && ./shell -Virtualization -y -vm
 .PHONY: all version-record gen-version-def FORCE
@@ -402,7 +406,7 @@ deploy:
 	@gcc -std=c11 -Wall -Wextra -O2 -o gen_version_changelog scripts/gen_version_changelog.c && ./gen_version_changelog
 	@$(MAKE) CHANGELOG_CI=1 all
 
-.PHONY: vm baremetal browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-browser-kq test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
+.PHONY: vm baremetal baremetal-drivers browser-kernel test-browser-kernel test-browser-kernel-gate test-browser-lab test-browser-boot test-browser-boot-packaged test-browser-iframe test-browser-kq test-freestanding-entry test-freestanding-shell browser-lab-runtime browser-lab-release wasm test-wasm-shell project-metadata test-project-metadata
 vm:
 	$(MAKE) VM_ENABLE=1 $(TARGET)
 
