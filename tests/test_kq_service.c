@@ -874,28 +874,56 @@ static int test_a_refusal_is_reported_as_the_online_account(void) {
         ASSERT(code == rows[i].code && class_code == rows[i].class_code);
     }
     {
-        /* The checkpoint's own refusal picks the KQER code: only the listed causes are reported. */
+        /* The report keeps the coarse class (no oracle for the sender); the cause is in the local audit only. */
         static const struct {
             fl_kq_cp_result_t cp;
             uint16_t code;
             uint8_t class_code;
+            const char *cause;
         } by_cp[] = {
-            {FL_KQ_CP_INVALID, 1u, 1u},          {FL_KQ_CP_UNTRUSTED, 2u, 2u},
-            {FL_KQ_CP_NOT_RECIPIENT, 2u, 2u},    {FL_KQ_CP_BAD_SIGNATURE, 3u, 3u},
-            {FL_KQ_CP_REPLAYED, 4u, 4u},         {FL_KQ_CP_NOT_NEWER, 5u, 4u},
-            {FL_KQ_CP_FORKED, 6u, 4u},           {FL_KQ_CP_BELOW_THRESHOLD, 7u, 5u},
-            {FL_KQ_CP_TOO_LARGE, 8u, 7u},        {FL_KQ_CP_NEEDS_EDITOR_PERMIT, 8u, 5u},
+            {FL_KQ_CP_INVALID, 1u, 1u, "cause=invalid"},
+            {FL_KQ_CP_NO_KEY, 2u, 2u, "cause=no-key"},
+            {FL_KQ_CP_UNTRUSTED, 8u, 5u, "cause=untrusted"},
+            {FL_KQ_CP_NOT_RECIPIENT, 8u, 5u, "cause=not-recipient"},
+            {FL_KQ_CP_BAD_SIGNATURE, 8u, 5u, "cause=bad-signature"},
+            {FL_KQ_CP_REPLAYED, 8u, 5u, "cause=replayed"},
+            {FL_KQ_CP_NOT_NEWER, 8u, 5u, "cause=not-newer"},
+            {FL_KQ_CP_FORKED, 8u, 5u, "cause=forked"},
+            {FL_KQ_CP_BELOW_THRESHOLD, 8u, 5u, "cause=below-threshold"},
+            {FL_KQ_CP_TOO_LARGE, 8u, 7u, "cause=too-large"},
+            {FL_KQ_CP_NEEDS_EDITOR_PERMIT, 8u, 5u, "cause=needs-editor-permit"},
         };
         static const fl_kq_cp_result_t local[] = {FL_KQ_CP_OK, FL_KQ_CP_EXISTS, FL_KQ_CP_IO, FL_KQ_CP_NO_DRIVER};
+        char first[512], second[512];
         size_t j;
 
         for (j = 0; j < sizeof by_cp / sizeof by_cp[0]; j++) {
             each.policy_hash[2] = (uint8_t)(0xC0 + j);
             ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
             ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, each_report, sizeof each_report) == 0);
+            if (j % 4 == 0) {
+                sleep_ms(1100); /* the audit sink is rate limited per second (FL_LOG_RL_MAX_PER_SEC) */
+                audit_clear();
+            }
             fl_kq_report_refusal_cp_in(&each, by_cp[j].cp, &held);
             ASSERT(report_code_class(each_report, &code, &class_code) == 0);
             ASSERT(code == by_cp[j].code && class_code == by_cp[j].class_code);
+            ASSERT(audited(by_cp[j].cause));
+        }
+        /* A replay and a bad signature sign the same code and class, so the sender cannot tell them apart. */
+        each.policy_hash[2] = 0xE0;
+        ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
+        ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, first, sizeof first) == 0);
+        fl_kq_report_refusal_cp_in(&each, FL_KQ_CP_REPLAYED, &held);
+        ASSERT(report_code_class(first, &code, &class_code) == 0);
+        each.policy_hash[2] = 0xE1;
+        ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);
+        ASSERT(fl_kq_cp_report_path(s_tmp, each_ref, second, sizeof second) == 0);
+        fl_kq_report_refusal_cp_in(&each, FL_KQ_CP_BAD_SIGNATURE, &held);
+        {
+            unsigned code2 = 0, class2 = 0;
+            ASSERT(report_code_class(second, &code2, &class2) == 0);
+            ASSERT(code == code2 && class_code == class2);
         }
         each.policy_hash[2] = 0xD0;
         ASSERT(fl_kq_cp_offer_ref(&each, each_ref) == FL_RESULT_OK);

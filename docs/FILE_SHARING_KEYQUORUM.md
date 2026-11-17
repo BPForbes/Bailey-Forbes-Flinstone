@@ -698,9 +698,11 @@ changes that.
   (`fl_kq_cp_offer_encode`, the one encoder `net_kq_delivery.c` sends), named by its SHA-256
   (`fl_kq_cp_offer_ref`). One table maps the refusal to KeyQuorum's closed sets: malformed is Framing/framing,
   a missing key Untrusted/auth, any other refusal Denied/policy, too large Denied/resource; the step is
-  `FL_KQ_OP_RECEIVE`. The declared entry point takes an `fl_result_t`, so signature, trust, replay, freshness
-  and fork refusals all arrive as Denied; that is deliberate, because a remote peer should see only the coarse class so a failure is not
-  an oracle (KeyQuorum #169). `.kqer` is a reserved suffix. `fl_kq_cp_inject_report_with` verifies a
+  `FL_KQ_OP_RECEIVE`. Signature, trust, replay, freshness and fork refusals all arrive as Denied; that is
+  deliberate, because a remote peer should see only the coarse class so a failure is not an oracle (KeyQuorum #169).
+  The receive path calls `fl_kq_report_refusal_cp_in` with the checkpoint's own result: the report still takes the
+  coarse class through `fl_kq_cp_to_result`, and the precise cause (`cause=replayed`, `cause=bad-signature`, ...) is
+  only the `detail` of the recipient's local audit line, never in the report. `.kqer` is a reserved suffix. `fl_kq_cp_inject_report_with` verifies a
   held report under the reporter's key and appends one `ErrorReported` event (48) to the local copy.
   **Carrying it to the sender.** After the refusing ACK the recipient sends the report on `FL_NET_SESSION_OP_KQR_REPORT` (0x52, a third
   KeyQuorum range above the history one): `[delivery id 16][len u16 BE][KQER <= 480 bytes]` (a signed KQER is about 150 bytes). The host
