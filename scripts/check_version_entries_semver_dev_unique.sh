@@ -2,8 +2,9 @@
 # Every *.ver under version/entries/ (including preproduction <A>.<B>.<C>/) must have a
 # unique (MAJOR, STANDARD, RELEASE, DEV_VERSION) quadruple for the whole tree, except
 # re-releases: RERELEASE=1 marks a row that reuses the quadruple of an original row
-# (RERELEASE=0 or absent), for example a PR stacked on another PR. Per quadruple there
-# must be exactly one original; RERELEASE=1 needs DEV_VERSION>=1 and cannot carry GM=1.
+# (RERELEASE=0 or absent), for example a PR stacked on another PR or a reissued GA version.
+# Per quadruple there must be exactly one original; RERELEASE=1 cannot carry GM=1.
+# fold_rerelease_entries.sh merges each re-release into its original when the branch merges.
 #
 # O(kn): one linear pass over all entry .ver files (k top-level dirs × n files, plus
 # preproduction trees); one sort + linear duplicate scan.
@@ -41,10 +42,6 @@ while IFS= read -r -d '' f; do
     exit 1
   fi
   d=$(ver_parse_nonneg_int_field DEV_VERSION "$f")
-  if [[ "$rr" == "1" ]] && [[ -z "$d" || "$d" == "0" ]]; then
-    echo "check_version_entries_semver_dev_unique: RERELEASE=1 needs DEV_VERSION>=1 — $f" >&2
-    exit 1
-  fi
   if [[ "$rr" == "1" && "$gm" == "1" ]]; then
     echo "check_version_entries_semver_dev_unique: RERELEASE=1 cannot carry GM=1 — $f" >&2
     exit 1

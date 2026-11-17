@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Every file under version/locked must exist under version/entries with identical content.
 # version/entries may contain extra files not yet copied to version/locked.
-# "Identical" is against the locked form (scripts/lib/ver_locked_form.sh): RERELEASE=1 in entries
-# is RERELEASE=0 in locked.
+# "Identical" is against the locked form (scripts/lib/ver_locked_form.sh): a locked .ver has no
+# RERELEASE line.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/ver_locked_form.sh

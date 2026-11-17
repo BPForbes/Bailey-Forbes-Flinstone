@@ -2,7 +2,7 @@
 # Finalize published versions: copy version/entries → version/locked (published snapshot).
 # Top-level directories named "preproduction <A>.<B>.<C>/" under version/entries are
 # develop-only and are NOT copied into version/locked (see docs/versioning.md).
-# A *.ver row copied with RERELEASE=1 is written with RERELEASE=0 (scripts/lib/ver_locked_form.sh).
+# A copied *.ver row loses its RERELEASE line (scripts/lib/ver_locked_form.sh).
 # After this, run `make` or ./scripts/gen_version_def.sh so userland/shell/version_def.h
 # reflects the highest A.B.C among version/locked/**/*.ver.
 set -euo pipefail
