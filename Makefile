@@ -45,9 +45,11 @@ CFLAGS += -Ithird_party/keyquorum/ffi/identity/include
 # links driver_model.o from this build must link kq_driver.o and $(KQ_ID_LINK) (bus.o only
 # needs the flag, not the driver). After adding the flag, `make clean`: a stale bus.o or
 # driver_model.o built without it is not rebuilt.
-# Bare metal ignores it (driver_model.c and bus.c test DRIVERS_BAREMETAL); the browser lab
-# (build_wasm_lab.sh) builds the driver model with FL_LAB_KQ instead, so the model resolves
-# the driver there too, but never runs register_all or the bus.
+# Bare metal still links KeyQuorum objects under this flag: driver_model resolves
+# fl_kq_driver_get, while bus enumeration and register_all skip the synthetic device
+# (DRIVERS_BAREMETAL). The browser lab (build_wasm_lab.sh) builds the driver model with
+# FL_LAB_KQ instead, so the model resolves the driver there too, but never runs
+# register_all or the bus.
 CFLAGS += -DFL_WITH_KEYQUORUM
 
 # The Wi-Fi host layer can drive the host's own tools (wpa_cli, nmcli, iw, the Flinstone helper). That
@@ -1105,6 +1107,15 @@ test_fs_bootmap: $(MEM_ASM_OBJ)
 	  kernel/freestanding/x86_64/kq_heap.c $(MEM_ASM_OBJ)
 	./tests/test_fs_bootmap
 
+# Freestanding VGA wrap/scroll (#419); host buffer via FL_FS_VGA_HOST_TEST.
+.PHONY: test_fs_vga_wrap
+test_fs_vga_wrap:
+	$(CC) $(CFLAGS) $(TEST_SANITIZE) -Werror -DFL_FS_VGA_HOST_TEST \
+	  -Ikernel/drivers/freestanding_x86_64 \
+	  -o tests/test_fs_vga_wrap tests/test_fs_vga_wrap.c \
+	  kernel/drivers/freestanding_x86_64/vga.c
+	./tests/test_fs_vga_wrap
+
 .PHONY: test_hex
 test_hex: kernel/core/vfs/kq_delivery.o kernel/core/vfs/server_shared_fs.o kernel/core/vfs/server_shared_db.o kernel/core/vfs/server_catalog_file.o kernel/core/vfs/server_shared_digest.o $(SHARED_FS_MM_OBJS) userland/shell/common.o
 	$(CC) $(CFLAGS) $(TEST_SANITIZE) -o tests/test_hex tests/test_hex.c \
@@ -1667,6 +1678,7 @@ clean:
 	rm -f tests/test_mem_asm tests/test_alloc tests/test_priority_queue tests/test_drivers tests/test_drivers_no_keyquorum tests/test_kq_real_token tests/test_vm_mem tests/test_replay tests/test_invariants tests/test_userspace_connection tests/test_vm_syscall_bridge tests/test_vm_arch_readiness
 	rm -f tests/test_p3_network tests/test_p3_server tests/test_p3_server_lan tests/test_p3_udp_cmds tests/test_p3_net_tools tests/test_netlab_sim tests/test_wifi_flinstone_helper tests/test_wifi_flinstone_linux_helper tests/test_p3_wifi tests/test_p3_wifi_ota tests/test_wifi_mgmt_ota tests/test_wifi_connect_ota tests/test_wifi_coprocessor tests/test_wifi_uart_at_scan_join tests/test_wifi_fullmac_probe tests/test_wifi_80211ax_mock_279 tests/test_wifi_ax_server_ota tests/test_macvlan_waitpid
 	rm -f tests/test_batch_argv_issue220 tests/test_threadpool_issue222 tests/test_disk_hex_issue222
+	rm -f tests/test_fs_vga_wrap
 	rm -rf tests/obj/issue220 tests/obj/issue222
 	find . -name '*.o' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
 	find . -name '*.d' -type f ! -path './deps/*' ! -path './.git/*' -exec rm -f {} +
