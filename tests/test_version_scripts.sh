@@ -733,14 +733,6 @@ test_unique_rerelease_without_original_rejected() {
   expect_unique fail "unique: RERELEASE=1 with no original row is rejected" "$d"
 }
 
-test_unique_rerelease_needs_dev_version() {
-  require_proc_sub "unique: RERELEASE=1 needs DEV_VERSION" || return 0
-  local d
-  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
-  write_ver_ga "$d/version/entries/a.ver" 5 3 0
-  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=x\n' >"$d/version/entries/b.ver"
-  expect_unique fail "unique: RERELEASE=1 without DEV_VERSION is rejected" "$d"
-}
 
 test_unique_rerelease_gm_rejected() {
   require_proc_sub "unique: RERELEASE=1 with GM=1 rejected" || return 0
@@ -759,49 +751,174 @@ test_unique_rerelease_flag_must_be_binary() {
   expect_unique fail "unique: RERELEASE=2 is rejected" "$d"
 }
 
-test_main_policy_rerelease_rejected() {
+
+# finalize_version_locked.sh publishes a RERELEASE=1 row as RERELEASE=0; the subset check agrees.
+
+
+test_unique_rerelease_ga_reissue() {
+  require_proc_sub "unique: a GA version may be reissued" || return 0
+  local d
+  d="$(make_fake_repo check_version_entries_semver_dev_unique.sh)"
+  write_ver_ga "$d/version/entries/5_3_0_a.ver" 5 3 0
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=x\n' >"$d/version/entries/5_3_0_b.ver"
+  expect_unique pass "unique: RERELEASE=1 reissues a GA row (no DEV_VERSION)" "$d"
+}
+
+test_main_policy_rerelease_allowed() {
   local d
   d="$(make_fake_repo check_version_main_prerelease_policy.sh)"
-  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=0\nDESCRIPTION=x\n' >"$d/version/entries/5_3_0_x.ver"
-  if bash "$(main_policy_script "$d")" 2>/dev/null; then
-    fail "main_policy: RERELEASE on main should fail"
+  write_ver_ga "$d/version/entries/5_3_0_a.ver" 5 3 0
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=x\n' >"$d/version/entries/5_3_0_b.ver"
+  if bash "$(main_policy_script "$d")" >/dev/null 2>&1; then
+    ok "main_policy: a reissued GA row (RERELEASE) is allowed on main"
   else
-    ok "main_policy: RERELEASE on main is rejected"
+    fail "main_policy: RERELEASE on a GA row should be allowed on main"
   fi
   cleanup "$d"
 }
 
-# finalize_version_locked.sh publishes a RERELEASE=1 row as RERELEASE=0; the subset check agrees.
-test_finalize_rerelease_locked_as_zero() {
-  require_proc_sub "finalize: RERELEASE=1 is locked as RERELEASE=0" || return 0
+# finalize_version_locked.sh drops every RERELEASE line; the subset check compares that form.
+test_finalize_drops_rerelease_line() {
+  require_proc_sub "finalize: locked rows carry no RERELEASE line" || return 0
   local d
   d="$(make_fake_repo finalize_version_locked.sh check_version_locked_subset_of_entries.sh)"
   write_ver_rerelease "$d/version/entries/5_3_0_a.ver" 5 3 0 13 0
   write_ver_rerelease "$d/version/entries/5_3_0_b.ver" 5 3 0 13 1
   printf 'notes\nRERELEASE=1\n' >"$d/version/entries/ABOUT.txt"
   REPO_ROOT="$d" bash "$d/scripts/finalize_version_locked.sh" >/dev/null 2>&1
-  if grep -qx 'RERELEASE=0' "$d/version/locked/5_3_0_b.ver" && ! grep -qx 'RERELEASE=1' "$d/version/locked/5_3_0_b.ver" &&
+  if ! grep -q '^RERELEASE=' "$d/version/locked/5_3_0_a.ver" "$d/version/locked/5_3_0_b.ver" &&
+     grep -qx 'DESCRIPTION=Test rerelease' "$d/version/locked/5_3_0_a.ver" &&
      grep -qx 'RERELEASE=1' "$d/version/entries/5_3_0_b.ver" &&
-     cmp -s "$d/version/entries/5_3_0_a.ver" "$d/version/locked/5_3_0_a.ver" &&
      cmp -s "$d/version/entries/ABOUT.txt" "$d/version/locked/ABOUT.txt" &&
      bash "$d/scripts/check_version_locked_subset_of_entries.sh" >/dev/null 2>&1; then
-    ok "finalize: RERELEASE=1 locked as RERELEASE=0, other files unchanged, subset check passes"
+    ok "finalize: locked rows carry no RERELEASE line, other files unchanged, subset check passes"
   else
-    fail "finalize: RERELEASE=1 should be locked as RERELEASE=0 with the subset check passing"
+    fail "finalize: locked rows should carry no RERELEASE line with the subset check passing"
   fi
   cleanup "$d"
 }
 
-test_locked_subset_refuses_rerelease_one() {
-  require_proc_sub "subset: a locked RERELEASE=1 is refused" || return 0
+test_locked_subset_refuses_rerelease_line() {
+  require_proc_sub "subset: a locked RERELEASE line is refused" || return 0
   local d
   d="$(make_fake_repo check_version_locked_subset_of_entries.sh)"
   write_ver_rerelease "$d/version/entries/5_3_0_b.ver" 5 3 0 13 1
   cp "$d/version/entries/5_3_0_b.ver" "$d/version/locked/5_3_0_b.ver"
   if bash "$d/scripts/check_version_locked_subset_of_entries.sh" 2>/dev/null; then
-    fail "subset: a locked copy keeping RERELEASE=1 should fail"
+    fail "subset: a locked copy keeping its RERELEASE line should fail"
   else
-    ok "subset: a locked copy keeping RERELEASE=1 is refused"
+    ok "subset: a locked copy keeping its RERELEASE line is refused"
+  fi
+  cleanup "$d"
+}
+
+# ── Tests: fold_rerelease_entries.sh ──────────────────────────────────────────
+
+fold() { REPO_ROOT="$1" bash "$1/scripts/fold_rerelease_entries.sh" "${@:2}"; }
+
+test_fold_appends_and_removes() {
+  require_proc_sub "fold: description appended, re-release removed" || return 0
+  local d o="version/entries/preproduction 5.3.0/5_3_0_a.ver"
+  d="$(make_fake_repo fold_rerelease_entries.sh)"
+  mkdir -p "$d/version/entries/preproduction 5.3.0"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nPRERELEASE=1\nDEV_VERSION=13\nRERELEASE=0\nDESCRIPTION=First.\nRELEASE_DATE=2026-11-17\n' >"$d/$o"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nPRERELEASE=1\nDEV_VERSION=13\nRERELEASE=1\nDESCRIPTION=Second.\n' >"$d/version/entries/5_3_0_b.ver"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nPRERELEASE=1\nDEV_VERSION=13\nRERELEASE=1\nDESCRIPTION=Third.\n' >"$d/version/entries/5_3_0_c.ver"
+  printf 'MAJOR_VERSION=5\nDESCRIPTION=Second.\n' >"$d/version/locked/5_3_0_b.ver"
+  write_ver_prerelease "$d/version/entries/5_3_0_other.ver" 5 3 0 14
+  local before
+  before="$(cat "$d/version/entries/5_3_0_other.ver")"
+  if fold "$d" --dry-run-exit-if-needed >/dev/null 2>&1; then
+    fail "fold: --dry-run-exit-if-needed should exit 1 when a fold is pending"
+  elif [[ ! -f "$d/version/entries/5_3_0_b.ver" ]]; then
+    fail "fold: --dry-run-exit-if-needed must not change anything"
+  elif fold "$d" >/dev/null 2>&1 &&
+       grep -qx 'DESCRIPTION=First. Second. Third.' "$d/$o" &&
+       grep -qx 'RELEASE_DATE=2026-11-17' "$d/$o" && grep -qx 'RERELEASE=0' "$d/$o" &&
+       [[ ! -e "$d/version/entries/5_3_0_b.ver" && ! -e "$d/version/entries/5_3_0_c.ver" ]] &&
+       [[ ! -e "$d/version/locked/5_3_0_b.ver" ]] &&
+       [[ "$(cat "$d/version/entries/5_3_0_other.ver")" == "$before" ]] &&
+       fold "$d" --dry-run-exit-if-needed >/dev/null 2>&1; then
+    ok "fold: descriptions appended in path order, re-releases removed from entries and locked, others untouched"
+  else
+    fail "fold: expected one row with both descriptions appended and the re-releases removed"
+  fi
+  cleanup "$d"
+}
+
+test_fold_into_heredoc_description() {
+  require_proc_sub "fold: into a DESCRIPTION<< block" || return 0
+  local d
+  d="$(make_fake_repo fold_rerelease_entries.sh)"
+  printf 'MAJOR_VERSION=4\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION<<END\n4.3.0: Wi-Fi.\n\nMore.\nEND\n\nRELEASE_DATE=2026-09-13\n' >"$d/version/entries/4_3_0_a.ver"
+  printf 'MAJOR_VERSION=4\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=Reissued: a fix.\n' >"$d/version/entries/4_3_0_b.ver"
+  printf 'MAJOR_VERSION=4\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION<<END\n4.3.0: Wi-Fi.\n\nMore.\nReissued: a fix.\nEND\n\nRELEASE_DATE=2026-09-13\n' >"$d/want.ver"
+  fold "$d" >/dev/null 2>&1 || true
+  if cmp -s "$d/want.ver" "$d/version/entries/4_3_0_a.ver" && [[ ! -e "$d/version/entries/4_3_0_b.ver" ]]; then
+    ok "fold: a GA reissue appends inside the original's DESCRIPTION<< block"
+  else
+    fail "fold: a GA reissue should append inside the DESCRIPTION<< block"
+  fi
+  cleanup "$d"
+}
+
+test_fold_without_original_changes_nothing() {
+  require_proc_sub "fold: no original, nothing changed" || return 0
+  local d
+  d="$(make_fake_repo fold_rerelease_entries.sh)"
+  write_ver_rerelease "$d/version/entries/5_3_0_b.ver" 5 3 0 13 1
+  write_ver_prerelease "$d/version/entries/5_3_0_a.ver" 5 3 0 12
+  if fold "$d" >/dev/null 2>&1; then
+    fail "fold: a re-release with no original should fail"
+  elif [[ -f "$d/version/entries/5_3_0_b.ver" ]]; then
+    ok "fold: a re-release with no original fails and changes nothing"
+  else
+    fail "fold: a failed fold must not remove files"
+  fi
+  cleanup "$d"
+}
+
+# ── Tests: check_version_locked_immutable.sh (a fold is the one allowed change) ─
+
+immutable_repo() {
+  local d
+  d="$(make_fake_repo check_version_locked_immutable.sh fold_rerelease_entries.sh)"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=First.\nRELEASE_DATE=2026-11-17\n' >"$d/version/entries/5_3_0_a.ver"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nRERELEASE=1\nDESCRIPTION=Second.\n' >"$d/version/entries/5_3_0_b.ver"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=First.\nRELEASE_DATE=2026-11-17\n' >"$d/version/locked/5_3_0_a.ver"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=Second.\n' >"$d/version/locked/5_3_0_b.ver"
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.name=t -c user.email=t@t commit -qm base
+  echo "$d"
+}
+
+test_immutable_allows_fold() {
+  local d
+  d="$(immutable_repo)"
+  fold "$d" >/dev/null 2>&1
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=First. Second.\nRELEASE_DATE=2026-11-17\n' >"$d/version/locked/5_3_0_a.ver"
+  if (cd "$d" && bash scripts/check_version_locked_immutable.sh HEAD) >/dev/null 2>&1; then
+    ok "immutable: a fold (append to a published row, remove the re-released copy) is allowed"
+  else
+    fail "immutable: a fold should be allowed"
+  fi
+  cleanup "$d"
+}
+
+test_immutable_refuses_other_edits() {
+  local d bad=0
+  d="$(immutable_repo)"
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=Rewritten.\nRELEASE_DATE=2026-11-17\n' >"$d/version/locked/5_3_0_a.ver"
+  (cd "$d" && bash scripts/check_version_locked_immutable.sh HEAD) >/dev/null 2>&1 && bad=1
+  git -C "$d" checkout -q -- version/locked
+  printf 'MAJOR_VERSION=5\nSTANDARD_VERSION=3\nRELEASE_VERSION=0\nDESCRIPTION=First. Second.\nRELEASE_DATE=2026-12-01\n' >"$d/version/locked/5_3_0_a.ver"
+  (cd "$d" && bash scripts/check_version_locked_immutable.sh HEAD) >/dev/null 2>&1 && bad=1
+  git -C "$d" checkout -q -- version/locked
+  rm "$d/version/locked/5_3_0_a.ver"
+  (cd "$d" && bash scripts/check_version_locked_immutable.sh HEAD) >/dev/null 2>&1 && bad=1
+  if (( bad == 0 )); then
+    ok "immutable: a rewritten description, another changed line, or removing an original are refused"
+  else
+    fail "immutable: only a fold may change a published row"
   fi
   cleanup "$d"
 }
@@ -2382,12 +2499,17 @@ test_unique_rerelease_reuses_original
 test_unique_rerelease_absent_counts_as_original
 test_unique_rerelease_two_originals_rejected
 test_unique_rerelease_without_original_rejected
-test_unique_rerelease_needs_dev_version
+test_unique_rerelease_ga_reissue
 test_unique_rerelease_gm_rejected
 test_unique_rerelease_flag_must_be_binary
-test_main_policy_rerelease_rejected
-test_finalize_rerelease_locked_as_zero
-test_locked_subset_refuses_rerelease_one
+test_main_policy_rerelease_allowed
+test_finalize_drops_rerelease_line
+test_locked_subset_refuses_rerelease_line
+test_fold_appends_and_removes
+test_fold_into_heredoc_description
+test_fold_without_original_changes_nothing
+test_immutable_allows_fold
+test_immutable_refuses_other_edits
 test_unique_dev_version_numeric_suffix_rejected
 test_unique_semver_numeric_suffix_rejected
 test_unique_standard_version_suffix_rejected

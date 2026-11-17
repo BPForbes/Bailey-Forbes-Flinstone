@@ -1,4 +1,5 @@
-# After a push to develop, relocate non-GM root PRERELEASE=1 rows into preproduction */,
+# After a push to develop, fold re-released rows (RERELEASE=1) into their originals, relocate non-GM root
+# PRERELEASE=1 rows into preproduction */,
 # normalize duplicate GM candidates, promote GM=1 preproduction to root GA .ver, copy version/entries → version/locked
 # (excluding top-level preproduction */ trees), regenerate userland/shell/version_def.h. If anything changed,
 # opens a PR into develop (do not
@@ -21,7 +22,7 @@ name: Version lock on merge
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, main]
 
 permissions:
   contents: write
@@ -36,13 +37,16 @@ jobs:
     name: Sync version/locked from entries
     runs-on: ubuntu-latest
     # Avoid a loop when the tip commit is already our sync squash (optional guard).
-    if: "${{ github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync') }}"
+    if: "${{ github.ref == 'refs/heads/develop' && (github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): sync')) }}"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           fetch-depth: 0
           persist-credentials: true
           token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Fold re-released rows (RERELEASE=1) into their originals
+        run: bash scripts/fold_rerelease_entries.sh
 
       - name: Relocate non-GM root PRERELEASE=1 entries into preproduction (stamp then move)
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh
@@ -91,7 +95,7 @@ jobs:
             userland/shell/version_def.h
             metadata/releases.json
           body: |
-            Automated sync after a push to `develop`: ran `relocate_root_prerelease_ver_to_preproduction.sh`, `promote_preproduction_for_main.sh --normalize-gm-only`, `promote_preproduction_for_main.sh` (GA promote when GM=1 is present, which also upserts `metadata/releases.json` from the promoted row's `PUBLISHED_DESCRIPTION`/`DESCRIPTION`), `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
+            Automated sync after a push to `develop`: ran `fold_rerelease_entries.sh` (a `RERELEASE=1` row's `DESCRIPTION` appended to its original, the re-released file removed from `version/entries` and `version/locked`), `relocate_root_prerelease_ver_to_preproduction.sh`, `promote_preproduction_for_main.sh --normalize-gm-only`, `promote_preproduction_for_main.sh` (GA promote when GM=1 is present, which also upserts `metadata/releases.json` from the promoted row's `PUBLISHED_DESCRIPTION`/`DESCRIPTION`), `finalize_version_locked.sh`, `stamp_version_release_date.sh`, and `gen_version_def.sh`.
 
             **Branch protection** on `develop` (PR-only, required checks, verified signatures) means the sync cannot land as a direct push. Merge this PR to publish `version/entries` moves (when relocate applied), `version/locked/`, and `userland/shell/version_def.h`.
 
@@ -116,4 +120,59 @@ jobs:
             echo "Enabled auto-merge (squash) on PR #$num"
           else
             echo "::warning::Could not enable auto-merge on PR #$num (allow auto-merge + squash merge in repo settings, or merge manually)."
+          fi
+
+  # main: a merge that brings a RERELEASE=1 row (a reissued GA version) folds it into the original
+  # and republishes version/locked through a PR, as develop does. Nothing else runs here.
+  fold-on-main:
+    name: Fold re-released rows on main
+    runs-on: ubuntu-latest
+    if: "${{ github.ref == 'refs/heads/main' && (github.event.head_commit == null || !startsWith(github.event.head_commit.message, 'chore(version): fold')) }}"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Fold re-released rows (RERELEASE=1) into their originals
+        id: fold
+        run: |
+          set -euo pipefail
+          if bash scripts/fold_rerelease_entries.sh --dry-run-exit-if-needed; then
+            echo "folded=false" >> "$GITHUB_OUTPUT"
+          else
+            bash scripts/fold_rerelease_entries.sh
+            ./scripts/finalize_version_locked.sh
+            ./scripts/gen_version_def.sh
+            echo "folded=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open pull request with the folded rows
+        id: cpr
+        if: steps.fold.outputs.folded == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+          commit-message: "chore(version): fold re-released rows after merge to main"
+          branch: cursor/version-fold-main-${{ github.run_id }}
+          title: "chore(version): fold re-released rows after merge to main"
+          add-paths: |
+            version/entries/**
+            version/locked/**
+            userland/shell/version_def.h
+          body: |
+            Automated after a push to `main`: `fold_rerelease_entries.sh` appended each `RERELEASE=1` row's `DESCRIPTION` to its original and removed the re-released file from `version/entries` and `version/locked`; `finalize_version_locked.sh` and `gen_version_def.sh` then republished. `check_version_locked_immutable.sh` allows exactly this change to a published row.
+
+      - name: Enable auto-merge for the fold PR
+        if: ${{ steps.fold.outputs.folded == 'true' && steps.cpr.outputs.pull-request-number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.BPFORBES_PAT || secrets.VERSION_LOCK_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          num="${{ steps.cpr.outputs.pull-request-number }}"
+          if gh pr merge "$num" --repo "${{ github.repository }}" --auto --squash; then
+            echo "Enabled auto-merge (squash) on PR #$num"
+          else
+            echo "::warning::Could not enable auto-merge on PR #$num (merge it manually)."
           fi
