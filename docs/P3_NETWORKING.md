@@ -298,7 +298,7 @@ PRE **4.2.0** ships an in-tree **lab** path (not production virtio/MMIO — that
 | Loopback | **`fl_net_loopback_exchange`** — shared egress/host path (**#237** gap 4) |
 | Shutdown | **`fl_net_baremetal_shutdown()`** via **`fl_net_netdev_shutdown()`** |
 
-**Build:** **`make baremetal`** links the lab driver; **`make test_p3_network`** covers ARP tick eviction and static routes on the hosted test binary.
+**Build:** **`make baremetal-drivers`** links the lab driver into the hosted program; **`make test_p3_network`** covers ARP tick eviction and static routes on the hosted test binary.
 
 **Still open:** production NIC (**virtio** / board MMIO), full **RFC 793** TCP FSM, general UDP demux for apps — **#238** / **P4** / **#239**.
 

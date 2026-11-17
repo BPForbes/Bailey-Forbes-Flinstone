@@ -15,7 +15,7 @@ for tool in git readelf sha256sum python3; do
 done
 
 [[ -f "${source_elf}" ]] || {
-    echo "browser-kernel: ${source_elf} is missing; run make baremetal first" >&2
+    echo "browser-kernel: ${source_elf} is missing; run make baremetal-drivers first" >&2
     exit 1
 }
 
