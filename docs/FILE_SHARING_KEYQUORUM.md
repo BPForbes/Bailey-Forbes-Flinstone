@@ -729,7 +729,8 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
   histories and the `fw_cfg` entropy driver are still **left out of the security-lab image**.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
-  needs at least 64 MiB, which is what the page requests.
+  needs at least 64 MiB, which is what the page requests. Measured under QEMU (TCG, no data disk): the image fails at
+  40 MiB (`FLINTSTONE_BOOT_FAIL memory`) and boots at 44 MiB, so the floor of 64 MiB has about 20 MiB of margin.
 - **Entropy.** RDRAND, else a launcher-supplied file. QEMU's default CPU model has no RDRAND (in the browser's QEMU Wasm either), so
   there `kq_platform_random` reads the file `opt/flintstone/entropy` through QEMU's `fw_cfg` device (`kernel/drivers/freestanding_x86_64/fwcfg.c`
   is the driver; `kq_platform.c` keeps the policy): every byte is handed out once and never reused, and a missing file, a wrong name or a file that
