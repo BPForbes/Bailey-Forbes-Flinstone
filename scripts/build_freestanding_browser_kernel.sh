@@ -18,6 +18,8 @@ layout() { awk -v n="$1" '$1=="%define" && $2==n{print $3}' "${fsdir}/bootinfo.i
 stage2_sectors=$(layout FL_STAGE2_SECTORS)
 load_addr=$(layout FL_KERNEL_LOAD_ADDR)
 low_budget=$(layout FL_LOW_BUDGET)
+bss_addr=$(layout FL_KERNEL_BSS_ADDR)
+map_end=$(layout FL_IDENTITY_MAP_END)
 (( stage2_sectors > 0 && $(stat -c%s "${build}/stage2.bin") == stage2_sectors * 512 )) || { echo "stage 2 is not ${stage2_sectors} sectors" >&2; exit 1; }
 nasm -f elf64 -I"${fsdir}/" "${fsdir}/entry.asm" -o "${build}/entry.o"
 cflags=(-c -std=c11 -m64 -march=x86-64 -mno-red-zone -mgeneral-regs-only -ffreestanding -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -Wall -Wextra -Werror -DFL_FREESTANDING -DNDEBUG -I"${root}/kernel/drivers/freestanding_x86_64" -I"${root}/kernel/freestanding/x86_64")
@@ -67,7 +69,7 @@ do
     # kq_platform.c defines memcpy and friends: nothing in it may turn into a call to itself.
     case "${src}" in
         */kq_platform.c) extra=(-fno-builtin -fno-tree-loop-distribute-patterns) ;;
-        */bootmap.c) extra=(-Os) ;; # runs once per boot: small beats fast while the image lives below 0x9f000
+        */bootmap.c) extra=(-Os) ;; # runs once per boot: small beats fast while the code lives below 0x9f000
     esac
     gcc "${cflags[@]}" ${extra[@]+"${extra[@]}"} "${src}" -o "${obj}"
     objects+=("${obj}")
@@ -80,39 +82,40 @@ ld -m elf_x86_64 -nostdlib -T "${root}/kernel/freestanding/x86_64/linker.ld" "${
 objcopy -O binary "${build}/kernel.elf" "${build}/kernel.bin"
 sectors=$(( ($(stat -c%s "${build}/kernel.bin") + 511) / 512 ))
 (( sectors > 0 && sectors <= 1024 )) || { echo "payload is outside the chunked BIOS load budget (max 1024 sectors / 512 KiB): ${sectors} sectors" >&2; exit 1; }
-# Payload and bss stay below FL_LOW_BUDGET (0x9f000, under the EBDA at 0x9fc00) and VGA at 0xa0000.
+# The loaded image stays below FL_LOW_BUDGET (0x9f000, under the EBDA at 0x9fc00) and VGA at 0xa0000;
+# the bss is linked at FL_KERNEL_BSS_ADDR above 1 MiB and is never read from disk.
+image_end=$(nm "${build}/kernel.elf" | awk '$3=="__image_end"{print "0x"$1}')
 bss_end=$(nm "${build}/kernel.elf" | awk '$3=="__bss_end"{print "0x"$1}')
 payload_bytes=$(stat -c%s "${build}/kernel.bin")
 nm "${build}/kernel.elf" | python3 -c '
 import sys
 payload, sectors = int(sys.argv[1]), int(sys.argv[2])
 base_expected, budget = int(sys.argv[3], 0), int(sys.argv[4], 0)
+bss_expected, map_end = int(sys.argv[5], 0), int(sys.argv[6], 0)
 sym = {}
 for line in sys.stdin:
     f = line.split()
     if len(f) == 3:
         sym[f[2]] = int(f[0], 16)
-need = ("__kernel_start", "kernel_entry", "__bss_start", "__bss_end")
+need = ("__kernel_start", "kernel_entry", "__image_end", "__bss_start", "__bss_end")
 missing = [n for n in need if n not in sym]
 if missing:
     sys.exit("image layout: missing symbols: " + ", ".join(missing))
-start, entry, bss_start, bss_end = (sym[n] for n in need)
+start, entry, image_end, bss_start, bss_end = (sym[n] for n in need)
 problems = []
 if start != base_expected or entry != start:
     problems.append("entry %#x / image start %#x is not the load address %#x" % (entry, start, base_expected))
-if start + payload > bss_start:
-    problems.append("loaded bytes end at %#x, past the bss start %#x" % (start + payload, bss_start))
-if start + sectors * 512 < bss_start:
-    problems.append("the loader reads up to %#x, short of the bss start %#x" % (start + sectors * 512, bss_start))
-if bss_end < bss_start:
-    problems.append("bss end %#x is below its start %#x" % (bss_end, bss_start))
+if start + payload != image_end:
+    problems.append("the payload ends at %#x, not at the image end %#x" % (start + payload, image_end))
 if start + sectors * 512 > budget:
     problems.append("the loader reads up to %#x, past the budget %#x" % (start + sectors * 512, budget))
-if not 0 < bss_end < budget:
-    problems.append("image plus bss ends at %#x: past the conventional-memory budget (%#x)" % (bss_end, budget))
+if bss_start != bss_expected:
+    problems.append("the bss starts at %#x, not FL_KERNEL_BSS_ADDR %#x" % (bss_start, bss_expected))
+if not bss_start < bss_end <= map_end:
+    problems.append("the bss [%#x, %#x) is empty or past the identity map (%#x)" % (bss_start, bss_end, map_end))
 if problems:
     sys.exit("image layout: " + "; ".join(problems))
-' "${payload_bytes}" "${sectors}" "${load_addr}" "${low_budget}"
+' "${payload_bytes}" "${sectors}" "${load_addr}" "${low_budget}" "${bss_addr}" "${map_end}"
 python3 - "${build}/stage2.bin" "$sectors" "$bss_end" <<'PY'
 import pathlib, struct, sys
 p = pathlib.Path(sys.argv[1]); data = bytearray(p.read_bytes())
@@ -128,12 +131,12 @@ image="${dist}/${imgname}"; cat "${build}/boot.bin" "${build}/stage2.bin" "${bui
 truncate -s $(( (1 + stage2_sectors + sectors) * 512 )) "${image}"
 commit="${GITHUB_SHA:-$(git -C "${root}" rev-parse HEAD)}"; short="${commit:0:7}"
 sha="$(sha256sum "${image}" | awk '{print $1}')"; built="${BUILD_TIMESTAMP:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" "$sectors" "$payload_bytes" "$bss_end" "$stage2_sectors" "$kq_on" <<'PY'
+python3 - "${dist}/${infoname}" "$commit" "$short" "$built" "$sha" "$imgname" "$secfeat" "$sectors" "$payload_bytes" "$image_end" "$bss_addr" "$bss_end" "$stage2_sectors" "$kq_on" <<'PY'
 import json, sys
-out, commit, short, built, sha, artifact, secfeat, sectors, payload_bytes, bss_end, stage2_sectors, kq_on = sys.argv[1:]
+out, commit, short, built, sha, artifact, secfeat, sectors, payload_bytes, image_end, bss_start, bss_end, stage2_sectors, kq_on = sys.argv[1:]
 kq = kq_on == "1" # the 40 MiB KeyQuorum arena is what 32 MiB of RAM cannot hold
-info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR + stage 2 long-mode loader (E820, A20, boot info v1)","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"lowMemoryProbe":{"ramBytes":32*1024*1024,"marker":"FLINTSTONE_BOOT_FAIL memory"} if kq else None,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"stage2Sectors":int(stage2_sectors),"payloadSectors":int(sectors),"payloadBytes":int(payload_bytes),"bssEnd":bss_end,"conventionalMemoryBudget":"0x9f000","capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
+info={"schemaVersion":2,"project":"Flintstone Kernel","repository":"BPForbes/Bailey-Forbes-Flinstone","commit":commit,"shortCommit":short,"builtAt":built,"architecture":"x86_64","cpuMode":"64-bit long mode, freestanding","artifact":artifact,"artifactFormat":"raw BIOS disk image","securityFeatures":secfeat=="1","sha256":sha,"browserEmulator":"QEMU Wasm x86_64 (b7c549b5e6f4)","browserCompatible":False,"v86Compatible":False,"bootableCandidate":True,"bootable":False,"bootloader":"BIOS MBR + stage 2 long-mode loader (E820, A20, boot info v1)","requiredBios":"SeaBIOS-compatible","qemuBootMode":"ide-drive","minimumRamBytes":64*1024*1024,"lowMemoryProbe":{"ramBytes":32*1024*1024,"marker":"FLINTSTONE_BOOT_FAIL memory"} if kq else None,"recommendedRamBytes":64*1024*1024,"bootSuccessMarker":"FLINTSTONE_KERNEL_BOOT_OK","bootSuccessMarkerImplemented":True,"validationOutcome":"qemu-unvalidated","runtimeMode":"browser-hosted","serverPath":"relay","serverRelayPort":8767,"stage2Sectors":int(stage2_sectors),"payloadSectors":int(sectors),"payloadBytes":int(payload_bytes),"imageEnd":image_end,"bssStart":bss_start,"bssEnd":bss_end,"conventionalMemoryBudget":"0x9f000","capabilities":{"longMode":True,"gdt":True,"idt":True,"serial":True,"vga":True,"pic":True,"pit":True,"ps2Probe":True,"keyboard":True,"biosBlockLoad":True,"identity":True,"hostedLabSessions":True,"filesystem":True,"network":True,"server":True,"securityLab":secfeat=="1"},"blockers":["QEMU has not independently observed the serial marker","Browser has not independently observed the serial marker for this image"]}
 if info["lowMemoryProbe"] is None: del info["lowMemoryProbe"]
 with open(out,'w',encoding='utf-8') as f: json.dump(info,f,indent=2); f.write('\n')
 PY
-echo "browser-kernel: wrote ${image} (${stage2_sectors} stage 2 + ${sectors} payload sectors / ${payload_bytes} bytes, bss_end=${bss_end} < 0x9f000, SECFEAT=${secfeat})"
+echo "browser-kernel: wrote ${image} (${stage2_sectors} stage 2 + ${sectors} payload sectors / ${payload_bytes} bytes, image_end=${image_end} < ${low_budget}, bss=[${bss_addr}, ${bss_end}), SECFEAT=${secfeat})"

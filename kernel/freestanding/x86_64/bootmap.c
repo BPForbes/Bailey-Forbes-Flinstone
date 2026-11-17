@@ -109,8 +109,10 @@ static int reserved_covers(const fl_boot_info_t *bi, uint64_t base, uint64_t end
     return 0;
 }
 
-int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t bss_start, uint64_t kernel_end)
+int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t image_end, uint64_t bss_start,
+                         uint64_t kernel_end)
 {
+    const fl_e820_entry_t *map;
     uint64_t map_end;
 
     if (!bi || bi->magic != FL_BOOTINFO_MAGIC || bi->version != FL_BOOTINFO_VERSION ||
@@ -122,9 +124,10 @@ int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64
     if (bi->e820_capacity > FL_BOOTINFO_E820_CAP || !bi->e820_addr || (bi->e820_addr & 7))
         return FL_BOOTMAP_E_INVAL;
     map_end = bi->e820_addr + (uint64_t)bi->e820_capacity * sizeof(fl_e820_entry_t);
-    /* The image the loader describes is this image: same start, same end, fully read. */
-    if (bi->kernel_base != kernel_start || bi->kernel_end != kernel_end || kernel_start >= bss_start ||
-        bss_start > kernel_end || bi->kernel_load_end < bss_start ||
+    /* The image the loader describes is this image: same start, every loaded byte read, below the bss. */
+    if (bi->kernel_base != kernel_start || bi->kernel_end != kernel_end || kernel_start >= image_end ||
+        image_end > bss_start || bss_start < FL_KERNEL_BSS_ADDR || bss_start > kernel_end ||
+        bi->kernel_load_end < image_end || bi->kernel_load_end > bss_start ||
         ((bi->kernel_load_end - kernel_start) & 511) || bi->mapped_end < kernel_end)
         return FL_BOOTMAP_E_INVAL;
     if (bi->reserved_count == 0 || bi->reserved_count > FL_BOOTINFO_MAX_RESERVED)
@@ -132,12 +135,20 @@ int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64
     for (uint32_t i = 0; i < bi->reserved_count; i++)
         if (bi->reserved[i].base >= bi->reserved[i].end)
             return FL_BOOTMAP_E_INVAL;
-    /* Reserved: the image, its stack, page tables, E820 buffer and this struct; no arena takes them. */
-    if (map_end < bi->e820_addr || !reserved_covers(bi, kernel_start, kernel_end) ||
+    /* Reserved: the image, its bss, stack, page tables, E820 buffer and this struct; no arena takes them. */
+    if (map_end < bi->e820_addr || !reserved_covers(bi, kernel_start, bi->kernel_load_end) ||
+        !reserved_covers(bi, bss_start, kernel_end) ||
         !reserved_covers(bi, FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP) ||
         !reserved_covers(bi, FL_PAGE_TABLES, FL_PAGE_TABLES_END) ||
         !reserved_covers(bi, bi->e820_addr, map_end) ||
         !reserved_covers(bi, (uintptr_t)bi, (uintptr_t)bi + sizeof(*bi)))
+        return FL_BOOTMAP_E_INVAL;
+    /* Read only now that the buffer is known not to wrap. Stage 2 checked the bss before the jump. */
+    map = (const fl_e820_entry_t *)(uintptr_t)bi->e820_addr;
+    for (uint32_t i = 0; i < bi->e820_count; i++)
+        if (map[i].length > UINT64_MAX - map[i].base)
+            return FL_BOOTMAP_E_INVAL;
+    if (span_end(map, bi->e820_count, 0, 0, bss_start, UINT64_MAX) < kernel_end)
         return FL_BOOTMAP_E_INVAL;
     return FL_BOOTMAP_OK;
 }

@@ -33,7 +33,7 @@ struct idtr {
 static struct idt_gate idt[256];
 
 /* The image's own bounds, from linker.ld. */
-extern char __kernel_start[], __bss_start[], __bss_end[];
+extern char __kernel_start[], __image_end[], __bss_start[], __bss_end[];
 
 __attribute__((noreturn)) static void boot_fail(const char *marker)
 {
@@ -100,7 +100,7 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
 {
     fl_fs_serial_init();
     /* Before anything else starts: the loader's handoff must describe this image and a whole map. */
-    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__bss_start,
+    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__image_end, (uintptr_t)__bss_start,
                              (uintptr_t)__bss_end) != FL_BOOTMAP_OK)
         boot_fail("FLINTSTONE_BOOT_FAIL bootinfo\r\n");
 #ifdef FL_WITH_KEYQUORUM

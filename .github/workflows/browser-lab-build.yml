@@ -102,11 +102,13 @@ jobs:
           info = json.loads(Path("dist/build-info.json").read_text())
           sectors = info.get("payloadSectors")
           nbytes = info.get("payloadBytes")
-          bss = info.get("bssEnd")
+          image_end = info.get("imageEnd")
+          bss_start, bss = info.get("bssStart"), info.get("bssEnd")
           budget = info.get("conventionalMemoryBudget")
-          print(f"FL-22 image size: payloadSectors={sectors} payloadBytes={nbytes} bssEnd={bss} budget={budget}")
-          assert sectors is not None and nbytes is not None and bss and budget == "0x9f000"
-          assert int(str(bss), 0) < int(budget, 0)
+          print(f"FL-22 image size: payloadSectors={sectors} payloadBytes={nbytes} imageEnd={image_end} bss=[{bss_start}, {bss}) budget={budget}")
+          assert sectors is not None and nbytes is not None and image_end and bss and budget == "0x9f000"
+          assert int(str(image_end), 0) < int(budget, 0)  # the loaded image; the bss is above 1 MiB
+          assert int(str(bss_start), 0) == 0x100000 < int(str(bss), 0)
           PY
 
       - name: Probe virtual boot and verify compatibility metadata

@@ -17,6 +17,7 @@
 #define FL_PAGE_TABLES_END 0x5000u
 #define FL_KERNEL_STACK_BOTTOM 0xc000u
 #define FL_KERNEL_STACK_TOP 0x10000u
+#define FL_KERNEL_BSS_ADDR 0x100000u
 
 typedef struct fl_boot_info {
     uint32_t magic;
@@ -41,6 +42,8 @@ _Static_assert(FL_BOOTINFO_ADDR + FL_BOOTINFO_SIZE <= FL_BOOTINFO_E820_ADDR, "bo
 _Static_assert(FL_BOOTINFO_E820_ADDR + FL_BOOTINFO_E820_CAP * 24u <= FL_PAGE_TABLES, "E820 buffer overlaps the page tables");
 
 /* Returns OK, E_INVAL, or E_TRUNCATED for a truncated E820 map. */
-int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t bss_start, uint64_t kernel_end);
+/* image_end: the end of the loaded bytes; [bss_start, kernel_end) is the bss above 1 MiB. */
+int fl_bootinfo_validate(const fl_boot_info_t *bi, uint64_t kernel_start, uint64_t image_end, uint64_t bss_start,
+                         uint64_t kernel_end);
 
 #endif

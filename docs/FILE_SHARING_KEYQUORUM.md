@@ -723,10 +723,10 @@ kernel prints `CAP keyquorum=linked` when `fl_kq_driver_get()` accepts the linke
 (`FL_KQ_ABI_VERSION` 7), else `CAP keyquorum=abi-mismatch`. The image binds the KeyQuorum-backed demo accounts
 (`fl_fs_kq_bind_identity`) only when that same check passes; on a mismatch the plain demo accounts stay.
 
-- **Size.** The image is 910 sectors (about 455 KiB; 942 with the security lab; gate 1024) and its bss ends at `0x9ae40` (`0x9ee20` with the
-  security lab, which has about 480 bytes of room left); the build script refuses an image whose bss end reaches `0x9f000`, the end of
-  conventional memory. The account sealing below (`kq_identity.c`) and the `fw_cfg` entropy driver are therefore **left out of the security-lab
-  image**.
+- **Size.** The image is 913 sectors (about 456 KiB; 945 with the security lab; gate 1024). The loaded bytes end at `0x82118`
+  (`0x86160` with the security lab), below `0x9f000`, the end of conventional memory the build script allows, which leaves about 115 KiB
+  (99 KiB) for code. The bss (about 85 KiB) is linked at 1 MiB and never loaded (`docs/FREESTANDING_BOOT.md`). The account sealing below
+  (`kq_identity.c`) and the `fw_cfg` entropy driver are still **left out of the security-lab image**, as before the bss moved.
 - **Heap.** A 40 MiB arena at 4 MiB (`kq_platform.c`), above the image, inside the first GiB the boot code
   identity-maps. Sealing an account key (Argon2id, 19 MiB) needs more than 19 MiB at once, so the machine
   needs at least 64 MiB, which is what the page requests.
