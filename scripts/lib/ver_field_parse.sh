@@ -33,7 +33,7 @@ ver_parse_nonneg_int_field() {
 }
 
 # Binary flag: absent key -> 0; present value must be exactly 0 or 1 (rejects 2, 0abc, KEY=).
-# Use for PRERELEASE, GM, and RERELEASE in *.ver files.
+# Use for PRERELEASE, GM and RERELEASE in *.ver files.
 ver_parse_flag_field() {
   local key="$1" file="$2"
   local raw

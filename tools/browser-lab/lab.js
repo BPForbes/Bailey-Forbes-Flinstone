@@ -208,11 +208,14 @@
       if (event.type === "hello") {
         renderRelayStatus(`Connected as ${event.display} (#${event.memberId})`);
         appendChat(`[relay] joined as ${event.display}`);
+        void armGuestRelaySeat(true);
         if (!core.isFormTypingTarget(document.activeElement)) screen.focus();
       } else if (event.type === "announcement") {
         appendChat(`[announce] ${event.text}`);
       } else if (event.type === "message") {
         appendChat(event.text);
+        // Local echo already left the guest as SERVER_RELAY msg; only peers need relayrecv (#426).
+        if (!event.local) void deliverRelayChat(event.text);
       } else if (event.type === "roster") {
         renderRoster(event.members);
         kqSyncRoster(event.members);
@@ -229,6 +232,7 @@
         appendChat(`[error] ${event.text}`);
       } else if (event.type === "closed") {
         renderRelayStatus("Disconnected");
+        void armGuestRelaySeat(false);
       }
     });
     let connecting = null;
@@ -264,6 +268,7 @@
       renderRelayStatus("Disconnected");
       renderRoster([]);
       kqSyncRoster([]);
+      void armGuestRelaySeat(false);
     });
     let sendingMsg = false;
     document.getElementById("server-msg-form")?.addEventListener("submit", async event => {
@@ -495,6 +500,8 @@
         renderRoster([]);
         kqSyncRoster([]);
         appendChat("[relay] leave");
+        // Guest already cleared its seat via leave/kill; keep page queue empty.
+        pendingRelayChat.length = 0;
         return;
       }
       // While lab-isolated the relay stays down: reconnecting here would bypass the isolation boundary.
@@ -566,6 +573,7 @@
         waiter.resolve(true);
       }
     }
+    if (ch === "\n" || ch === " ") void flushGuestRelayWork();
   }
   function waitSerial(re, timeoutMs, from) {
     const start = from == null ? 0 : from;
@@ -614,6 +622,67 @@
     await enqueueGuest(() => emulator.sendText(value));
     return true;
   }
+  /* Seat arming and inbound relay chat are typed only at an idle command prompt
+   * (same rule as filerecv / dnsack) so neither can land in a Password: field. */
+  const pendingRelayChat = [];
+  let pendingSeat = null; /* null = no change; true/false = desired seat once idle */
+  let relayChatFlushing = false;
+  let relayWorkGen = 0; /* bumped on power-off / reset so in-flight flushes stop */
+  function atCommandPrompt() {
+    const tail = serialTail.replace(/\r/g, "");
+    return /(?:@flintstone>|shell>) $/.test(tail);
+  }
+  function cancelGuestRelayWork() {
+    pendingRelayChat.length = 0;
+    pendingSeat = null;
+    relayWorkGen++;
+    relayChatFlushing = false;
+  }
+  async function armGuestRelaySeat(on) {
+    pendingSeat = Boolean(on);
+    if (!on) pendingRelayChat.length = 0;
+    await flushGuestRelayWork();
+  }
+  async function deliverRelayChat(chatText) {
+    const line = core.relayRecvLine(chatText);
+    if (!line) return;
+    pendingRelayChat.push(line);
+    if (pendingRelayChat.length > 32) pendingRelayChat.shift();
+    await flushGuestRelayWork();
+  }
+  async function flushGuestRelayWork() {
+    if (relayChatFlushing || !guestReady()) return;
+    if (pendingSeat === null && !pendingRelayChat.length) return;
+    if (!atCommandPrompt()) return;
+    const gen = relayWorkGen;
+    relayChatFlushing = true;
+    try {
+      await guestExchange.run(async () => {
+        if (gen !== relayWorkGen || !guestReady()) return;
+        if (pendingSeat !== null && atCommandPrompt() && guestReady()) {
+          const on = pendingSeat;
+          pendingSeat = null;
+          const from = serialTail.length;
+          const seatLine = on ? "server seat\n" : "server unseat\n";
+          if (gen !== relayWorkGen || !guestReady()) return;
+          await enqueueGuest(() => emulator.sendText(seatLine));
+          if (gen !== relayWorkGen || !guestReady()) return;
+          await waitSerial(/(?:@flintstone>|shell>) /, 2000, from);
+        }
+        while (pendingRelayChat.length && atCommandPrompt() && guestReady()) {
+          if (gen !== relayWorkGen) return;
+          const line = pendingRelayChat.shift();
+          const from = serialTail.length;
+          if (gen !== relayWorkGen || !guestReady()) return;
+          await enqueueGuest(() => emulator.sendText(line));
+          if (gen !== relayWorkGen || !guestReady()) return;
+          await waitSerial(/\[relay\] |relayrecv: /, 2000, from);
+        }
+      });
+    } finally {
+      if (gen === relayWorkGen) relayChatFlushing = false;
+    }
+  }
   // A secret step is sent only as the answer to its own command's prompt, never typed as a command.
   function sendGuestLines(script, patterns) {
     return guestExchange.run(() => driveGuestLines(script, patterns));
@@ -645,6 +714,7 @@
     postReady: () => window.parent.postMessage({ source: "flinstone-guest", type: "ready", schemaVersion: 1, commit: info.shortCommit }, config.parentOrigin),
     createEmulator: async (settings) => {
       if (typeof config.createEmulator !== "function") throw new Error("No validated x86-64 browser emulator is configured");
+      cancelGuestRelayWork();
       serial.textContent = "";
       serialTail = "";
       activeSession = 1;
@@ -754,7 +824,11 @@
     document.getElementById(id).onclick = async () => {
       if (busy || ((id === "boot" || id === "reset") && !canBoot())) return;
       busy = true;
-      if (id === "boot" || id === "reset" || id === "poweroff") clearLabIsolation();
+      if (id === "boot" || id === "reset" || id === "poweroff") {
+        clearLabIsolation();
+        // Drop queued seat/chat work so an in-flight flush cannot keep a QEMU worker alive.
+        cancelGuestRelayWork();
+      }
       try { await action(); } catch (error) {
         if (id === "pause" || id === "resume") {
           const node = document.getElementById("status");

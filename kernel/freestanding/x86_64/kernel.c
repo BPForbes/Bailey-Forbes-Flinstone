@@ -13,7 +13,9 @@
 #ifdef FL_WITH_KEYQUORUM
 #include "fl/driver/keyquorum.h"
 #include "kq_heap.h"
-#ifndef FL_SECFEAT
+#ifdef FL_KQ_FILES
+#include "kq_files.h"
+#else
 void fl_fs_kq_bind_identity(void);
 #endif
 #endif
@@ -33,7 +35,7 @@ struct idtr {
 static struct idt_gate idt[256];
 
 /* The image's own bounds, from linker.ld. */
-extern char __kernel_start[], __bss_start[], __bss_end[];
+extern char __kernel_start[], __image_end[], __bss_start[], __bss_end[];
 
 __attribute__((noreturn)) static void boot_fail(const char *marker)
 {
@@ -100,7 +102,7 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
 {
     fl_fs_serial_init();
     /* Before anything else starts: the loader's handoff must describe this image and a whole map. */
-    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__bss_start,
+    if (fl_bootinfo_validate(boot_info, (uintptr_t)__kernel_start, (uintptr_t)__image_end, (uintptr_t)__bss_start,
                              (uintptr_t)__bss_end) != FL_BOOTMAP_OK)
         boot_fail("FLINTSTONE_BOOT_FAIL bootinfo\r\n");
 #ifdef FL_WITH_KEYQUORUM
@@ -122,10 +124,18 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
     fl_fs_pic_init();
     fl_fs_pit_init();
     fl_fs_kbd_init();
-#if defined(FL_WITH_KEYQUORUM) && !defined(FL_SECFEAT)
+#if defined(FL_WITH_KEYQUORUM)
     /* Only with a driver whose ABI probe passes: otherwise the demo accounts stay as they are. */
     if (fl_kq_driver_get())
         fl_fs_kq_bind_identity();
+#endif
+#ifdef FL_KQ_FILES
+    /* Before the accounts are enrolled (their sealed keys come back from the data disk) and before the
+     * self-test. No data disk is not an error: the image then keeps everything in memory. */
+    if (fl_kq_driver_get()) {
+        int records = fl_fs_kq_persist_load();
+        fl_fs_serial_puts(records >= 0 ? "CAP keyquorum-disk=present\r\n" : "CAP keyquorum-disk=absent\r\n");
+    }
 #endif
     fl_fs_identity_init();
     fl_fs_ramfs_init();
@@ -138,6 +148,11 @@ void fl_kernel_main(const fl_boot_info_t *boot_info)
 #ifdef FL_WITH_KEYQUORUM
     /* The KeyQuorum library is linked and its ABI is the one the driver was written for. */
     fl_fs_serial_puts(fl_kq_driver_get() ? "CAP keyquorum=linked\r\n" : "CAP keyquorum=abi-mismatch\r\n");
+#endif
+#ifdef FL_KQ_FILES
+    /* A real history in the in-memory store: started, signed again, trusted, refused under a wrong key. */
+    fl_fs_serial_puts(fl_kq_driver_get() && fl_fs_kq_selftest() == 0 ? "CAP keyquorum-history=ok\r\n"
+                                                                      : "CAP keyquorum-history=failed\r\n");
 #endif
     fl_fs_serial_puts("FLINTSTONE_KERNEL_BOOT_OK\r\n");
     __asm__ volatile("sti");

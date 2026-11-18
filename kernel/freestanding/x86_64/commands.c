@@ -8,6 +8,9 @@
 #ifdef FL_LAB_KQ
 #include "lab_kq.h" /* tools/browser-lab/wasm: KeyQuorum in the WebAssembly shell */
 #endif
+#ifdef FL_KQ_FILES
+#include "kq_files.h" /* KeyQuorum-signed histories in the QEMU image */
+#endif
 /* VERSION_LINE of the build: the same header the hosted shell uses, macros only. */
 #include "../../../userland/shell/version_def.h"
 
@@ -20,6 +23,8 @@ static char s_audit[AUDIT_MAX][AUDIT_LINE];
 static unsigned s_audit_n;
 static char s_loc[LOC_MAX][FL_FS_RAMFS_PATH];
 static unsigned s_loc_n;
+/* 1 after server host|join|seat until leave|kill|unseat: inbound relayrecv is allowed. */
+static int s_server_seat;
 
 #ifdef FL_SECFEAT  /* security-features gate: the netlab teaching lab */
 /*
@@ -157,6 +162,132 @@ static void emit(const char *s)
         ++p;
     }
     redir_append(s);
+}
+
+/*
+ * Print untrusted text the lab page may parse on serial: only bytes 0x20-0x7E
+ * and colour-only SGR sequences, everything else as '?'. Each logical line
+ * (split on CR/LF) is emitted behind `prefix` so a forged SWITCHUSER /
+ * SERVER_* / LAB_NETMODE line can never match parseGuestLine (#427). Chat uses
+ * the same path behind "[relay] " (#426).
+ */
+static void emit_safe_byte(unsigned char c)
+{
+    char one[2];
+    one[0] = (char)(c < 0x20u || c > 0x7Eu ? '?' : c);
+    one[1] = 0;
+    emit(one);
+}
+
+static int sgr_colour_param(unsigned p)
+{
+    return p == 0 || p == 1 || p == 22 || (p >= 30 && p <= 37) || p == 39 ||
+           (p >= 40 && p <= 47) || p == 49 || (p >= 90 && p <= 97) || (p >= 100 && p <= 107);
+}
+
+#define SGR_SEQ_MAX 24u
+
+/* Length of a colour-only "ESC [ n;n m" sequence at s (at most n bytes), or 0. */
+static unsigned safe_sgr_len(const char *s, unsigned n)
+{
+    unsigned i, p = 0, digits = 0;
+    if (n < 3u || (unsigned char)s[0] != 0x1bu || s[1] != '[')
+        return 0;
+    for (i = 2; i < n && i < SGR_SEQ_MAX; ++i) {
+        char c = s[i];
+        if (c >= '0' && c <= '9') {
+            if (++digits > 3u)
+                return 0;
+            p = p * 10u + (unsigned)(c - '0');
+            continue;
+        }
+        if (c != ';' && c != 'm')
+            return 0;
+        if (!sgr_colour_param(p))
+            return 0;
+        if (c == 'm')
+            return i + 1u;
+        p = 0;
+        digits = 0;
+    }
+    return 0;
+}
+
+static void emit_sgr(const char *s, unsigned len)
+{
+    char seq[SGR_SEQ_MAX + 1u];
+    unsigned i;
+    for (i = 0; i < len && i < SGR_SEQ_MAX; ++i)
+        seq[i] = s[i];
+    seq[i] = 0;
+    emit(seq);
+}
+
+#define SGR_RESET "\x1b[0m"
+
+/*
+ * Image colour (docs/COLOR_SYSTEM.md): the SGR bytes go to the VGA parser
+ * only. Serial and the redirect buffer keep plain text, so the lab page's
+ * line parser (SERVER_RELAY, SERVER_FILE, SWITCHUSER, LAB_NETMODE) and
+ * `> file` never see an escape this image added. Machine lines are never
+ * coloured.
+ */
+#define C_RED "\x1b[31m"
+#define C_GRN "\x1b[32m"
+#define C_YEL "\x1b[33m"
+#define C_BLU "\x1b[34m"
+#define C_CYN "\x1b[36m"
+
+static void vga_sgr(const char *seq)
+{
+    while (*seq)
+        fl_fs_vga_putc(*seq++);
+}
+
+/* The hosted helpers' tags (userland/shell/fl_colors.c): the whole line in one colour,
+ * reset at the end. Same colour per role as KGRN / KYEL / KRED / KCYN there. */
+static void emit_line(const char *sgr, const char *tag, const char *s)
+{
+    vga_sgr(sgr);
+    emit(tag);
+    emit(s);
+    vga_sgr(SGR_RESET);
+}
+static void srv_warn(const char *s) { emit_line(C_YEL, "[Server] ", s); }     /* fl_color_warn */
+static void srv_error(const char *s) { emit_line(C_RED, "[ERROR] ", s); }     /* fl_color_error */
+/* netlab is image-only (SECFEAT builds); no hosted counterpart, tag only. */
+__attribute__((unused)) static void emit_netlab(const char *rest)
+{
+    vga_sgr(C_CYN);
+    emit("netlab: ");
+    vga_sgr(SGR_RESET);
+    emit(rest);
+}
+
+static void emit_safe_text(const char *prefix, const char *data)
+{
+    const char *p = data ? data : "";
+    for (;;) {
+        int coloured = 0;
+        emit(prefix);
+        while (*p && *p != '\n' && *p != '\r') {
+            unsigned k = safe_sgr_len(p, SGR_SEQ_MAX);
+            if (k) {
+                emit_sgr(p, k);
+                p += k;
+                coloured = 1;
+            } else {
+                emit_safe_byte((unsigned char)*p++);
+            }
+        }
+        emit(coloured ? SGR_RESET "\r\n" : "\r\n");
+        if (*p == '\r')
+            ++p;
+        if (*p == '\n')
+            ++p;
+        if (!*p)
+            break;
+    }
 }
 
 static void emit_uint(unsigned value)
@@ -378,8 +509,9 @@ static int run_fs(int session, const char *verb, const char **cursor)
             return 1;
         }
         loc_add(path);
-        emit(data);
-        emit("\r\n");
+        /* Never emit raw file bytes: a received or written line must not forge
+         * lab control tokens the page parses (#427). */
+        emit_safe_text("[file] ", data);
         return 1;
     }
     if (str_eq(verb, "write") || str_eq(verb, "make")) {
@@ -795,8 +927,13 @@ static int run_net(const char *verb, const char **cursor)
 #define FILE_NAME_MAX 20 /* one ramfs name, NUL included */
 /* The Rust library is linked into this image but the delivery checkpoints are not: they
  * need a store that holds .kqtf containers (the ramfs holds 160 bytes a file) and a libc subset. */
+#ifdef FL_KQ_FILES
 #define FILE_KQ_ELSEWHERE \
-    "server file: KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
+    "this image keeps KeyQuorum-signed histories (server file sign|log|verify <path>); co-signed delivery runs in the lab's WebAssembly shell\r\n"
+#else
+#define FILE_KQ_ELSEWHERE \
+    "KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
+#endif
 #define FILE_USER_MAX 16
 
 static int file_user_ok(const char *s)
@@ -855,7 +992,7 @@ static int server_file_send(int session, const char **cursor)
     if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
         emit(str_eq(word, "accept") ? "SERVER_FILE_ACCEPT\r\n" : "SERVER_FILE_DECLINE\r\n");
         if (str_eq(word, "decline"))
-            emit("server file: files waiting for you were declined\r\n");
+            srv_warn("files waiting for you were declined\r\n");
         return 1;
     }
     if (more && (str_eq(word, "permit") || str_eq(word, "log"))) {
@@ -869,12 +1006,33 @@ static int server_file_send(int session, const char **cursor)
         if (str_eq(word, "permit"))
             return fl_lab_kq_permit(session, target);
         return fl_lab_kq_log(session, target);
+#elif defined(FL_KQ_FILES)
+        if (str_eq(word, "log") && take_word(cursor, target, sizeof(target))) {
+            (void)fl_fs_kq_file_log(session, target);
+            return 1;
+        }
+        if (str_eq(word, "log"))
+            emit("usage: server file log <path>\r\n");
+        else
+            srv_warn(FILE_KQ_ELSEWHERE);
+        return 1;
 #else
         (void)target;
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
         return 1;
 #endif
     }
+#ifdef FL_KQ_FILES
+    if (more && str_eq(word, "verify")) {
+        char target[FL_FS_RAMFS_PATH];
+        if (!take_word(cursor, target, sizeof(target))) {
+            emit("usage: server file verify <path>\r\n");
+            return 1;
+        }
+        (void)fl_fs_kq_file_verify(session, target);
+        return 1;
+    }
+#endif
     if (more && (str_eq(word, "cosign") || str_eq(word, "open"))) {
         char id[40];
         int has = take_word(cursor, id, sizeof(id));
@@ -886,7 +1044,7 @@ static int server_file_send(int session, const char **cursor)
         emit("usage: server file open <delivery>\r\n");
 #else
         (void)has;
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
 #endif
         return 1;
     }
@@ -917,14 +1075,14 @@ static int server_file_send(int session, const char **cursor)
         return 1;
     }
     if (!file_user_ok(user)) {
-        emit("server file: not a user name\r\n");
+        srv_error("server file: not a user name\r\n");
         return 1;
     }
     if (kq) {
 #ifdef FL_LAB_KQ
         return fl_lab_kq_send(session, path, user, permitted);
 #else
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
         return 1;
 #endif
     }
@@ -938,26 +1096,28 @@ static int server_file_send(int session, const char **cursor)
         if (path[i] == '/')
             base = path + i + 1;
     if (!file_name_ok(base)) {
-        emit("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
+        srv_error("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
         return 1;
     }
-    emit("SERVER_FILE ");
-    emit(user);
-    emit(" ");
-    emit(base);
-    emit(" ");
+    fl_fs_serial_puts("SERVER_FILE ");
+    fl_fs_serial_puts(user);
+    fl_fs_serial_puts(" ");
+    fl_fs_serial_puts(base);
+    fl_fs_serial_puts(" ");
     for (i = 0; data[i]; ++i) {
         char pair[3] = { digits[((unsigned char)data[i]) >> 4], digits[((unsigned char)data[i]) & 15], 0 };
-        emit(pair);
+        fl_fs_serial_puts(pair);
     }
-    emit("\r\n");
-    emit("server file: sending ");
+    fl_fs_serial_puts("\r\n");
+    vga_sgr(C_GRN); /* fl_color_success */
+    emit("[Server] sending ");
     emit(base);
     emit(" to ");
     emit(user);
     emit(" (");
     emit_uint(i);
     emit(" bytes)\r\n");
+    vga_sgr(SGR_RESET);
     return 1;
 }
 
@@ -968,6 +1128,137 @@ static struct {
     char data[FL_FS_RAMFS_DATA];
     unsigned len;
 } s_file_rx[FL_FS_MAX_SESSIONS];
+
+/*
+ * relayrecv [+] <from> <hex>: the page types one or more of these for each
+ * inbound relay chat line (#426); see tools/browser-lab/README.md.
+ */
+#define RELAY_BODY_MAX 512u
+#define RELAY_COLS 80u
+#define RELAY_INDENT "  "
+static char s_relay_from[FILE_USER_MAX];
+static char s_relay_body[RELAY_BODY_MAX];
+static unsigned s_relay_len;
+
+static void relay_reset(void)
+{
+    s_relay_from[0] = 0;
+    s_relay_len = 0;
+}
+
+/* fl_color_msg_from_all(): "[Server Message, From <sender>]: <text>", cyan. */
+#define RELAY_TAG "[Server Message, From "
+static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
+{
+    unsigned col = sizeof(RELAY_TAG) - 1u + str_len(from) + 3u;
+    unsigned i = 0;
+    int coloured = 0;
+    vga_sgr(C_CYN);
+    emit(RELAY_TAG);
+    emit(from);
+    emit("]: ");
+    while (i < n) {
+        unsigned j, vis = 0;
+        if (body[i] == ' ') {
+            if (col + 1u > RELAY_COLS) {
+                emit("\r\n" RELAY_INDENT);
+                col = sizeof(RELAY_INDENT) - 1u;
+            } else {
+                emit(" ");
+                ++col;
+            }
+            ++i;
+            continue;
+        }
+        for (j = i; j < n && body[j] != ' ';) {
+            unsigned k = safe_sgr_len(body + j, n - j);
+            j += k ? k : 1u;
+            vis += k ? 0u : 1u;
+        }
+        if (col + vis > RELAY_COLS && col > sizeof(RELAY_INDENT) - 1u) {
+            emit("\r\n" RELAY_INDENT);
+            col = sizeof(RELAY_INDENT) - 1u;
+        }
+        while (i < j) {
+            unsigned k = safe_sgr_len(body + i, n - i);
+            if (k) {
+                emit_sgr(body + i, k);
+                i += k;
+                coloured = 1;
+                continue;
+            }
+            if (col >= RELAY_COLS) {
+                emit("\r\n" RELAY_INDENT);
+                col = sizeof(RELAY_INDENT) - 1u;
+            }
+            emit_safe_byte((unsigned char)body[i++]);
+            ++col;
+        }
+    }
+    emit(coloured ? SGR_RESET "\r\n" : "\r\n");
+    vga_sgr(SGR_RESET);
+}
+
+static int run_relayrecv(int session, const char *verb, const char **cursor)
+{
+    char from[FILE_USER_MAX];
+    char hex[128];
+    int part = 0;
+    unsigned i;
+    (void)session;
+    if (!str_eq(verb, "relayrecv"))
+        return 0;
+#ifdef FL_SECFEAT
+    if (s_lab_netmode) {
+        srv_error("relayrecv: refused (lab isolated)\r\n");
+        return 1;
+    }
+#endif
+    if (!s_server_seat) {
+        relay_reset();
+        srv_error("relayrecv: refused (not on a server)\r\n");
+        return 1;
+    }
+    if (!take_word(cursor, from, sizeof(from))) {
+        emit("usage: relayrecv [+] <from> <hex>\r\n");
+        return 1;
+    }
+    if (str_eq(from, "+")) {
+        part = 1;
+        if (!take_word(cursor, from, sizeof(from))) {
+            emit("usage: relayrecv [+] <from> <hex>\r\n");
+            return 1;
+        }
+    }
+    if (!file_user_ok(from) || !take_word(cursor, hex, sizeof(hex))) {
+        emit("usage: relayrecv [+] <from> <hex>\r\n");
+        return 1;
+    }
+    skip_spaces(cursor);
+    if (s_relay_len && !str_eq(from, s_relay_from))
+        relay_reset();
+    if (**cursor) {
+        relay_reset();
+        srv_error("relayrecv: refused (bad or oversized content)\r\n");
+        return 1;
+    }
+    for (i = 0; hex[i]; i += 2) {
+        int hi = hex_val(hex[i]);
+        int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
+        if (hi < 0 || lo < 0 || s_relay_len >= RELAY_BODY_MAX) {
+            relay_reset();
+            srv_error("relayrecv: refused (bad or oversized content)\r\n");
+            return 1;
+        }
+        s_relay_body[s_relay_len++] = (char)((hi << 4) | lo);
+    }
+    str_copy(s_relay_from, from, sizeof(s_relay_from));
+    if (part)
+        return 1;
+    emit_relay_wrapped(s_relay_from, s_relay_body, s_relay_len);
+    relay_reset();
+    return 1;
+}
 
 /* filerecv begin <from> <name> | data <hex> | end: a file another user sent (typed by the page). */
 static int run_filerecv(int session, const char *verb, const char **cursor)
@@ -982,7 +1273,7 @@ static int run_filerecv(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(sub, "none")) {
-        emit("server file: no files waiting\r\n");
+        srv_warn("no files waiting\r\n");
         return 1;
     }
     if (str_eq(sub, "begin")) {
@@ -1109,10 +1400,10 @@ static int run_server(int session, const char *verb, const char **cursor)
                 if (s_nl_hostidx >= 0) {
                     char dn2[40];
                     nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
-                    emit("netlab: you are now the server host — new pod host: ");
+                    emit_netlab("you are now the server host — new pod host: ");
                     emit(dn2); emit("\r\n");
                 } else {
-                    emit("netlab: you are now the server host — pod host pending "
+                    emit_netlab("you are now the server host — pod host pending "
                          "(no other session can hold it yet).\r\n");
                 }
             }
@@ -1124,7 +1415,7 @@ static int run_server(int session, const char *verb, const char **cursor)
              * under it are killed too. */
             if (s_nl_pod[0]) {
                 nl_pod_dissolve();
-                emit("netlab: server killed by its host — pod dissolved.\r\n");
+                emit_netlab("server killed by its host — pod dissolved.\r\n");
             }
         }
     } else if (str_eq(sub, "leave")) {
@@ -1139,7 +1430,7 @@ static int run_server(int session, const char *verb, const char **cursor)
                 if (s_nl_hostidx != before && s_nl_hostidx >= 0) {
                     char dn2[40];
                     nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
-                    emit("netlab: server host stepped down — new pod host: ");
+                    emit_netlab("server host stepped down — new pod host: ");
                     emit(dn2); emit("\r\n");
                 }
             }
@@ -1148,7 +1439,33 @@ static int run_server(int session, const char *verb, const char **cursor)
 #endif /* FL_SECFEAT */
     if (str_eq(sub, "file"))
         return server_file_send(session, cursor);
+    /* Quiet seat arming for the page's auto-join (no SERVER_RELAY token). */
+    if (str_eq(sub, "seat")) {
+        s_server_seat = 1;
+        return 1;
+    }
+    if (str_eq(sub, "unseat")) {
+        s_server_seat = 0;
+        relay_reset();
+        return 1;
+    }
+    if (str_eq(sub, "host") || str_eq(sub, "join"))
+        s_server_seat = 1;
+    else if (str_eq(sub, "leave") || str_eq(sub, "kill")) {
+        s_server_seat = 0;
+        relay_reset();
+    }
     skip_spaces(cursor);
+    if (str_eq(sub, "msg") || str_eq(sub, "announce")) {
+        fl_fs_serial_puts("SERVER_RELAY ");
+        fl_fs_serial_puts(sub);
+        if (**cursor) {
+            fl_fs_serial_puts(" ");
+            fl_fs_serial_puts(*cursor);
+        }
+        fl_fs_serial_puts("\r\n");
+        return 1;
+    }
     emit("SERVER_RELAY ");
     emit(sub);
     if (**cursor) {
@@ -1257,10 +1574,10 @@ static void nl_set_mode(int lab)
     /* Control token for tools/browser-lab/lab.js to drop/resume the relay. */
     emit(lab ? "LAB_NETMODE lab\r\n" : "LAB_NETMODE live\r\n");
     if (lab) {
-        emit("netlab: lab-isolated — real network (server relay) dropped for the demo.\r\n");
+        emit_netlab("lab-isolated — real network (server relay) dropped for the demo.\r\n");
         nl_boundary();
     } else {
-        emit("netlab: live — real network restored; server relay may resume.\r\n");
+        emit_netlab("live — real network restored; server relay may resume.\r\n");
     }
 }
 
@@ -1573,7 +1890,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "stop")) {
         if (s_nl_atk_session >= 0) {
-            emit("netlab: a reverse-shell binding is open; `netlab end` it first.\r\n");
+            emit_netlab("a reverse-shell binding is open; `netlab end` it first.\r\n");
             return 1;
         }
         nl_set_mode(0);
@@ -1590,7 +1907,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 return 1;
             }
             if (s_nl_pod[0]) {
-                emit("netlab: pod '");
+                emit_netlab("pod '");
                 emit(s_nl_pod);
                 emit("' already exists; `netlab pod leave` first.\r\n");
                 return 1;
@@ -1600,7 +1917,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
             s_nl_members[s_nl_memcount++] = session;
             nl_pick_host();
-            emit("netlab: pod '");
+            emit_netlab("pod '");
             emit(s_nl_pod);
             emit("' created.\r\n");
             if (s_nl_hostidx >= 0) {
@@ -1616,17 +1933,17 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "join")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod yet. `netlab pod create <pod>` first.\r\n");
+                emit_netlab("no pod yet. `netlab pod create <pod>` first.\r\n");
                 return 1;
             }
             if (nl_session_idx(session) >= 0) {
-                emit("netlab: you are already in pod ");
+                emit_netlab("you are already in pod ");
                 emit(s_nl_pod);
                 emit(".\r\n");
                 return 1;
             }
             if (s_nl_memcount >= NL_MAXMEM) {
-                emit("netlab: pod is full.\r\n");
+                emit_netlab("pod is full.\r\n");
                 return 1;
             }
             str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
@@ -1635,7 +1952,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             {
                 char dn[40];
                 nl_display_name(session, dn, sizeof(dn));
-                emit("netlab: "); emit(dn); emit(" joined pod "); emit(s_nl_pod);
+                emit_netlab(""); emit(dn); emit(" joined pod "); emit(s_nl_pod);
                 emit(" (identity preserved).\r\n");
             }
             if (s_nl_hostidx >= 0) {
@@ -1649,7 +1966,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "members")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod.\r\n");
+                emit_netlab("no pod.\r\n");
                 return 1;
             }
             emit("pod ");
@@ -1669,7 +1986,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "host")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod.\r\n");
+                emit_netlab("no pod.\r\n");
                 return 1;
             }
             emit("pod ");
@@ -1688,12 +2005,12 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             int idx, was_host, j;
             char dn[40];
             if (!s_nl_pod[0]) {
-                emit("netlab: not in a pod.\r\n");
+                emit_netlab("not in a pod.\r\n");
                 return 1;
             }
             idx = nl_session_idx(session);
             if (idx < 0) {
-                emit("netlab: you are not in this pod.\r\n");
+                emit_netlab("you are not in this pod.\r\n");
                 return 1;
             }
             was_host = ((int)idx == s_nl_hostidx);
@@ -1704,7 +2021,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             }
             s_nl_memcount--;
             if (s_nl_memcount == 0) {
-                emit("netlab: "); emit(dn); emit(" left; pod dissolved.\r\n");
+                emit_netlab(""); emit(dn); emit(" left; pod dissolved.\r\n");
                 s_nl_pod[0] = 0;
                 s_nl_hostidx = -1;
                 s_nl_listen_session = -1;
@@ -1715,7 +2032,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 return 1;
             }
             nl_pick_host();
-            emit("netlab: "); emit(dn); emit(" left.\r\n");
+            emit_netlab(""); emit(dn); emit(" left.\r\n");
             if (s_nl_hostidx >= 0) {
                 char dn2[40];
                 nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
@@ -1729,7 +2046,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 s_nl_victim_session = -1;
                 nl_sb_reset();
                 nl_set_mode(0);
-                emit("netlab: your reverse-shell binding ended because you left the pod.\r\n");
+                emit_netlab("your reverse-shell binding ended because you left the pod.\r\n");
             }
             if (session == s_nl_listen_session)
                 s_nl_listen_session = -1;
@@ -1740,24 +2057,24 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "listen")) {
         if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
-            emit("netlab: join a pod first (`netlab pod create` or `netlab pod join`).\r\n");
+            emit_netlab("join a pod first (`netlab pod create` or `netlab pod join`).\r\n");
             return 1;
         }
         if (take_word(cursor, nm, sizeof(nm)) && str_eq(nm, "cancel")) {
             if (s_nl_listen_session != session) {
-                emit("netlab: you have no open listener to cancel.\r\n");
+                emit_netlab("you have no open listener to cancel.\r\n");
                 return 1;
             }
             s_nl_listen_session = -1;
-            emit("netlab: listener cancelled.\r\n");
+            emit_netlab("listener cancelled.\r\n");
             return 1;
         }
         if (s_nl_atk_session >= 0) {
-            emit("netlab: a reverse shell is already bound in this pod; `netlab end` it first.\r\n");
+            emit_netlab("a reverse shell is already bound in this pod; `netlab end` it first.\r\n");
             return 1;
         }
         if (s_nl_listen_session >= 0) {
-            emit("netlab: a listener is already open in this pod. `netlab accept` it, or its\r\n");
+            emit_netlab("a listener is already open in this pod. `netlab accept` it, or its\r\n");
             emit("  owner can `netlab listen cancel`.\r\n");
             return 1;
         }
@@ -1765,7 +2082,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         {
             char dn[40];
             nl_display_name(session, dn, sizeof(dn));
-            emit("netlab: "); emit(dn); emit(" is listening in pod "); emit(s_nl_pod);
+            emit_netlab(""); emit(dn); emit(" is listening in pod "); emit(s_nl_pod);
             emit(".\r\n  Another pod member can `netlab accept` to bind as the victim side\r\n");
             emit("  (SIMULATED — a disposable isolated sandbox, never their real session).\r\n");
         }
@@ -1773,19 +2090,19 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "accept")) {
         if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
-            emit("netlab: join a pod first.\r\n");
+            emit_netlab("join a pod first.\r\n");
             return 1;
         }
         if (s_nl_listen_session < 0) {
-            emit("netlab: no open listener in this pod. Someone runs `netlab listen` first.\r\n");
+            emit_netlab("no open listener in this pod. Someone runs `netlab listen` first.\r\n");
             return 1;
         }
         if (s_nl_listen_session == session) {
-            emit("netlab: you cannot accept your own listener.\r\n");
+            emit_netlab("you cannot accept your own listener.\r\n");
             return 1;
         }
         if (s_nl_atk_session >= 0) {
-            emit("netlab: already bound; `netlab end` it first.\r\n");
+            emit_netlab("already bound; `netlab end` it first.\r\n");
             return 1;
         }
         /* "when we switch to lab network": re-resolve the pod host here, since
@@ -1801,7 +2118,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             char adn[40], vdn[40];
             nl_display_name(s_nl_atk_session, adn, sizeof(adn));
             nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
-            emit("netlab: "); emit(vdn); emit(" accepted. "); emit(adn);
+            emit_netlab(""); emit(vdn); emit(" accepted. "); emit(adn);
             emit(" is bound as attacker against a fresh, isolated SANDBOX\r\n");
             emit("  labeled for "); emit(vdn); emit(" — not "); emit(vdn);
             emit("'s real session or real files.\r\n  ");
@@ -1813,14 +2130,14 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "end")) {
         if (session != s_nl_atk_session && session != s_nl_victim_session) {
-            emit("netlab: no reverse shell bound to you.\r\n");
+            emit_netlab("no reverse shell bound to you.\r\n");
             return 1;
         }
         {
             char adn[40], vdn[40];
             nl_display_name(s_nl_atk_session, adn, sizeof(adn));
             nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
-            emit("netlab: reverse shell between "); emit(adn); emit(" and "); emit(vdn);
+            emit_netlab("reverse shell between "); emit(adn); emit(" and "); emit(vdn);
             emit(" closed.\r\n");
         }
         s_nl_atk_session = -1;
@@ -1860,7 +2177,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         p = nl_find_pod(pod);
         if (!p) {
-            emit("netlab: no pod '");
+            emit_netlab("no pod '");
             emit(pod);
             emit("' (try `netlab pods`)\r\n");
             return 1;
@@ -1952,7 +2269,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 }
             }
             if (!h) {
-                emit("netlab: no host '");
+                emit_netlab("no host '");
                 emit(dst);
                 emit("' in pod ");
                 emit(p->name);
@@ -2037,7 +2354,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         return 1;
     }
 
-    emit("netlab: unknown verb '");
+    emit_netlab("unknown verb '");
     emit(sub);
     emit("' (try `netlab help`)\r\n");
     return 1;
@@ -2162,9 +2479,14 @@ void fl_fs_commands_init(void)
 #ifdef FL_LAB_KQ
     fl_lab_kq_init(emit);
 #endif
+#ifdef FL_KQ_FILES
+    fl_fs_kq_files_init(emit);
+#endif
     s_redir[0] = 0;
     s_audit_n = 0;
     s_loc_n = 0;
+    s_server_seat = 0;
+    relay_reset();
 #ifdef FL_SECFEAT
     s_lab_netmode = 0;
     s_nl_pod[0] = 0;
@@ -2195,7 +2517,8 @@ int fl_fs_commands_run(int session, const char *verb, const char **cursor)
 #ifdef FL_SECFEAT
         run_netlab(session, verb, cursor) ||
 #endif
-        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor))
+        run_server(session, verb, cursor) || run_filerecv(session, verb, cursor) ||
+        run_relayrecv(session, verb, cursor))
         return 1;
     return 0;
 }

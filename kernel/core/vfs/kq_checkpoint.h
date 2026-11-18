@@ -82,6 +82,16 @@ fl_kq_cp_result_t fl_kq_cp_history_letters_with(const fl_kq_keydir_t *keys, cons
                                                 const uint8_t host_signing_secret[32], const char *requester_key,
                                                 const char *path, fl_kq_buf_t *l15, fl_kq_buf_t *l17);
 
+/* Starts path's history with a revision signed by author_key (the store's key for it must exist):
+ * EXISTS when one is already kept beside it; rev_out (optional) is the new revision. */
+fl_kq_cp_result_t fl_kq_cp_track_with(const fl_kq_keydir_t *keys, const char *path, const char *author_key,
+                                      const uint8_t signing_secret[32], const char *created_at_utc,
+                                      uint8_t rev_out[32]);
+
+/* Whether the single head is trusted under the file's own policy and the keys the store holds for its
+ * signers: OK with rev = the head, UNTRUSTED, FORKED, IO without a history, INVALID when damaged. */
+fl_kq_cp_result_t fl_kq_cp_head_trusted_with(const fl_kq_keydir_t *keys, const char *path, uint8_t rev[32]);
+
 fl_kq_cp_result_t fl_kq_cp_sign_head_with(const char *path, const char *author_key,
                                           const uint8_t signing_secret[32], const char *created_at_utc);
 

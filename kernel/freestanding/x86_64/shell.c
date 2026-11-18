@@ -6,6 +6,9 @@
 #include "pit.h"
 #include "serial.h"
 #include "vga.h"
+#ifdef FL_KQ_FILES
+#include "kq_files.h"
+#endif
 
 #define LINE 128
 #define HIST_MAX 16
@@ -18,6 +21,7 @@
 #define MODE_SUDO_I 6
 #define MODE_PASSWD 7
 #define MODE_SWITCHUSER 8
+#define MODE_FILE_SIGN 9
 
 struct perspective {
     int valid;
@@ -47,6 +51,13 @@ static int str_eq(const char *a, const char *b)
         ++b;
     }
     return *a == *b;
+}
+
+static void wipe(char *p, unsigned n)
+{
+    volatile char *v = p;
+    while (n--)
+        *v++ = 0;
 }
 
 static void str_copy(char *dst, const char *src, unsigned cap)
@@ -87,6 +98,41 @@ static void emit_uint(unsigned value)
         emit_char(buf[n]);
 }
 
+static int has_prefix(const char *s, unsigned len, const char *p)
+{
+    unsigned i = 0;
+    while (p[i]) {
+        if (i >= len || s[i] != p[i])
+            return 0;
+        ++i;
+    }
+    return 1;
+}
+
+static int page_line_quiet(const char *line, unsigned len)
+{
+    return has_prefix(line, len, "relayrecv ") || has_prefix(line, len, "filerecv ");
+}
+
+static int page_line(const char *line, unsigned len)
+{
+    return page_line_quiet(line, len) || str_eq(line, "server seat") || str_eq(line, "server unseat");
+}
+
+static void screen_unwrite(unsigned cells)
+{
+    int row = 0, col = 0;
+    long start;
+    fl_fs_vga_get_cursor(&row, &col);
+    start = (long)row * FL_FS_VGA_SHELL_COLS + col - (long)cells;
+    if (start < FL_FS_VGA_SHELL_COLS)
+        start = FL_FS_VGA_SHELL_COLS;
+    fl_fs_vga_set_cursor((int)(start / FL_FS_VGA_SHELL_COLS), (int)(start % FL_FS_VGA_SHELL_COLS));
+    for (long i = start; i < (long)row * FL_FS_VGA_SHELL_COLS + col; ++i)
+        fl_fs_vga_putc(' ');
+    fl_fs_vga_set_cursor((int)(start / FL_FS_VGA_SHELL_COLS), (int)(start % FL_FS_VGA_SHELL_COLS));
+}
+
 static int active_session(void)
 {
     return fl_fs_session_active();
@@ -122,6 +168,20 @@ static void announce_switchuser(void)
     emit(fl_fs_identity_user(session));
     emit("\r\n");
     refresh_status();
+}
+
+static unsigned prompt_width(int session)
+{
+#ifdef FL_WASM_SHELL_PROMPT
+    (void)session;
+    return 7u;
+#else
+    const char *user = fl_fs_identity_user(session);
+    unsigned n = 13u;
+    while (*user++)
+        ++n;
+    return n;
+#endif
 }
 
 static void prompt(void)
@@ -297,6 +357,14 @@ static void finish_password(int session, const char *password)
     int mode = s_mode[session];
     int before = fl_fs_identity_user_index(session);
     s_mode[session] = MODE_CMD;
+#ifdef FL_KQ_FILES
+    if (mode == MODE_FILE_SIGN) {
+        /* The password opens the account's key for this one signature; kq_files.c reports the outcome. */
+        (void)fl_fs_kq_file_sign(session, s_pending[session], password);
+        s_pending[session][0] = 0;
+        return;
+    }
+#endif
     if (mode == MODE_LOGIN)
         ok = fl_fs_identity_login(session, s_pending[session], password);
     else if (mode == MODE_SU)
@@ -507,6 +575,23 @@ static void run_command(int session, char *line)
         }
         return;
     }
+#ifdef FL_KQ_FILES
+    if (str_eq(verb, "server")) {
+        /* server file sign <path> asks for the account's password first, like su. */
+        const char *look = cursor;
+        char w1[8], w2[8], target[LINE];
+        if (take_word(&look, w1, sizeof(w1)) && str_eq(w1, "file") && take_word(&look, w2, sizeof(w2)) &&
+            str_eq(w2, "sign")) {
+            if (!take_word(&look, target, sizeof(target))) {
+                emit("usage: server file sign <path>\r\n");
+                return;
+            }
+            str_copy(s_pending[session], target, sizeof(s_pending[session]));
+            s_mode[session] = MODE_FILE_SIGN;
+            return;
+        }
+    }
+#endif
     if (fl_fs_commands_run(session, verb, &cursor))
         return;
     emit("unknown command; try help\r\n");
@@ -535,26 +620,45 @@ void fl_fs_shell_input(char c)
         c = '\n';
     if (c == '\n') {
         char line[LINE];
-        emit("\r\n");
         s_line[session][s_len[session]] = 0;
+        if (s_mode[session] == MODE_CMD && page_line(s_line[session], s_len[session])) {
+            fl_fs_serial_puts("\r\n");
+            screen_unwrite(prompt_width(session) +
+                           (page_line_quiet(s_line[session], s_len[session]) ? 0u : s_len[session]));
+        } else {
+            emit("\r\n");
+        }
         str_copy(line, s_line[session], LINE);
         /* Clear before dispatch so session new / switchuser cannot snapshot
          * the completed command into the next session's line buffer. */
         s_len[session] = 0;
         s_line[session][0] = 0;
-        if (s_mode[session] != MODE_CMD)
+        if (s_mode[session] != MODE_CMD) {
             finish_password(session, line);
-        else
+            wipe(line, sizeof(line)); /* a password: neither copy outlives its use */
+            wipe(s_line[session], sizeof(s_line[session]));
+        } else {
             run_command(session, line);
+        }
         prompt();
         return;
     }
     if (c == '\b' || c == 127) {
+        int quiet;
         if (s_len[session] == 0)
             return;
+        quiet = s_mode[session] == MODE_CMD && page_line_quiet(s_line[session], s_len[session]);
         --s_len[session];
-        if (s_mode[session] == MODE_CMD)
+        if (s_mode[session] != MODE_CMD)
+            return;
+        if (!quiet) {
             emit("\b \b");
+        } else {
+            fl_fs_serial_puts("\b \b");
+            if (!page_line_quiet(s_line[session], s_len[session]))
+                for (unsigned i = 0; i < s_len[session]; ++i)
+                    fl_fs_vga_putc(s_line[session][i]);
+        }
         return;
     }
     if (c < 32 || c > 126)
@@ -562,6 +666,12 @@ void fl_fs_shell_input(char c)
     if (s_len[session] + 1 >= LINE)
         return;
     s_line[session][s_len[session]++] = c;
+    if (s_mode[session] == MODE_CMD && page_line_quiet(s_line[session], s_len[session])) {
+        fl_fs_serial_putc(c);
+        if (!page_line_quiet(s_line[session], s_len[session] - 1u))
+            screen_unwrite(s_len[session] - 1u);
+        return;
+    }
     emit_char(s_mode[session] == MODE_CMD ? c : '*');
 }
 

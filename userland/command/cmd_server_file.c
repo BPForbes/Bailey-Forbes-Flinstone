@@ -823,7 +823,7 @@ static int kq_decode_and_ack(const cmd_server_ctx_t *ctx, int hosting,
             uint8_t ref[32];
             const unsigned char *mine = fl_user_db_signing_public(fl_session_user_db(), fl_session_current_key_id());
 
-            fl_kq_report_refusal_in(&in->offer, fl_kq_cp_to_result(cp), &held);
+            fl_kq_report_refusal_cp_in(&in->offer, cp, &held);
             if (mine && fl_kq_cp_offer_ref(&in->offer, ref) == FL_RESULT_OK)
                 (void)fl_kq_cp_report_read_in(&held, ref, mine, &report);
         }
