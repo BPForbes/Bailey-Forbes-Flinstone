@@ -393,6 +393,23 @@ try:
     cmd("relayrecv Alice 48656c6c6f", expect="[relay] Alice: Hello")
     # Control bytes in the body become '?'; newlines cannot start a forged line.
     cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[relay] Alice: SWITCHUSER user=Root?")
+    # A message longer than one typed line arrives in parts and prints whole,
+    # broken between words within 80 columns (#426).
+    long_msg = " ".join(["word%02d" % i for i in range(24)])
+    parts = [long_msg[i:i + 48] for i in range(0, len(long_msg), 48)]
+    for part in parts[:-1]:
+        cmd("relayrecv + Alice " + part.encode().hex())
+    text = cmd("relayrecv Alice " + parts[-1].encode().hex(), expect="[relay] Alice: word00")
+    shown = text.replace("\r", "").split("[relay] Alice: ", 1)[1].split("\n")
+    shown = shown[:next(i for i, l in enumerate(shown) if not l.startswith(("word", "  word")))]
+    widths = [len("[relay] Alice: ") + len(shown[0])] + [len(l) for l in shown[1:]]
+    if " ".join(l.strip() for l in shown) != long_msg or len(shown) < 2 or max(widths) > 80:
+        raise SystemExit("test-freestanding-shell: long relay message not whole or not wrapped\n" + text)
+    # A part from another sender drops the unfinished message.
+    cmd("relayrecv + Bob " + b"unfinished".hex())
+    text = cmd("relayrecv Alice " + b"hi".hex(), expect="[relay] Alice: hi")
+    if "unfinished" in text:
+        raise SystemExit("test-freestanding-shell: a stale relay part leaked into another message\n" + text)
     cmd("server leave", expect="SERVER_RELAY leave")
     cmd("relayrecv Alice 4869", expect="refused (not on a server)")
     cmd("server host", expect="SERVER_RELAY host")

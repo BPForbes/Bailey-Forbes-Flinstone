@@ -676,7 +676,7 @@
           if (gen !== relayWorkGen || !guestReady()) return;
           await enqueueGuest(() => emulator.sendText(line));
           if (gen !== relayWorkGen || !guestReady()) return;
-          await waitSerial(/\[relay\] |relayrecv: |(?:@flintstone>|shell>) /, 2000, from);
+          await waitSerial(/\[relay\] |relayrecv: /, 2000, from);
         }
       });
     } finally {

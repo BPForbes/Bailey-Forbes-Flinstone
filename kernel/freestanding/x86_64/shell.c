@@ -98,6 +98,41 @@ static void emit_uint(unsigned value)
         emit_char(buf[n]);
 }
 
+static int has_prefix(const char *s, unsigned len, const char *p)
+{
+    unsigned i = 0;
+    while (p[i]) {
+        if (i >= len || s[i] != p[i])
+            return 0;
+        ++i;
+    }
+    return 1;
+}
+
+static int page_line_quiet(const char *line, unsigned len)
+{
+    return has_prefix(line, len, "relayrecv ") || has_prefix(line, len, "filerecv ");
+}
+
+static int page_line(const char *line, unsigned len)
+{
+    return page_line_quiet(line, len) || str_eq(line, "server seat") || str_eq(line, "server unseat");
+}
+
+static void screen_unwrite(unsigned cells)
+{
+    int row = 0, col = 0;
+    long start;
+    fl_fs_vga_get_cursor(&row, &col);
+    start = (long)row * FL_FS_VGA_SHELL_COLS + col - (long)cells;
+    if (start < FL_FS_VGA_SHELL_COLS)
+        start = FL_FS_VGA_SHELL_COLS;
+    fl_fs_vga_set_cursor((int)(start / FL_FS_VGA_SHELL_COLS), (int)(start % FL_FS_VGA_SHELL_COLS));
+    for (long i = start; i < (long)row * FL_FS_VGA_SHELL_COLS + col; ++i)
+        fl_fs_vga_putc(' ');
+    fl_fs_vga_set_cursor((int)(start / FL_FS_VGA_SHELL_COLS), (int)(start % FL_FS_VGA_SHELL_COLS));
+}
+
 static int active_session(void)
 {
     return fl_fs_session_active();
@@ -133,6 +168,20 @@ static void announce_switchuser(void)
     emit(fl_fs_identity_user(session));
     emit("\r\n");
     refresh_status();
+}
+
+static unsigned prompt_width(int session)
+{
+#ifdef FL_WASM_SHELL_PROMPT
+    (void)session;
+    return 7u;
+#else
+    const char *user = fl_fs_identity_user(session);
+    unsigned n = 13u;
+    while (*user++)
+        ++n;
+    return n;
+#endif
 }
 
 static void prompt(void)
@@ -571,8 +620,14 @@ void fl_fs_shell_input(char c)
         c = '\n';
     if (c == '\n') {
         char line[LINE];
-        emit("\r\n");
         s_line[session][s_len[session]] = 0;
+        if (s_mode[session] == MODE_CMD && page_line(s_line[session], s_len[session])) {
+            fl_fs_serial_puts("\r\n");
+            screen_unwrite(prompt_width(session) +
+                           (page_line_quiet(s_line[session], s_len[session]) ? 0u : s_len[session]));
+        } else {
+            emit("\r\n");
+        }
         str_copy(line, s_line[session], LINE);
         /* Clear before dispatch so session new / switchuser cannot snapshot
          * the completed command into the next session's line buffer. */
@@ -589,11 +644,21 @@ void fl_fs_shell_input(char c)
         return;
     }
     if (c == '\b' || c == 127) {
+        int quiet;
         if (s_len[session] == 0)
             return;
+        quiet = s_mode[session] == MODE_CMD && page_line_quiet(s_line[session], s_len[session]);
         --s_len[session];
-        if (s_mode[session] == MODE_CMD)
+        if (s_mode[session] != MODE_CMD)
+            return;
+        if (!quiet) {
             emit("\b \b");
+        } else {
+            fl_fs_serial_puts("\b \b");
+            if (!page_line_quiet(s_line[session], s_len[session]))
+                for (unsigned i = 0; i < s_len[session]; ++i)
+                    fl_fs_vga_putc(s_line[session][i]);
+        }
         return;
     }
     if (c < 32 || c > 126)
@@ -601,6 +666,12 @@ void fl_fs_shell_input(char c)
     if (s_len[session] + 1 >= LINE)
         return;
     s_line[session][s_len[session]++] = c;
+    if (s_mode[session] == MODE_CMD && page_line_quiet(s_line[session], s_len[session])) {
+        fl_fs_serial_putc(c);
+        if (!page_line_quiet(s_line[session], s_len[session] - 1u))
+            screen_unwrite(s_len[session] - 1u);
+        return;
+    }
     emit_char(s_mode[session] == MODE_CMD ? c : '*');
 }
 

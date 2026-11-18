@@ -49,11 +49,25 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   8767` uses the Node hub. If the hub is down, the page falls back to a
   same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
   emits it once (the sender's local echo is the same event path as peer delivery).
-  Peer messages are also typed into the guest at an idle command prompt as
-  `relayrecv <from> <hex>`, which prints `[relay] <from>: <text>` with only
-  printable bytes (anything else becomes `?`), so a bare-metal user can follow
-  chat without the page panel. The page arms a quiet `server seat` on connect
-  (and `server unseat` on leave) so `relayrecv` is refused when not on a server.
+  Peer messages are also typed into the guest at an idle command prompt, so a
+  bare-metal user can follow chat without the page panel. The body goes as hex
+  in parts of at most 48 bytes so each typed line fits the guest's 128-character
+  line: `relayrecv + <from> <hex>` for every part but the last, then
+  `relayrecv <from> <hex>`, which prints the whole message (up to the relay's
+  512 bytes) as `[relay] <from>: <text>`, broken between words at 80 columns
+  with a two-space indent on later lines. Only printable bytes are shown
+  (anything else becomes `?`). A part from a different sender, a refused part,
+  or leaving the server drops an unfinished message. The page arms a quiet
+  `server seat` on connect (and `server unseat` on leave) so `relayrecv` is
+  refused when not on a server.
+- What the page types for itself (`relayrecv`, `filerecv`, `server seat`,
+  `server unseat`) and the control lines it reads back (`SERVER_RELAY msg` /
+  `announce` and the `SERVER_FILE` hex line) stay on serial only: the VGA
+  console never shows them, so the screen holds what the person typed and the
+  shell's answers. A sender sees their own `server msg` line once, as typed,
+  and peers see it as `[relay]` output. `relayrecv` and `filerecv` are for the
+  page: a person typing them sees no echo. The WebAssembly shell's terminal is
+  its serial stream, so it still shows these lines.
 - `server file -user <name> <path>` sends a ramfs file to another user on the
   server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
   as one frame of the lab opcode `0x72` (`who_len`, `who`, `name_len`, `name`, a

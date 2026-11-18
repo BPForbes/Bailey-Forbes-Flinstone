@@ -77,6 +77,17 @@ assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv 
   assert.strictEqual(line, "relayrecv Alice " + bytesToHex(new TextEncoder().encode("Hello from A")) + "\n");
   assert(line.length < 128);
   assert.strictEqual(relayRecvLine(""), "");
+  assert.strictEqual(relayRecvLine("Alice: "), "");
+  const longBody = "x".repeat(100) + " end";
+  const parts = relayRecvLine(`Alice: ${longBody}`).trimEnd().split("\n");
+  assert.strictEqual(parts.length, 3, "a long message is typed in guest-sized parts");
+  assert(parts.slice(0, -1).every(p => p.startsWith("relayrecv + Alice ")), "every part but the last is marked +");
+  assert(parts[2].startsWith("relayrecv Alice "), "the last part prints the message");
+  assert(parts.every(p => p.length < 128), "each part fits the guest's 128-character line");
+  assert.strictEqual(parts.map(p => p.split(" ").pop()).join(""), bytesToHex(new TextEncoder().encode(longBody)),
+                     "the parts carry the whole body");
+  assert(relayRecvLine("Mallory: hi\nthere").startsWith("relayrecv Mallory "),
+         "a body with a line break keeps its sender");
   assert.strictEqual(relayRecvLine("bad name: hi").startsWith("relayrecv peer "), true,
                      "an unsafe display name becomes peer with the full line as the body");
   assert.strictEqual(parseGuestLine("[relay] Alice: Hello from A"), null,

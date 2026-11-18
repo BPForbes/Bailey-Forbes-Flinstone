@@ -170,20 +170,21 @@ static void emit(const char *s)
  * `prefix` so a forged SWITCHUSER / SERVER_* / LAB_NETMODE line can never match
  * parseGuestLine (#427). Chat uses the same path behind "[relay] " (#426).
  */
+static void emit_safe_byte(unsigned char c)
+{
+    char one[2];
+    one[0] = (char)(c < 0x20u || c > 0x7Eu ? '?' : c);
+    one[1] = 0;
+    emit(one);
+}
+
 static void emit_safe_text(const char *prefix, const char *data)
 {
     const char *p = data ? data : "";
     for (;;) {
         emit(prefix);
-        while (*p && *p != '\n' && *p != '\r') {
-            unsigned char c = (unsigned char)*p++;
-            char one[2];
-            if (c < 0x20u || c > 0x7Eu)
-                c = '?';
-            one[0] = (char)c;
-            one[1] = 0;
-            emit(one);
-        }
+        while (*p && *p != '\n' && *p != '\r')
+            emit_safe_byte((unsigned char)*p++);
         emit("\r\n");
         if (*p == '\r')
             ++p;
@@ -1000,16 +1001,16 @@ static int server_file_send(int session, const char **cursor)
         emit("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
         return 1;
     }
-    emit("SERVER_FILE ");
-    emit(user);
-    emit(" ");
-    emit(base);
-    emit(" ");
+    fl_fs_serial_puts("SERVER_FILE ");
+    fl_fs_serial_puts(user);
+    fl_fs_serial_puts(" ");
+    fl_fs_serial_puts(base);
+    fl_fs_serial_puts(" ");
     for (i = 0; data[i]; ++i) {
         char pair[3] = { digits[((unsigned char)data[i]) >> 4], digits[((unsigned char)data[i]) & 15], 0 };
-        emit(pair);
+        fl_fs_serial_puts(pair);
     }
-    emit("\r\n");
+    fl_fs_serial_puts("\r\n");
     emit("server file: sending ");
     emit(base);
     emit(" to ");
@@ -1029,16 +1030,65 @@ static struct {
 } s_file_rx[FL_FS_MAX_SESSIONS];
 
 /*
- * relayrecv <from> <hex>: the page types this for each inbound relay chat line
- * (#426). Requires an armed server seat. Prints one sanitized "[relay] from: text"
- * line so the body can never forge a lab control token (#427).
+ * relayrecv [+] <from> <hex>: the page types one or more of these for each
+ * inbound relay chat line (#426); see tools/browser-lab/README.md.
  */
+#define RELAY_BODY_MAX 512u
+#define RELAY_COLS 80u
+#define RELAY_INDENT "  "
+static char s_relay_from[FILE_USER_MAX];
+static char s_relay_body[RELAY_BODY_MAX];
+static unsigned s_relay_len;
+
+static void relay_reset(void)
+{
+    s_relay_from[0] = 0;
+    s_relay_len = 0;
+}
+
+static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
+{
+    unsigned col = 10u + str_len(from);
+    unsigned i = 0;
+    emit("[relay] ");
+    emit(from);
+    emit(": ");
+    while (i < n) {
+        unsigned w = 0;
+        if (body[i] == ' ') {
+            if (col + 1u > RELAY_COLS) {
+                emit("\r\n" RELAY_INDENT);
+                col = sizeof(RELAY_INDENT) - 1u;
+            } else {
+                emit(" ");
+                ++col;
+            }
+            ++i;
+            continue;
+        }
+        while (i + w < n && body[i + w] != ' ')
+            ++w;
+        if (col + w > RELAY_COLS && col > sizeof(RELAY_INDENT) - 1u) {
+            emit("\r\n" RELAY_INDENT);
+            col = sizeof(RELAY_INDENT) - 1u;
+        }
+        for (; w; --w, ++i) {
+            if (col >= RELAY_COLS) {
+                emit("\r\n" RELAY_INDENT);
+                col = sizeof(RELAY_INDENT) - 1u;
+            }
+            emit_safe_byte((unsigned char)body[i]);
+            ++col;
+        }
+    }
+    emit("\r\n");
+}
+
 static int run_relayrecv(int session, const char *verb, const char **cursor)
 {
     char from[FILE_USER_MAX];
     char hex[128];
-    char body[64];
-    unsigned n = 0;
+    int part = 0;
     unsigned i;
     (void)session;
     if (!str_eq(verb, "relayrecv"))
@@ -1050,46 +1100,48 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
     }
 #endif
     if (!s_server_seat) {
+        relay_reset();
         emit("relayrecv: refused (not on a server)\r\n");
         return 1;
     }
-    if (!take_word(cursor, from, sizeof(from)) || !file_user_ok(from) ||
-        !take_word(cursor, hex, sizeof(hex))) {
-        emit("usage: relayrecv <from> <hex>\r\n");
+    if (!take_word(cursor, from, sizeof(from))) {
+        emit("usage: relayrecv [+] <from> <hex>\r\n");
+        return 1;
+    }
+    if (str_eq(from, "+")) {
+        part = 1;
+        if (!take_word(cursor, from, sizeof(from))) {
+            emit("usage: relayrecv [+] <from> <hex>\r\n");
+            return 1;
+        }
+    }
+    if (!file_user_ok(from) || !take_word(cursor, hex, sizeof(hex))) {
+        emit("usage: relayrecv [+] <from> <hex>\r\n");
         return 1;
     }
     skip_spaces(cursor);
+    if (s_relay_len && !str_eq(from, s_relay_from))
+        relay_reset();
     if (**cursor) {
+        relay_reset();
         emit("relayrecv: refused (bad or oversized content)\r\n");
         return 1;
     }
     for (i = 0; hex[i]; i += 2) {
         int hi = hex_val(hex[i]);
         int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
-        if (hi < 0 || lo < 0 || n + 1 >= sizeof(body)) {
+        if (hi < 0 || lo < 0 || s_relay_len >= RELAY_BODY_MAX) {
+            relay_reset();
             emit("relayrecv: refused (bad or oversized content)\r\n");
             return 1;
         }
-        body[n++] = (char)((hi << 4) | lo);
+        s_relay_body[s_relay_len++] = (char)((hi << 4) | lo);
     }
-    body[n] = 0;
-    emit("[relay] ");
-    emit(from);
-    emit(": ");
-    /* Body only (from is already validated); still map control bytes to '?'. */
-    {
-        unsigned j;
-        for (j = 0; j < n; ++j) {
-            unsigned char c = (unsigned char)body[j];
-            char one[2];
-            if (c < 0x20u || c > 0x7Eu)
-                c = '?';
-            one[0] = (char)c;
-            one[1] = 0;
-            emit(one);
-        }
-    }
-    emit("\r\n");
+    str_copy(s_relay_from, from, sizeof(s_relay_from));
+    if (part)
+        return 1;
+    emit_relay_wrapped(s_relay_from, s_relay_body, s_relay_len);
+    relay_reset();
     return 1;
 }
 
@@ -1279,13 +1331,26 @@ static int run_server(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "unseat")) {
         s_server_seat = 0;
+        relay_reset();
         return 1;
     }
     if (str_eq(sub, "host") || str_eq(sub, "join"))
         s_server_seat = 1;
-    else if (str_eq(sub, "leave") || str_eq(sub, "kill"))
+    else if (str_eq(sub, "leave") || str_eq(sub, "kill")) {
         s_server_seat = 0;
+        relay_reset();
+    }
     skip_spaces(cursor);
+    if (str_eq(sub, "msg") || str_eq(sub, "announce")) {
+        fl_fs_serial_puts("SERVER_RELAY ");
+        fl_fs_serial_puts(sub);
+        if (**cursor) {
+            fl_fs_serial_puts(" ");
+            fl_fs_serial_puts(*cursor);
+        }
+        fl_fs_serial_puts("\r\n");
+        return 1;
+    }
     emit("SERVER_RELAY ");
     emit(sub);
     if (**cursor) {
@@ -2306,6 +2371,7 @@ void fl_fs_commands_init(void)
     s_audit_n = 0;
     s_loc_n = 0;
     s_server_seat = 0;
+    relay_reset();
 #ifdef FL_SECFEAT
     s_lab_netmode = 0;
     s_nl_pod[0] = 0;
