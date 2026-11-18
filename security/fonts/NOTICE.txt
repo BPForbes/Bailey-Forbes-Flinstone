@@ -1,0 +1,8 @@
+Self-hosted webfonts for the browser lab (COEP require-corp cannot load
+typical CDN fonts). All three families are SIL Open Font License 1.1.
+
+- Inter (latin variable): https://github.com/rsms/inter
+- JetBrains Mono (latin variable): https://github.com/JetBrains/JetBrainsMono
+- Symbols Nerd Font (Powerline/status glyphs only): https://github.com/ryanoasis/nerd-fonts
+  Subset built with fontTools from NerdFontsSymbolsOnly Regular, covering
+  U+E0A0–U+E0DF plus a few status icons (user, terminal, lock).

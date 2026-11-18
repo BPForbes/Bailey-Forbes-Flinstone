@@ -1,0 +1,6 @@
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: cross-origin
+  Content-Security-Policy: frame-ancestors https://bailey-forbes.com
+  Cache-Control: no-store

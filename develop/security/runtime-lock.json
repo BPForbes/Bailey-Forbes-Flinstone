@@ -1,0 +1,11 @@
+{
+  "runtime": "ktock/qemu-wasm",
+  "distributionCommit": "b7c549b5e6f4c376f76483a03e983214421434ad",
+  "baseUrl": "https://raw.githubusercontent.com/ktock/qemu-wasm-demo-images/b7c549b5e6f4c376f76483a03e983214421434ad/alpine-x86_64/",
+  "files": {
+    "load-rom.data": "15de099e1363ceb13a31b9d11836337bab974f9460836449330b20c0534d06c9",
+    "out.js": "dab94140dc2ea847181ba47ae4cbd759728e551d8fd9ba9de409711ed25eddcc",
+    "qemu-system-x86_64.wasm": "f53107a35029d676aa551cd00d042f4f65af39a89bf72464494321fafdf54191",
+    "qemu-system-x86_64.worker.js": "8efab02a9cb5ee63ced22e9853bce74cbb895d15a5fb3d5139fef855c50f62ea"
+  }
+}
