@@ -1,9 +1,0 @@
-MAJOR_VERSION=5
-STANDARD_VERSION=3
-RELEASE_VERSION=0
-PRERELEASE=1
-DEV_VERSION=13
-RERELEASE=1
-DESCRIPTION=make baremetal builds a bootable kernel (#423). It used to produce the hosted Linux program (BPForbes_Flinstone_Shell, dynamically linked against libc, SQLite and OpenSSL, compiled with -DDRIVERS_BAREMETAL=1 and -no-pie), which has no boot loader and no Multiboot or PVH header, so QEMU -kernel refused it. The target now builds dist/flintstone.img, the MBR, long-mode loader and freestanding kernel that make browser-kernel already builds, by sharing that path. The hosted compile check of the bare-metal driver paths moves to make baremetal-drivers (same flags as before), and AGENTS.md's validation line, the README, docs/ARCH.md, docs/P3_NETWORKING.md, docs/ROADMAP.md, docs/browser-kernel-lab.md and scripts/package_browser_kernel_artifact.sh name the right target.
-
-RELEASE_DATE=2026-11-17
