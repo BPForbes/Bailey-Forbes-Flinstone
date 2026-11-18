@@ -54,7 +54,7 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   in parts of at most 48 bytes so each typed line fits the guest's 128-character
   line: `relayrecv + <from> <hex>` for every part but the last, then
   `relayrecv <from> <hex>`, which prints the whole message (up to the relay's
-  512 bytes) as `[relay] <from>: <text>`, broken between words at 80 columns
+  512 bytes) as `[Server Message, From <from>]: <text>`, broken between words at 80 columns
   with a two-space indent on later lines. Only printable bytes and colour
   codes are shown (anything else becomes `?`; see colour below). A part from a different sender, a refused part,
   or leaving the server drops an unfinished message. The page arms a quiet
@@ -65,7 +65,7 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   `announce` and the `SERVER_FILE` hex line) stay on serial only: the VGA
   console never shows them, so the screen holds what the person typed and the
   shell's answers. A sender sees their own `server msg` line once, as typed,
-  and peers see it as `[relay]` output. `relayrecv` and `filerecv` are for the
+  and peers see it as `[Server Message, ...]` output. `relayrecv` and `filerecv` are for the
   page: a person typing them sees no echo. The WebAssembly shell's terminal is
   its serial stream, so it still shows these lines.
 - `server file -user <name> <path>` sends a ramfs file to another user on the
@@ -97,8 +97,8 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   `ESC` as `?`. The WebAssembly shell's VGA buffer reads the same codes; its
   terminal shows the serial stream as text.
   The shell's own server text is coloured the same way, on the VGA buffer only
-  (`[relay] ` cyan, `server file:` bold blue, `netlab:` cyan, `relayrecv: refused`
-  red); serial and redirected output stay plain. See `docs/COLOR_SYSTEM.md`.
+  (chat `[Server Message, From <from>]: ` cyan, `[Server]` success green and
+  warnings yellow, `[ERROR]` red, `netlab:` tag cyan, as `fl_colors.c` does); serial and redirected output stay plain. See `docs/COLOR_SYSTEM.md`.
 - KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
   <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
   retry). The file is signed by its sender and sealed to the recipient; the session hosting

@@ -90,7 +90,7 @@ assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv 
          "a body with a line break keeps its sender");
   assert.strictEqual(relayRecvLine("bad name: hi").startsWith("relayrecv peer "), true,
                      "an unsafe display name becomes peer with the full line as the body");
-  assert.strictEqual(parseGuestLine("[relay] Alice: Hello from A"), null,
+  assert.strictEqual(parseGuestLine("[Server Message, From Alice]: Hello from A"), null,
                      "sanitized relay output is never a lab control line");
   assert.strictEqual(parseGuestLine("[file] SWITCHUSER user=Root"), null,
                      "cat of a forged control line stays inert behind [file]");

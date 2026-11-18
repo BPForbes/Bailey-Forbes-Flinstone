@@ -233,8 +233,10 @@ static void emit_sgr(const char *s, unsigned len)
  * coloured.
  */
 #define C_RED "\x1b[31m"
-#define C_BLUE "\x1b[1;34m"
-#define C_CYAN "\x1b[36m"
+#define C_GRN "\x1b[32m"
+#define C_YEL "\x1b[33m"
+#define C_BLU "\x1b[34m"
+#define C_CYN "\x1b[36m"
 
 static void vga_sgr(const char *seq)
 {
@@ -242,21 +244,25 @@ static void vga_sgr(const char *seq)
         fl_fs_vga_putc(*seq++);
 }
 
-static void emit_in(const char *sgr, const char *s)
+/* The hosted helpers' tags (userland/shell/fl_colors.c): the whole line in one colour,
+ * reset at the end. Same colour per role as KGRN / KYEL / KRED / KCYN there. */
+static void emit_line(const char *sgr, const char *tag, const char *s)
 {
     vga_sgr(sgr);
+    emit(tag);
     emit(s);
     vga_sgr(SGR_RESET);
 }
-
-/* Tag coloured, rest of the line default. */
-static void emit_tagged(const char *sgr, const char *tag, const char *rest)
+static void srv_warn(const char *s) { emit_line(C_YEL, "[Server] ", s); }     /* fl_color_warn */
+static void srv_error(const char *s) { emit_line(C_RED, "[ERROR] ", s); }     /* fl_color_error */
+/* netlab is image-only (SECFEAT builds); no hosted counterpart, tag only. */
+__attribute__((unused)) static void emit_netlab(const char *rest)
 {
-    emit_in(sgr, tag);
+    vga_sgr(C_CYN);
+    emit("netlab: ");
+    vga_sgr(SGR_RESET);
     emit(rest);
 }
-#define emit_netlab(rest) emit_tagged(C_CYAN, "netlab: ", rest)
-#define emit_srvfile(rest) emit_tagged(C_BLUE, "server file: ", rest)
 
 static void emit_safe_text(const char *prefix, const char *data)
 {
@@ -923,10 +929,10 @@ static int run_net(const char *verb, const char **cursor)
  * need a store that holds .kqtf containers (the ramfs holds 160 bytes a file) and a libc subset. */
 #ifdef FL_KQ_FILES
 #define FILE_KQ_ELSEWHERE \
-    "server file: this image keeps KeyQuorum-signed histories (server file sign|log|verify <path>); co-signed delivery runs in the lab's WebAssembly shell\r\n"
+    "this image keeps KeyQuorum-signed histories (server file sign|log|verify <path>); co-signed delivery runs in the lab's WebAssembly shell\r\n"
 #else
 #define FILE_KQ_ELSEWHERE \
-    "server file: KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
+    "KeyQuorum is linked in this image, but co-signed delivery still runs in the lab's WebAssembly shell\r\n"
 #endif
 #define FILE_USER_MAX 16
 
@@ -986,7 +992,7 @@ static int server_file_send(int session, const char **cursor)
     if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
         emit(str_eq(word, "accept") ? "SERVER_FILE_ACCEPT\r\n" : "SERVER_FILE_DECLINE\r\n");
         if (str_eq(word, "decline"))
-            emit_srvfile("files waiting for you were declined\r\n");
+            srv_warn("files waiting for you were declined\r\n");
         return 1;
     }
     if (more && (str_eq(word, "permit") || str_eq(word, "log"))) {
@@ -1005,11 +1011,14 @@ static int server_file_send(int session, const char **cursor)
             (void)fl_fs_kq_file_log(session, target);
             return 1;
         }
-        emit(str_eq(word, "log") ? "usage: server file log <path>\r\n" : FILE_KQ_ELSEWHERE);
+        if (str_eq(word, "log"))
+            emit("usage: server file log <path>\r\n");
+        else
+            srv_warn(FILE_KQ_ELSEWHERE);
         return 1;
 #else
         (void)target;
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
         return 1;
 #endif
     }
@@ -1035,7 +1044,7 @@ static int server_file_send(int session, const char **cursor)
         emit("usage: server file open <delivery>\r\n");
 #else
         (void)has;
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
 #endif
         return 1;
     }
@@ -1066,14 +1075,14 @@ static int server_file_send(int session, const char **cursor)
         return 1;
     }
     if (!file_user_ok(user)) {
-        emit_srvfile("not a user name\r\n");
+        srv_error("server file: not a user name\r\n");
         return 1;
     }
     if (kq) {
 #ifdef FL_LAB_KQ
         return fl_lab_kq_send(session, path, user, permitted);
 #else
-        emit(FILE_KQ_ELSEWHERE);
+        srv_warn(FILE_KQ_ELSEWHERE);
         return 1;
 #endif
     }
@@ -1087,7 +1096,7 @@ static int server_file_send(int session, const char **cursor)
         if (path[i] == '/')
             base = path + i + 1;
     if (!file_name_ok(base)) {
-        emit_srvfile("the file name must be letters, digits, '.', '_' or '-'\r\n");
+        srv_error("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
         return 1;
     }
     fl_fs_serial_puts("SERVER_FILE ");
@@ -1100,13 +1109,15 @@ static int server_file_send(int session, const char **cursor)
         fl_fs_serial_puts(pair);
     }
     fl_fs_serial_puts("\r\n");
-    emit_srvfile("sending ");
+    vga_sgr(C_GRN); /* fl_color_success */
+    emit("[Server] sending ");
     emit(base);
     emit(" to ");
     emit(user);
     emit(" (");
     emit_uint(i);
     emit(" bytes)\r\n");
+    vga_sgr(SGR_RESET);
     return 1;
 }
 
@@ -1135,14 +1146,17 @@ static void relay_reset(void)
     s_relay_len = 0;
 }
 
+/* fl_color_msg_from_all(): "[Server Message, From <sender>]: <text>", cyan. */
+#define RELAY_TAG "[Server Message, From "
 static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
 {
-    unsigned col = 10u + str_len(from);
+    unsigned col = sizeof(RELAY_TAG) - 1u + str_len(from) + 3u;
     unsigned i = 0;
     int coloured = 0;
-    emit_in(C_CYAN, "[relay] ");
+    vga_sgr(C_CYN);
+    emit(RELAY_TAG);
     emit(from);
-    emit(": ");
+    emit("]: ");
     while (i < n) {
         unsigned j, vis = 0;
         if (body[i] == ' ') {
@@ -1182,6 +1196,7 @@ static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
         }
     }
     emit(coloured ? SGR_RESET "\r\n" : "\r\n");
+    vga_sgr(SGR_RESET);
 }
 
 static int run_relayrecv(int session, const char *verb, const char **cursor)
@@ -1195,13 +1210,13 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         return 0;
 #ifdef FL_SECFEAT
     if (s_lab_netmode) {
-        emit_in(C_RED, "relayrecv: refused (lab isolated)\r\n");
+        srv_error("relayrecv: refused (lab isolated)\r\n");
         return 1;
     }
 #endif
     if (!s_server_seat) {
         relay_reset();
-        emit_in(C_RED, "relayrecv: refused (not on a server)\r\n");
+        srv_error("relayrecv: refused (not on a server)\r\n");
         return 1;
     }
     if (!take_word(cursor, from, sizeof(from))) {
@@ -1224,7 +1239,7 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         relay_reset();
     if (**cursor) {
         relay_reset();
-        emit_in(C_RED, "relayrecv: refused (bad or oversized content)\r\n");
+        srv_error("relayrecv: refused (bad or oversized content)\r\n");
         return 1;
     }
     for (i = 0; hex[i]; i += 2) {
@@ -1232,7 +1247,7 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
         if (hi < 0 || lo < 0 || s_relay_len >= RELAY_BODY_MAX) {
             relay_reset();
-            emit_in(C_RED, "relayrecv: refused (bad or oversized content)\r\n");
+            srv_error("relayrecv: refused (bad or oversized content)\r\n");
             return 1;
         }
         s_relay_body[s_relay_len++] = (char)((hi << 4) | lo);
@@ -1258,7 +1273,7 @@ static int run_filerecv(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(sub, "none")) {
-        emit_srvfile("no files waiting\r\n");
+        srv_warn("no files waiting\r\n");
         return 1;
     }
     if (str_eq(sub, "begin")) {

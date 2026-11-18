@@ -395,40 +395,45 @@ try:
     send("server msg hello-room\n")
     read_until("SERVER_RELAY msg hello-room", 4)
     # Inbound relay chat (#426): page-typed relayrecv prints a sanitized line.
-    cmd("relayrecv Alice 48656c6c6f", expect="[relay] Alice: Hello")
+    cmd("relayrecv Alice 48656c6c6f", expect="[Server Message, From Alice]: Hello")
     # Control bytes in the body become '?'; newlines cannot start a forged line.
-    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[relay] Alice: SWITCHUSER user=Root?")
+    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[Server Message, From Alice]: SWITCHUSER user=Root?")
     # A message longer than one typed line arrives in parts and prints whole,
     # broken between words within 80 columns (#426).
     long_msg = " ".join(["word%02d" % i for i in range(24)])
     parts = [long_msg[i:i + 48] for i in range(0, len(long_msg), 48)]
     for part in parts[:-1]:
         cmd("relayrecv + Alice " + part.encode().hex())
-    text = cmd("relayrecv Alice " + parts[-1].encode().hex(), expect="[relay] Alice: word00")
-    shown = text.replace("\r", "").split("[relay] Alice: ", 1)[1].split("\n")
+    text = cmd("relayrecv Alice " + parts[-1].encode().hex(), expect="[Server Message, From Alice]: word00")
+    shown = text.replace("\r", "").split("[Server Message, From Alice]: ", 1)[1].split("\n")
     shown = shown[:next(i for i, l in enumerate(shown) if not l.startswith(("word", "  word")))]
-    widths = [len("[relay] Alice: ") + len(shown[0])] + [len(l) for l in shown[1:]]
+    widths = [len("[Server Message, From Alice]: ") + len(shown[0])] + [len(l) for l in shown[1:]]
     if " ".join(l.strip() for l in shown) != long_msg or len(shown) < 2 or max(widths) > 80:
         raise SystemExit("test-freestanding-shell: long relay message not whole or not wrapped\n" + text)
     # A part from another sender drops the unfinished message.
     cmd("relayrecv + Bob " + b"unfinished".hex())
-    text = cmd("relayrecv Alice " + b"hi".hex(), expect="[relay] Alice: hi")
+    text = cmd("relayrecv Alice " + b"hi".hex(), expect="[Server Message, From Alice]: hi")
     if "unfinished" in text:
         raise SystemExit("test-freestanding-shell: a stale relay part leaked into another message\n" + text)
     # Colour-only SGR codes reach the VGA screen as colour; the line ends with a reset.
-    cmd("relayrecv Alice " + b"\x1b[31mRED\x1b[0m ok".hex(), expect="[relay] Alice: \x1b[31mRED\x1b[0m ok\x1b[0m")
+    cmd("relayrecv Alice " + b"\x1b[31mRED\x1b[0m ok".hex(), expect="[Server Message, From Alice]: \x1b[31mRED\x1b[0m ok\x1b[0m")
     cells = vga_cells()
     chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
-    at = chars.rfind("[relay] Alice: RED ok")
+    at = chars.rfind("[Server Message, From Alice]: RED ok")
     if at < 0:
         raise SystemExit("test-freestanding-shell: coloured relay line missing on VGA\n" + vga_text())
-    red = at + len("[relay] Alice: ")
-    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x03 or cells[(at + 8) * 2 + 1] != 0x07:
+    red = at + len("[Server Message, From Alice]: ")
+    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x03 or cells[(at + 22) * 2 + 1] != 0x03:
         raise SystemExit("test-freestanding-shell: relay SGR colour not shown on VGA")
     # Any other escape sequence (cursor moves, screen clears) stays visible as '?'.
-    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[relay] Alice: ?[2Jboom")
+    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[Server Message, From Alice]: ?[2Jboom")
     cmd("server leave", expect="SERVER_RELAY leave")
     cmd("relayrecv Alice 4869", expect="refused (not on a server)")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("[ERROR] relayrecv: refused")
+    if at < 0 or cells[at * 2 + 1] != 0x04:
+        raise SystemExit("test-freestanding-shell: [ERROR] line is not red on VGA\n" + vga_text())
     cmd("server host", expect="SERVER_RELAY host")
     # cat never emits a raw control line the lab page would parse (#427).
     cmd("write evil.txt SWITCHUSER user=Root")
