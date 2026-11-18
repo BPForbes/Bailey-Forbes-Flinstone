@@ -92,7 +92,7 @@ The hosted helpers send the plain codes (no bold), so on VGA blue is dark blue (
 
 A sequence holds at most 8 numbers (each stops growing at 1000); one with more, or a malformed one, is ignored. The untrusted-text filter below is stricter: at most 3 digits per number. Backspace erases with the current attribute.
 
-Untrusted text (relay chat, and `cat` / `type` output) goes through `emit_safe_byte` and `safe_sgr_len` in `kernel/freestanding/x86_64/commands.c`: a sequence made only of the colour codes above is kept, and every other escape sequence has its `ESC` shown as `?`. A message or file line that used colour ends with `ESC[0m` (`SGR_RESET`), so a sender cannot recolour the receiver's prompt. Details are in `tools/browser-lab/README.md`.
+Untrusted text (relay chat, host announcements, and `cat` / `type` output) goes through `emit_text_unit` and `safe_sgr_len` in `kernel/freestanding/x86_64/commands.c`: a sequence made only of the colour codes above is kept, every other escape sequence and control byte shows as caret text (`^[[2J`, `^G`), valid UTF-8 shows as its code page 437 glyph on VGA, and a byte that is not valid UTF-8 shows as `\xNN`. A message or file line that used colour ends with `ESC[0m` (`SGR_RESET`), so a sender cannot recolour the receiver's prompt, and a sender's code that resets the foreground (0, 39) brings back the receiver's chat cyan or announcement blue. Relayed host announcements print as `[Server Announcement]: ` in bright blue (SGR 94, attribute 0x09) on the VGA screen, since VGA blue (0x01) is hard to read on black. Details are in `tools/browser-lab/README.md`.
 
 ## 5. Files
 
@@ -104,7 +104,7 @@ Untrusted text (relay chat, and `cat` / `type` output) goes through `emit_safe_b
 | SGR parser | `kernel/drivers/freestanding_x86_64/vga_sgr.h` | the ANSI to VGA attribute conversion (section 4) |
 | Freestanding VGA | `kernel/drivers/freestanding_x86_64/vga.c`, `vga.h` | VGA text at `0xB8000`; `fl_fs_vga_putc` feeds the parser |
 | WebAssembly VGA buffer | `tools/browser-lab/wasm/platform_wasm.c` | the same parser over its own text buffer |
-| Untrusted-text filter | `kernel/freestanding/x86_64/commands.c` | keeps colour-only sequences, shows the rest as `?` |
+| Untrusted-text filter | `kernel/freestanding/x86_64/commands.c` | keeps colour-only sequences, shows other codes as caret text and UTF-8 as code page 437 |
 | Embedded x86 VM | `VM/devices/vm_sdl.c` | the 16-color palette; draws foreground `attr & 0x0F` on background `attr >> 4` |
 | VM memory and fonts | `VM/devices/vm_mem.h` (`GUEST_VGA_BASE 0xb8000`), `VM/devices/vm_font.[ch]`, `VM/devices/vm_display.c` | guest VGA text location, glyphs, text refresh (no color handling in `vm_display.c`) |
 | Tests | `tests/test_fs_vga_wrap.c`, `scripts/test_freestanding_shell.py` | VGA wrapping and the SGR cases |

@@ -111,7 +111,8 @@ static int has_prefix(const char *s, unsigned len, const char *p)
 
 static int page_line_quiet(const char *line, unsigned len)
 {
-    return has_prefix(line, len, "relayrecv ") || has_prefix(line, len, "filerecv ");
+    return has_prefix(line, len, "relayrecv ") || has_prefix(line, len, "relayannounce ") ||
+           has_prefix(line, len, "filerecv ");
 }
 
 static int page_line(const char *line, unsigned len)

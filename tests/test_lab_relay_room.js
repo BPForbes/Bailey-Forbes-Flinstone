@@ -43,6 +43,16 @@ assert.strictEqual(broadcasts.length, 1);
 assert.strictEqual(payloadText(broadcasts[0].payload), "alice: hello from alice");
 assert.strictEqual(takeOpcode(aliceSock, OP.FL_NET_SESSION_OP_MSG_BROADCAST).length, 0);
 
+// The host's announcement reaches everyone else as SERVER_ANNOUNCE; a non-host's is refused.
+alice.onMessage(encodeFrame(OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE, "maintenance at 5"));
+const announced = takeOpcode(bobSock, OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE);
+assert.strictEqual(announced.length, 1);
+assert.strictEqual(payloadText(announced[0].payload), "maintenance at 5");
+assert.strictEqual(takeOpcode(aliceSock, OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE).length, 0, "the host does not get its own back");
+bob.onMessage(encodeFrame(OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE, "fake"));
+assert.strictEqual(takeOpcode(aliceSock, OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE).length, 0, "only the host announces");
+assert.strictEqual(takeOpcode(bobSock, OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE).length, 0);
+
 // Files go only to the named user's sessions, never to everyone.
 const carolSock = new MockSocket();
 const carol = attachSocket(room, carolSock);

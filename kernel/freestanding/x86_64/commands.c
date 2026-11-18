@@ -165,18 +165,120 @@ static void emit(const char *s)
 }
 
 /*
- * Print untrusted text the lab page may parse on serial: only bytes 0x20-0x7E
- * and colour-only SGR sequences, everything else as '?'. Each logical line
- * (split on CR/LF) is emitted behind `prefix` so a forged SWITCHUSER /
- * SERVER_* / LAB_NETMODE line can never match parseGuestLine (#427). Chat uses
- * the same path behind "[relay] " (#426).
+ * Untrusted text (relay chat, announcements, `cat` of a received file) is
+ * printed one unit at a time so nothing in it can act on the screen or forge
+ * a line the lab page parses on serial (#426, #427):
+ *  - printable ASCII as is, a tab as one space;
+ *  - valid UTF-8: the original bytes on serial and in `> file`, the code
+ *    page 437 glyph on the VGA screen ('?' only when the font has none);
+ *  - other control bytes as caret text (ESC [ 2 J -> "^[[2J", BEL -> "^G",
+ *    DEL -> "^?"), and a byte that is not valid UTF-8 as "\xNN";
+ *  - colour-only SGR sequences pass through (see safe_sgr_len).
+ * Callers turn CR, LF and CRLF into a new line behind their own prefix or
+ * indent, so a forged SWITCHUSER / SERVER_* / LAB_NETMODE line never starts
+ * a serial line.
  */
-static void emit_safe_byte(unsigned char c)
+static const uint16_t s_cp437_high[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+    0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+    0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+    0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+    0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+    0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
+};
+
+static unsigned char cp437_glyph(unsigned cp)
 {
-    char one[2];
-    one[0] = (char)(c < 0x20u || c > 0x7Eu ? '?' : c);
-    one[1] = 0;
-    emit(one);
+    unsigned i;
+    for (i = 0; i < 128u; ++i) {
+        if (s_cp437_high[i] == cp)
+            return (unsigned char)(0x80u + i);
+    }
+    return (unsigned char)'?';
+}
+
+/* Length of one valid UTF-8 sequence (2-4 bytes) at s and its code point, or 0. */
+static unsigned utf8_seq(const char *s, unsigned n, unsigned *cp_out)
+{
+    const unsigned char *u = (const unsigned char *)s;
+    unsigned len, cp, i, min;
+    if (u[0] >= 0xC2u && u[0] <= 0xDFu) {
+        len = 2; cp = u[0] & 0x1Fu; min = 0x80u;
+    } else if (u[0] >= 0xE0u && u[0] <= 0xEFu) {
+        len = 3; cp = u[0] & 0x0Fu; min = 0x800u;
+    } else if (u[0] >= 0xF0u && u[0] <= 0xF4u) {
+        len = 4; cp = u[0] & 0x07u; min = 0x10000u;
+    } else {
+        return 0;
+    }
+    if (n < len)
+        return 0;
+    for (i = 1; i < len; ++i) {
+        if ((u[i] & 0xC0u) != 0x80u)
+            return 0;
+        cp = (cp << 6) | (u[i] & 0x3Fu);
+    }
+    if (cp < min || cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu))
+        return 0;
+    *cp_out = cp;
+    return len;
+}
+
+/*
+ * One unit of untrusted text at s (n bytes left, never CR or LF): prints it
+ * when draw is set and returns the bytes it used; *cols gets its width.
+ */
+static unsigned emit_text_unit(const char *s, unsigned n, int draw, unsigned *cols)
+{
+    static const char hexd[] = "0123456789ABCDEF";
+    unsigned char c = (unsigned char)s[0];
+    char out[5];
+    unsigned cp = 0, k;
+    if (c >= 0x20u && c <= 0x7Eu) {
+        out[0] = (char)c;
+        out[1] = 0;
+    } else if (c == '\t') {
+        out[0] = ' ';
+        out[1] = 0;
+    } else if (c < 0x20u || c == 0x7Fu) {
+        out[0] = '^';
+        out[1] = (char)(c ^ 0x40u);
+        out[2] = 0;
+    } else if ((k = utf8_seq(s, n, &cp)) != 0) {
+        *cols = 1;
+        if (draw) {
+            char raw[5];
+            unsigned i;
+            for (i = 0; i < k; ++i) {
+                raw[i] = s[i];
+                fl_fs_serial_putc(s[i]);
+            }
+            raw[k] = 0;
+            fl_fs_vga_putc((char)cp437_glyph(cp));
+            redir_append(raw);
+        }
+        return k;
+    } else {
+        out[0] = '\\';
+        out[1] = 'x';
+        out[2] = hexd[c >> 4];
+        out[3] = hexd[c & 15u];
+        out[4] = 0;
+    }
+    *cols = str_len(out);
+    if (draw)
+        emit(out);
+    return 1;
 }
 
 static int sgr_colour_param(unsigned p)
@@ -237,6 +339,8 @@ static void emit_sgr(const char *s, unsigned len)
 #define C_YEL "\x1b[33m"
 #define C_BLU "\x1b[34m"
 #define C_CYN "\x1b[36m"
+/* Announcements: bright blue, since VGA blue (attribute 0x01) is hard to read on black. */
+#define C_LBLU "\x1b[94m"
 
 static void vga_sgr(const char *seq)
 {
@@ -277,7 +381,8 @@ static void emit_safe_text(const char *prefix, const char *data)
                 p += k;
                 coloured = 1;
             } else {
-                emit_safe_byte((unsigned char)*p++);
+                unsigned cols;
+                p += emit_text_unit(p, str_len(p), 1, &cols);
             }
         }
         emit(coloured ? SGR_RESET "\r\n" : "\r\n");
@@ -1146,20 +1251,63 @@ static void relay_reset(void)
     s_relay_len = 0;
 }
 
-/* fl_color_msg_from_all(): "[Server Message, From <sender>]: <text>", cyan. */
-#define RELAY_TAG "[Server Message, From "
-static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
+/* 1 when an SGR sequence leaves the foreground at the default (0, 39 or an empty ESC[m). */
+static int sgr_ends_default_fg(const char *s, unsigned len)
 {
-    unsigned col = sizeof(RELAY_TAG) - 1u + str_len(from) + 3u;
+    unsigned i, p = 0;
+    int dflt = 0;
+    for (i = 2; i < len; ++i) {
+        char c = s[i];
+        if (c >= '0' && c <= '9') {
+            p = p * 10u + (unsigned)(c - '0');
+            continue;
+        }
+        if (p == 0 || p == 39)
+            dflt = 1;
+        else if ((p >= 30 && p <= 37) || (p >= 90 && p <= 97))
+            dflt = 0;
+        p = 0;
+    }
+    return dflt;
+}
+
+static int relay_break_byte(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+/*
+ * Relayed text on the VGA screen: tag and body in the role's colour, word
+ * wrapped at 80 columns with a two-space indent, and the sender's own line
+ * breaks kept as indented lines. A sender's colour codes show; when one sets
+ * the foreground back to the default, the role's colour comes back.
+ */
+#define RELAY_TAG "[Server Message, From "
+#define ANNOUNCE_TAG "[Server Announcement]: "
+static void emit_relay_text(const char *colour, const char *tag, const char *from,
+                            const char *body, unsigned n)
+{
+    unsigned col = str_len(tag) + (from ? str_len(from) + 3u : 0u);
     unsigned i = 0;
     int coloured = 0;
-    vga_sgr(C_CYN);
-    emit(RELAY_TAG);
-    emit(from);
-    emit("]: ");
+    vga_sgr(colour);
+    emit(tag);
+    if (from) {
+        emit(from);
+        emit("]: ");
+    }
     while (i < n) {
         unsigned j, vis = 0;
-        if (body[i] == ' ') {
+        if (body[i] == '\r' || body[i] == '\n') {
+            if (body[i] == '\r' && i + 1u < n && body[i + 1u] == '\n')
+                ++i;
+            if (++i >= n)
+                break; /* a trailing line break adds no empty line */
+            emit("\r\n" RELAY_INDENT);
+            col = sizeof(RELAY_INDENT) - 1u;
+            continue;
+        }
+        if (body[i] == ' ' || body[i] == '\t') {
             if (col + 1u > RELAY_COLS) {
                 emit("\r\n" RELAY_INDENT);
                 col = sizeof(RELAY_INDENT) - 1u;
@@ -1170,29 +1318,37 @@ static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
             ++i;
             continue;
         }
-        for (j = i; j < n && body[j] != ' ';) {
-            unsigned k = safe_sgr_len(body + j, n - j);
-            j += k ? k : 1u;
-            vis += k ? 0u : 1u;
+        for (j = i; j < n && !relay_break_byte(body[j]);) {
+            unsigned k = safe_sgr_len(body + j, n - j), w = 0;
+            if (k) {
+                j += k;
+                continue;
+            }
+            j += emit_text_unit(body + j, n - j, 0, &w);
+            vis += w;
         }
         if (col + vis > RELAY_COLS && col > sizeof(RELAY_INDENT) - 1u) {
             emit("\r\n" RELAY_INDENT);
             col = sizeof(RELAY_INDENT) - 1u;
         }
         while (i < j) {
-            unsigned k = safe_sgr_len(body + i, n - i);
+            unsigned k = safe_sgr_len(body + i, n - i), w = 0, used;
             if (k) {
                 emit_sgr(body + i, k);
+                if (sgr_ends_default_fg(body + i, k))
+                    vga_sgr(colour);
                 i += k;
                 coloured = 1;
                 continue;
             }
-            if (col >= RELAY_COLS) {
+            (void)emit_text_unit(body + i, n - i, 0, &w);
+            if (col + w > RELAY_COLS) {
                 emit("\r\n" RELAY_INDENT);
                 col = sizeof(RELAY_INDENT) - 1u;
             }
-            emit_safe_byte((unsigned char)body[i++]);
-            ++col;
+            used = emit_text_unit(body + i, n - i, 1, &w);
+            i += used;
+            col += w;
         }
     }
     emit(coloured ? SGR_RESET "\r\n" : "\r\n");
@@ -1203,35 +1359,37 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
 {
     char from[FILE_USER_MAX];
     char hex[128];
-    int part = 0;
+    int part = 0, announce;
     unsigned i;
     (void)session;
-    if (!str_eq(verb, "relayrecv"))
+    announce = str_eq(verb, "relayannounce");
+    if (!announce && !str_eq(verb, "relayrecv"))
         return 0;
 #ifdef FL_SECFEAT
     if (s_lab_netmode) {
-        srv_error("relayrecv: refused (lab isolated)\r\n");
+        srv_error(announce ? "relayannounce: refused (lab isolated)\r\n" : "relayrecv: refused (lab isolated)\r\n");
         return 1;
     }
 #endif
     if (!s_server_seat) {
         relay_reset();
-        srv_error("relayrecv: refused (not on a server)\r\n");
+        srv_error(announce ? "relayannounce: refused (not on a server)\r\n" : "relayrecv: refused (not on a server)\r\n");
         return 1;
     }
-    if (!take_word(cursor, from, sizeof(from))) {
-        emit("usage: relayrecv [+] <from> <hex>\r\n");
-        return 1;
-    }
-    if (str_eq(from, "+")) {
+    skip_spaces(cursor);
+    if (**cursor == '+' && ((*cursor)[1] == ' ' || (*cursor)[1] == 0)) {
         part = 1;
-        if (!take_word(cursor, from, sizeof(from))) {
-            emit("usage: relayrecv [+] <from> <hex>\r\n");
-            return 1;
-        }
+        ++*cursor;
     }
-    if (!file_user_ok(from) || !take_word(cursor, hex, sizeof(hex))) {
+    if (announce) {
+        /* Not a user name file_user_ok accepts, so chat and announcement parts never join. */
+        str_copy(from, "*", sizeof(from));
+    } else if (!take_word(cursor, from, sizeof(from)) || !file_user_ok(from)) {
         emit("usage: relayrecv [+] <from> <hex>\r\n");
+        return 1;
+    }
+    if (!take_word(cursor, hex, sizeof(hex))) {
+        emit(announce ? "usage: relayannounce [+] <hex>\r\n" : "usage: relayrecv [+] <from> <hex>\r\n");
         return 1;
     }
     skip_spaces(cursor);
@@ -1239,7 +1397,8 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         relay_reset();
     if (**cursor) {
         relay_reset();
-        srv_error("relayrecv: refused (bad or oversized content)\r\n");
+        srv_error(announce ? "relayannounce: refused (bad or oversized content)\r\n"
+                           : "relayrecv: refused (bad or oversized content)\r\n");
         return 1;
     }
     for (i = 0; hex[i]; i += 2) {
@@ -1247,7 +1406,8 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
         if (hi < 0 || lo < 0 || s_relay_len >= RELAY_BODY_MAX) {
             relay_reset();
-            srv_error("relayrecv: refused (bad or oversized content)\r\n");
+            srv_error(announce ? "relayannounce: refused (bad or oversized content)\r\n"
+                               : "relayrecv: refused (bad or oversized content)\r\n");
             return 1;
         }
         s_relay_body[s_relay_len++] = (char)((hi << 4) | lo);
@@ -1255,7 +1415,10 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
     str_copy(s_relay_from, from, sizeof(s_relay_from));
     if (part)
         return 1;
-    emit_relay_wrapped(s_relay_from, s_relay_body, s_relay_len);
+    if (announce)
+        emit_relay_text(C_LBLU, ANNOUNCE_TAG, 0, s_relay_body, s_relay_len);
+    else
+        emit_relay_text(C_CYN, RELAY_TAG, s_relay_from, s_relay_body, s_relay_len);
     relay_reset();
     return 1;
 }

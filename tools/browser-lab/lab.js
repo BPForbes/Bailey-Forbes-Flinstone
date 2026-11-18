@@ -212,6 +212,8 @@
         if (!core.isFormTypingTarget(document.activeElement)) screen.focus();
       } else if (event.type === "announcement") {
         appendChat(`[announce] ${event.text}`);
+        // The host's own announcement already left its guest as SERVER_RELAY announce.
+        if (event.server && !event.local) void deliverRelayAnnouncement(event.text);
       } else if (event.type === "message") {
         appendChat(event.text);
         // Local echo already left the guest as SERVER_RELAY msg; only peers need relayrecv (#426).
@@ -517,7 +519,8 @@
       }
       if (event.op === "msg" || event.op === "announce") {
         if (!relay.connected) await relay.connect(principal());
-        relay.sendMessage(event.text || "");
+        if (event.op === "announce") relay.sendAnnouncement(event.text || "");
+        else relay.sendMessage(event.text || "");
         return;
       }
       if (event.op === "connected") {
@@ -546,7 +549,8 @@
       ctx.fillStyle = VGA_TRUECOLOR[(attr >> 4) & 7];
       ctx.fillRect(x, y, VGA_CELL_W, VGA_CELL_H);
       ctx.fillStyle = VGA_TRUECOLOR[attr & 15];
-      if (ch >= 32 && ch <= 126) ctx.fillText(String.fromCharCode(ch), x, y + 1);
+      const glyph = core.cp437Char(ch);
+      if (glyph && glyph !== " " && glyph !== "\u00a0") ctx.fillText(glyph, x, y + 1);
     }
     document.getElementById("display-placeholder").hidden = true;
   }
@@ -647,6 +651,13 @@
     const line = core.relayRecvLine(chatText);
     if (!line) return;
     pendingRelayChat.push(line);
+    if (pendingRelayChat.length > 32) pendingRelayChat.shift();
+    await flushGuestRelayWork();
+  }
+  async function deliverRelayAnnouncement(text) {
+    const lines = core.relayAnnounceLines(text);
+    if (!lines) return;
+    pendingRelayChat.push(lines);
     if (pendingRelayChat.length > 32) pendingRelayChat.shift();
     await flushGuestRelayWork();
   }

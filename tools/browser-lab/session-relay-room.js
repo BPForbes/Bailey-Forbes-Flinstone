@@ -107,6 +107,16 @@ class Room {
     const frame = encodeFrame(OP.FL_NET_SESSION_OP_MSG_BROADCAST, body);
     if (frame) this.broadcast(frame, from.memberId);
   }
+  /* The host's `server announce`, to every other member; anyone else is ignored, as natively. */
+  relayAnnounce(from, textBytes) {
+    if (!from.isHost) {
+      this.sendStatus(from, "server announce: host only");
+      return;
+    }
+    const body = new TextEncoder().encode(payloadText(textBytes).slice(0, OP.FL_NET_SERVER_ANNOUNCEMENT_MAX - 1));
+    const frame = encodeFrame(OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE, body);
+    if (frame) this.broadcast(frame, from.memberId);
+  }
   sendStatus(member, text) {
     sendBinary(member.socket, encodeFrame(LAB.FILE_STATUS, text.slice(0, MAX_MSG)));
   }
@@ -195,6 +205,11 @@ class Room {
     if (opcode === OP.FL_NET_SESSION_OP_MSG) {
       if (payload.length === 0 || payload.length > MAX_MSG) return;
       this.relayMsg(member, payload);
+      return;
+    }
+    if (opcode === OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE) {
+      if (payload.length === 0 || payload.length > MAX_MSG) return;
+      this.relayAnnounce(member, payload);
       return;
     }
     if (opcode === LAB.FILE) {

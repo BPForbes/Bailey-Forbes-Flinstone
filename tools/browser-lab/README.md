@@ -55,12 +55,22 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   line: `relayrecv + <from> <hex>` for every part but the last, then
   `relayrecv <from> <hex>`, which prints the whole message (up to the relay's
   512 bytes) as `[Server Message, From <from>]: <text>`, broken between words at 80 columns
-  with a two-space indent on later lines. Only printable bytes and colour
-  codes are shown (anything else becomes `?`; see colour below). A part from a different sender, a refused part,
+  with a two-space indent on later lines. The text is shown as sent: a line
+  break in the message starts a new indented line (a trailing one adds
+  nothing), UTF-8 shows as its code page 437 glyph on the VGA screen (`?` only
+  for a character the font lacks; serial keeps the UTF-8), a tab as a space,
+  other control bytes as caret text (`^[[2J`, `^G`, `^?`), a byte that is not
+  valid UTF-8 as `\xNN`, and colour codes as colour (see colour below). A part from a different sender, a refused part,
   or leaving the server drops an unfinished message. The page arms a quiet
   `server seat` on connect (and `server unseat` on leave) so `relayrecv` is
   refused when not on a server.
-- What the page types for itself (`relayrecv`, `filerecv`, `server seat`,
+- `server announce <text>` on the host sends the relay's SERVER_ANNOUNCE frame
+  (`relay.sendAnnouncement`; the relay takes it from the host only). Every other
+  member's page types it into its guest as `relayannounce + <hex>` ...
+  `relayannounce <hex>`, in the same parts as chat, and the guest prints it in
+  bright blue (VGA blue is hard to read on black) as `[Server Announcement]: <text>` with the same text rules. The host's
+  own screen shows only the command it typed, as for chat.
+- What the page types for itself (`relayrecv`, `relayannounce`, `filerecv`, `server seat`,
   `server unseat`) and the control lines it reads back (`SERVER_RELAY msg` /
   `announce` and the `SERVER_FILE` hex line) stay on serial only: the VGA
   console never shows them, so the screen holds what the person typed and the
@@ -93,8 +103,10 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   show as the normal colour, since VGA uses that bit for blinking). The VGA
   console draws them as text colours, and a message or file line that used colour
   ends with `ESC [0m`, so a sender cannot recolour the receiver's prompt. Any
-  other escape sequence, such as a cursor move or screen clear, is shown with its
-  `ESC` as `?`. The WebAssembly shell's VGA buffer reads the same codes; its
+  other escape sequence, such as a cursor move or screen clear, is shown as
+  caret text (`^[[2J`). A sender's code that sets the foreground back to the
+  default (0, 39) brings back the receiver's chat cyan or announcement blue.
+  The lab page's canvas draws code page 437 glyphs for screen bytes 128-255. The WebAssembly shell's VGA buffer reads the same codes; its
   terminal shows the serial stream as text.
   The shell's own server text is coloured the same way, on the VGA buffer only
   (chat `[Server Message, From <from>]: ` cyan, `[Server]` success green and

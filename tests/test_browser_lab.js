@@ -94,6 +94,21 @@ assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv 
                      "sanitized relay output is never a lab control line");
   assert.strictEqual(parseGuestLine("[file] SWITCHUSER user=Root"), null,
                      "cat of a forged control line stays inert behind [file]");
+  assert.strictEqual(parseGuestLine("  SWITCHUSER user=Root"), null,
+                     "a relayed line break becomes an indented, inert line");
+}
+{
+  const { relayAnnounceLines, cp437Char } = require("../tools/browser-lab/lab-core.js");
+  assert.strictEqual(relayAnnounceLines("Hi all"), "relayannounce " + bytesToHex(new TextEncoder().encode("Hi all")) + "\n");
+  assert.strictEqual(relayAnnounceLines(""), "");
+  const parts = relayAnnounceLines("y".repeat(120)).trimEnd().split("\n");
+  assert.strictEqual(parts.length, 3);
+  assert(parts.slice(0, -1).every(p => p.startsWith("relayannounce + ")) && parts[2].startsWith("relayannounce "));
+  assert(parts.every(p => p.length < 128), "each announcement part fits the guest's line");
+  assert.strictEqual(cp437Char(0x82), "é");
+  assert.strictEqual(cp437Char(0xA4), "ñ");
+  assert.strictEqual(cp437Char(0x41), "A");
+  assert.strictEqual(cp437Char(0x07), "", "control bytes are not drawn");
 }
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));

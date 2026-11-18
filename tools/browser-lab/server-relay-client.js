@@ -117,7 +117,9 @@
       }
       if (opcode === OP.FL_NET_SESSION_OP_JOIN_ANNOUNCE || opcode === OP.FL_NET_SESSION_OP_LEAVE_ANNOUNCE ||
           opcode === OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE) {
-        emit({ type: "announcement", text: payloadText(payload) });
+        // "server" marks the host's own `server announce`; joins and leaves are the relay's.
+        emit({ type: "announcement", text: payloadText(payload),
+               server: opcode === OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE });
         return;
       }
       if (opcode === OP.FL_NET_SESSION_OP_MSG_BROADCAST) {
@@ -176,6 +178,11 @@
       return members.some(m => m.memberId === memberId && m.isHost);
     }
 
+    function hostMemberId() {
+      const host = members.find(m => m.isHost);
+      return host ? host.memberId : null;
+    }
+
     function closeSocket() {
       if (!socket) return;
       try { socket.close(); } catch (_) { /* ignore */ }
@@ -210,6 +217,9 @@
           emit({ type: "roster", members: members.slice() });
         } else if (data.kind === "msg") {
           emit({ type: "message", text: data.text, broadcast: true });
+        } else if (data.kind === "announce" && typeof data.text === "string") {
+          if (data.memberId === hostMemberId())
+            emit({ type: "announcement", text: data.text, server: true });
         } else if (data.kind === "file") {
           if (sameName(data.to, principalName) && data.bytes instanceof Uint8Array)
             emit({ type: "file", from: data.from, name: data.name, bytes: data.bytes });
@@ -316,6 +326,26 @@
         if (!frame) return false;
         socket.send(frame);
         emit({ type: "message", text: line, local: true });
+        return true;
+      },
+      /* The host's `server announce`: every other member gets it as a server announcement. */
+      sendAnnouncement(text) {
+        if (!this.connected) return false;
+        const body = String(text || "");
+        if (!body) return false;
+        if (!selfIsHost()) {
+          emit({ type: "error", text: "server announce: host only" });
+          return false;
+        }
+        if (socket.channel) {
+          socket.channel.postMessage({ v: 1, kind: "announce", tabId: socket.tabId, text: body, memberId });
+          emit({ type: "announcement", text: body, server: true, local: true });
+          return true;
+        }
+        const frame = encodeFrame(OP.FL_NET_SESSION_OP_SERVER_ANNOUNCE, body);
+        if (!frame) return false;
+        socket.send(frame);
+        emit({ type: "announcement", text: body, server: true, local: true });
         return true;
       },
       /* Sends one file to another user's sessions; the relay answers with a file-status event. */

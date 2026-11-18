@@ -223,6 +223,24 @@
     }
     return lines;
   }
+  /* The VGA font's glyph for a screen byte (code page 437), or "" for one not drawn. */
+  const CP437_HIGH = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥\u20A7ƒáíóúñÑªº¿\u2310¬½¼¡«»\u2591\u2592\u2593\u2502\u2524\u2561\u2562\u2556\u2555\u2563\u2551\u2557\u255D\u255C\u255B\u2510\u2514\u2534\u252C\u251C\u2500\u253C\u255E\u255F\u255A\u2554\u2569\u2566\u2560\u2550\u256C\u2567\u2568\u2564\u2565\u2559\u2558\u2552\u2553\u256B\u256A\u2518\u250C\u2588\u2584\u258C\u2590\u2580αßΓπΣσµτΦΘΩδ\u221Eφε\u2229\u2261±\u2265\u2264\u2320\u2321÷\u2248°\u2219·\u221A\u207F²\u25A0\u00A0";
+  function cp437Char(byte) {
+    if (byte >= 32 && byte <= 126) return String.fromCharCode(byte);
+    if (byte >= 128 && byte <= 255) return CP437_HIGH[byte - 128];
+    return "";
+  }
+  /* A host announcement for the guest, in the same hex parts as chat:
+   * "relayannounce + <hex>" for every part but the last, then "relayannounce <hex>". */
+  function relayAnnounceLines(text) {
+    const bytes = new TextEncoder().encode(String(text || "")).slice(0, RELAY_RECV_BODY_MAX);
+    let lines = "";
+    for (let i = 0; i < bytes.length; i += RELAY_RECV_PART_BYTES) {
+      const last = i + RELAY_RECV_PART_BYTES >= bytes.length;
+      lines += `relayannounce ${last ? "" : "+ "}${bytesToHex(bytes.slice(i, i + RELAY_RECV_PART_BYTES))}\n`;
+    }
+    return lines;
+  }
   function labDnsNameOk(name) {
     return typeof name === "string" && name.length > 0 && name.length <= 253 &&
       /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[A-Za-z0-9]$/.test(name);
@@ -325,5 +343,5 @@
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine, relayAnnounceLines, cp437Char };
 });

@@ -396,8 +396,19 @@ try:
     read_until("SERVER_RELAY msg hello-room", 4)
     # Inbound relay chat (#426): page-typed relayrecv prints a sanitized line.
     cmd("relayrecv Alice 48656c6c6f", expect="[Server Message, From Alice]: Hello")
-    # Control bytes in the body become '?'; newlines cannot start a forged line.
-    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[Server Message, From Alice]: SWITCHUSER user=Root?")
+    # A trailing line break adds nothing; a line break inside the body becomes an
+    # indented line, so it can never start a forged control line.
+    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[Server Message, From Alice]: SWITCHUSER user=Root\n")
+    text = cmd("relayrecv Alice " + b"hi\r\nSWITCHUSER user=Root\nbye".hex(),
+               expect="[Server Message, From Alice]: hi\n  SWITCHUSER user=Root\n  bye\n")
+    # Other control bytes show as caret text, stray bytes as \xNN, and UTF-8 as
+    # its code page 437 glyph on VGA (the original bytes on serial).
+    cmd("relayrecv Alice " + b"a\x07b\x7fc\x9fd\te".hex(), expect="[Server Message, From Alice]: a^Gb^?c\\x9Fd e\n")
+    cmd("relayrecv Alice " + "café ñ ß 😀".encode().hex(), expect="[Server Message, From Alice]: " + "café ñ ß 😀".encode().decode("latin1"))
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2))
+    if b"caf\x82 \xa4 \xe1 ?" not in chars:
+        raise SystemExit("test-freestanding-shell: UTF-8 not drawn as code page 437 on VGA\n" + vga_text())
     # A message longer than one typed line arrives in parts and prints whole,
     # broken between words within 80 columns (#426).
     long_msg = " ".join(["word%02d" % i for i in range(24)])
@@ -423,12 +434,33 @@ try:
     if at < 0:
         raise SystemExit("test-freestanding-shell: coloured relay line missing on VGA\n" + vga_text())
     red = at + len("[Server Message, From Alice]: ")
-    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x03 or cells[(at + 22) * 2 + 1] != 0x03:
+    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x03 or cells[at * 2 + 1] != 0x03 or cells[(at + 22) * 2 + 1] != 0x03:
         raise SystemExit("test-freestanding-shell: relay SGR colour not shown on VGA")
-    # Any other escape sequence (cursor moves, screen clears) stays visible as '?'.
-    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[Server Message, From Alice]: ?[2Jboom")
+    # A sender's reset brings back the recipient's cyan, not plain grey.
+    cmd("relayrecv Alice " + b"\x1b[31mRED\x1b[0m after".hex(), expect="after")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("RED after")
+    if at < 0 or cells[at * 2 + 1] != 0x04 or cells[(at + 4) * 2 + 1] != 0x03:
+        raise SystemExit("test-freestanding-shell: text after a sender reset is not cyan on VGA")
+    # Any other escape sequence (cursor moves, screen clears) stays visible as caret text.
+    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[Server Message, From Alice]: ^[[2Jboom")
+    # Host announcements (#428 follow-up): bright blue "[Server Announcement]: ", same text rules.
+    cmd("relayannounce + " + b"Maintenance at 5 PM: save your ".hex())
+    cmd("relayannounce " + b"work\x07".hex(), expect="[Server Announcement]: Maintenance at 5 PM: save your work^G")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("[Server Announcement]: Maintenance")
+    if at < 0 or cells[at * 2 + 1] != 0x09 or cells[(at + 30) * 2 + 1] != 0x09:
+        raise SystemExit("test-freestanding-shell: announcement is not blue on VGA\n" + vga_text())
+    # An announcement part never joins a chat message.
+    cmd("relayannounce + " + b"stale".hex())
+    text = cmd("relayrecv Alice " + b"fresh".hex(), expect="[Server Message, From Alice]: fresh")
+    if "stale" in text:
+        raise SystemExit("test-freestanding-shell: an announcement part leaked into chat\n" + text)
     cmd("server leave", expect="SERVER_RELAY leave")
     cmd("relayrecv Alice 4869", expect="refused (not on a server)")
+    cmd("relayannounce 4869", expect="relayannounce: refused (not on a server)")
     cells = vga_cells()
     chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
     at = chars.rfind("[ERROR] relayrecv: refused")
@@ -442,7 +474,7 @@ try:
     cmd("filerecv begin Alice col.txt")
     cmd("filerecv data " + b"\x1b[32mgreen\x1b[0m\nplain\x1b[1A".hex())
     cmd("filerecv end", expect="received col.txt")
-    cmd("cat col.txt", expect="[file] \x1b[32mgreen\x1b[0m\x1b[0m\n[file] plain?[1A")
+    cmd("cat col.txt", expect="[file] \x1b[32mgreen\x1b[0m\x1b[0m\n[file] plain^[[1A")
 
     cmd("mkdir tmpd")
     cmd("write tmpd/note.txt hi")
