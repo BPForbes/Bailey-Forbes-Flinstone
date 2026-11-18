@@ -225,6 +225,39 @@ static void emit_sgr(const char *s, unsigned len)
 
 #define SGR_RESET "\x1b[0m"
 
+/*
+ * Image colour (docs/COLOR_SYSTEM.md): the SGR bytes go to the VGA parser
+ * only. Serial and the redirect buffer keep plain text, so the lab page's
+ * line parser (SERVER_RELAY, SERVER_FILE, SWITCHUSER, LAB_NETMODE) and
+ * `> file` never see an escape this image added. Machine lines are never
+ * coloured.
+ */
+#define C_RED "\x1b[31m"
+#define C_BLUE "\x1b[1;34m"
+#define C_CYAN "\x1b[36m"
+
+static void vga_sgr(const char *seq)
+{
+    while (*seq)
+        fl_fs_vga_putc(*seq++);
+}
+
+static void emit_in(const char *sgr, const char *s)
+{
+    vga_sgr(sgr);
+    emit(s);
+    vga_sgr(SGR_RESET);
+}
+
+/* Tag coloured, rest of the line default. */
+static void emit_tagged(const char *sgr, const char *tag, const char *rest)
+{
+    emit_in(sgr, tag);
+    emit(rest);
+}
+#define emit_netlab(rest) emit_tagged(C_CYAN, "netlab: ", rest)
+#define emit_srvfile(rest) emit_tagged(C_BLUE, "server file: ", rest)
+
 static void emit_safe_text(const char *prefix, const char *data)
 {
     const char *p = data ? data : "";
@@ -953,7 +986,7 @@ static int server_file_send(int session, const char **cursor)
     if (more && (str_eq(word, "accept") || str_eq(word, "decline"))) {
         emit(str_eq(word, "accept") ? "SERVER_FILE_ACCEPT\r\n" : "SERVER_FILE_DECLINE\r\n");
         if (str_eq(word, "decline"))
-            emit("server file: files waiting for you were declined\r\n");
+            emit_srvfile("files waiting for you were declined\r\n");
         return 1;
     }
     if (more && (str_eq(word, "permit") || str_eq(word, "log"))) {
@@ -1033,7 +1066,7 @@ static int server_file_send(int session, const char **cursor)
         return 1;
     }
     if (!file_user_ok(user)) {
-        emit("server file: not a user name\r\n");
+        emit_srvfile("not a user name\r\n");
         return 1;
     }
     if (kq) {
@@ -1054,7 +1087,7 @@ static int server_file_send(int session, const char **cursor)
         if (path[i] == '/')
             base = path + i + 1;
     if (!file_name_ok(base)) {
-        emit("server file: the file name must be letters, digits, '.', '_' or '-'\r\n");
+        emit_srvfile("the file name must be letters, digits, '.', '_' or '-'\r\n");
         return 1;
     }
     fl_fs_serial_puts("SERVER_FILE ");
@@ -1067,7 +1100,7 @@ static int server_file_send(int session, const char **cursor)
         fl_fs_serial_puts(pair);
     }
     fl_fs_serial_puts("\r\n");
-    emit("server file: sending ");
+    emit_srvfile("sending ");
     emit(base);
     emit(" to ");
     emit(user);
@@ -1107,7 +1140,7 @@ static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
     unsigned col = 10u + str_len(from);
     unsigned i = 0;
     int coloured = 0;
-    emit("[relay] ");
+    emit_in(C_CYAN, "[relay] ");
     emit(from);
     emit(": ");
     while (i < n) {
@@ -1162,13 +1195,13 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         return 0;
 #ifdef FL_SECFEAT
     if (s_lab_netmode) {
-        emit("relayrecv: refused (lab isolated)\r\n");
+        emit_in(C_RED, "relayrecv: refused (lab isolated)\r\n");
         return 1;
     }
 #endif
     if (!s_server_seat) {
         relay_reset();
-        emit("relayrecv: refused (not on a server)\r\n");
+        emit_in(C_RED, "relayrecv: refused (not on a server)\r\n");
         return 1;
     }
     if (!take_word(cursor, from, sizeof(from))) {
@@ -1191,7 +1224,7 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         relay_reset();
     if (**cursor) {
         relay_reset();
-        emit("relayrecv: refused (bad or oversized content)\r\n");
+        emit_in(C_RED, "relayrecv: refused (bad or oversized content)\r\n");
         return 1;
     }
     for (i = 0; hex[i]; i += 2) {
@@ -1199,7 +1232,7 @@ static int run_relayrecv(int session, const char *verb, const char **cursor)
         int lo = hex[i + 1] ? hex_val(hex[i + 1]) : -1;
         if (hi < 0 || lo < 0 || s_relay_len >= RELAY_BODY_MAX) {
             relay_reset();
-            emit("relayrecv: refused (bad or oversized content)\r\n");
+            emit_in(C_RED, "relayrecv: refused (bad or oversized content)\r\n");
             return 1;
         }
         s_relay_body[s_relay_len++] = (char)((hi << 4) | lo);
@@ -1225,7 +1258,7 @@ static int run_filerecv(int session, const char *verb, const char **cursor)
         return 1;
     }
     if (str_eq(sub, "none")) {
-        emit("server file: no files waiting\r\n");
+        emit_srvfile("no files waiting\r\n");
         return 1;
     }
     if (str_eq(sub, "begin")) {
@@ -1352,10 +1385,10 @@ static int run_server(int session, const char *verb, const char **cursor)
                 if (s_nl_hostidx >= 0) {
                     char dn2[40];
                     nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
-                    emit("netlab: you are now the server host — new pod host: ");
+                    emit_netlab("you are now the server host — new pod host: ");
                     emit(dn2); emit("\r\n");
                 } else {
-                    emit("netlab: you are now the server host — pod host pending "
+                    emit_netlab("you are now the server host — pod host pending "
                          "(no other session can hold it yet).\r\n");
                 }
             }
@@ -1367,7 +1400,7 @@ static int run_server(int session, const char *verb, const char **cursor)
              * under it are killed too. */
             if (s_nl_pod[0]) {
                 nl_pod_dissolve();
-                emit("netlab: server killed by its host — pod dissolved.\r\n");
+                emit_netlab("server killed by its host — pod dissolved.\r\n");
             }
         }
     } else if (str_eq(sub, "leave")) {
@@ -1382,7 +1415,7 @@ static int run_server(int session, const char *verb, const char **cursor)
                 if (s_nl_hostidx != before && s_nl_hostidx >= 0) {
                     char dn2[40];
                     nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
-                    emit("netlab: server host stepped down — new pod host: ");
+                    emit_netlab("server host stepped down — new pod host: ");
                     emit(dn2); emit("\r\n");
                 }
             }
@@ -1526,10 +1559,10 @@ static void nl_set_mode(int lab)
     /* Control token for tools/browser-lab/lab.js to drop/resume the relay. */
     emit(lab ? "LAB_NETMODE lab\r\n" : "LAB_NETMODE live\r\n");
     if (lab) {
-        emit("netlab: lab-isolated — real network (server relay) dropped for the demo.\r\n");
+        emit_netlab("lab-isolated — real network (server relay) dropped for the demo.\r\n");
         nl_boundary();
     } else {
-        emit("netlab: live — real network restored; server relay may resume.\r\n");
+        emit_netlab("live — real network restored; server relay may resume.\r\n");
     }
 }
 
@@ -1842,7 +1875,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "stop")) {
         if (s_nl_atk_session >= 0) {
-            emit("netlab: a reverse-shell binding is open; `netlab end` it first.\r\n");
+            emit_netlab("a reverse-shell binding is open; `netlab end` it first.\r\n");
             return 1;
         }
         nl_set_mode(0);
@@ -1859,7 +1892,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 return 1;
             }
             if (s_nl_pod[0]) {
-                emit("netlab: pod '");
+                emit_netlab("pod '");
                 emit(s_nl_pod);
                 emit("' already exists; `netlab pod leave` first.\r\n");
                 return 1;
@@ -1869,7 +1902,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
             s_nl_members[s_nl_memcount++] = session;
             nl_pick_host();
-            emit("netlab: pod '");
+            emit_netlab("pod '");
             emit(s_nl_pod);
             emit("' created.\r\n");
             if (s_nl_hostidx >= 0) {
@@ -1885,17 +1918,17 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "join")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod yet. `netlab pod create <pod>` first.\r\n");
+                emit_netlab("no pod yet. `netlab pod create <pod>` first.\r\n");
                 return 1;
             }
             if (nl_session_idx(session) >= 0) {
-                emit("netlab: you are already in pod ");
+                emit_netlab("you are already in pod ");
                 emit(s_nl_pod);
                 emit(".\r\n");
                 return 1;
             }
             if (s_nl_memcount >= NL_MAXMEM) {
-                emit("netlab: pod is full.\r\n");
+                emit_netlab("pod is full.\r\n");
                 return 1;
             }
             str_copy(s_nl_member_acct[s_nl_memcount], fl_fs_identity_user(session), NL_NAMELEN);
@@ -1904,7 +1937,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             {
                 char dn[40];
                 nl_display_name(session, dn, sizeof(dn));
-                emit("netlab: "); emit(dn); emit(" joined pod "); emit(s_nl_pod);
+                emit_netlab(""); emit(dn); emit(" joined pod "); emit(s_nl_pod);
                 emit(" (identity preserved).\r\n");
             }
             if (s_nl_hostidx >= 0) {
@@ -1918,7 +1951,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "members")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod.\r\n");
+                emit_netlab("no pod.\r\n");
                 return 1;
             }
             emit("pod ");
@@ -1938,7 +1971,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         if (str_eq(sub, "host")) {
             if (!s_nl_pod[0]) {
-                emit("netlab: no pod.\r\n");
+                emit_netlab("no pod.\r\n");
                 return 1;
             }
             emit("pod ");
@@ -1957,12 +1990,12 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             int idx, was_host, j;
             char dn[40];
             if (!s_nl_pod[0]) {
-                emit("netlab: not in a pod.\r\n");
+                emit_netlab("not in a pod.\r\n");
                 return 1;
             }
             idx = nl_session_idx(session);
             if (idx < 0) {
-                emit("netlab: you are not in this pod.\r\n");
+                emit_netlab("you are not in this pod.\r\n");
                 return 1;
             }
             was_host = ((int)idx == s_nl_hostidx);
@@ -1973,7 +2006,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             }
             s_nl_memcount--;
             if (s_nl_memcount == 0) {
-                emit("netlab: "); emit(dn); emit(" left; pod dissolved.\r\n");
+                emit_netlab(""); emit(dn); emit(" left; pod dissolved.\r\n");
                 s_nl_pod[0] = 0;
                 s_nl_hostidx = -1;
                 s_nl_listen_session = -1;
@@ -1984,7 +2017,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 return 1;
             }
             nl_pick_host();
-            emit("netlab: "); emit(dn); emit(" left.\r\n");
+            emit_netlab(""); emit(dn); emit(" left.\r\n");
             if (s_nl_hostidx >= 0) {
                 char dn2[40];
                 nl_display_name(s_nl_members[s_nl_hostidx], dn2, sizeof(dn2));
@@ -1998,7 +2031,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 s_nl_victim_session = -1;
                 nl_sb_reset();
                 nl_set_mode(0);
-                emit("netlab: your reverse-shell binding ended because you left the pod.\r\n");
+                emit_netlab("your reverse-shell binding ended because you left the pod.\r\n");
             }
             if (session == s_nl_listen_session)
                 s_nl_listen_session = -1;
@@ -2009,24 +2042,24 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "listen")) {
         if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
-            emit("netlab: join a pod first (`netlab pod create` or `netlab pod join`).\r\n");
+            emit_netlab("join a pod first (`netlab pod create` or `netlab pod join`).\r\n");
             return 1;
         }
         if (take_word(cursor, nm, sizeof(nm)) && str_eq(nm, "cancel")) {
             if (s_nl_listen_session != session) {
-                emit("netlab: you have no open listener to cancel.\r\n");
+                emit_netlab("you have no open listener to cancel.\r\n");
                 return 1;
             }
             s_nl_listen_session = -1;
-            emit("netlab: listener cancelled.\r\n");
+            emit_netlab("listener cancelled.\r\n");
             return 1;
         }
         if (s_nl_atk_session >= 0) {
-            emit("netlab: a reverse shell is already bound in this pod; `netlab end` it first.\r\n");
+            emit_netlab("a reverse shell is already bound in this pod; `netlab end` it first.\r\n");
             return 1;
         }
         if (s_nl_listen_session >= 0) {
-            emit("netlab: a listener is already open in this pod. `netlab accept` it, or its\r\n");
+            emit_netlab("a listener is already open in this pod. `netlab accept` it, or its\r\n");
             emit("  owner can `netlab listen cancel`.\r\n");
             return 1;
         }
@@ -2034,7 +2067,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         {
             char dn[40];
             nl_display_name(session, dn, sizeof(dn));
-            emit("netlab: "); emit(dn); emit(" is listening in pod "); emit(s_nl_pod);
+            emit_netlab(""); emit(dn); emit(" is listening in pod "); emit(s_nl_pod);
             emit(".\r\n  Another pod member can `netlab accept` to bind as the victim side\r\n");
             emit("  (SIMULATED — a disposable isolated sandbox, never their real session).\r\n");
         }
@@ -2042,19 +2075,19 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "accept")) {
         if (!s_nl_pod[0] || nl_session_idx(session) < 0) {
-            emit("netlab: join a pod first.\r\n");
+            emit_netlab("join a pod first.\r\n");
             return 1;
         }
         if (s_nl_listen_session < 0) {
-            emit("netlab: no open listener in this pod. Someone runs `netlab listen` first.\r\n");
+            emit_netlab("no open listener in this pod. Someone runs `netlab listen` first.\r\n");
             return 1;
         }
         if (s_nl_listen_session == session) {
-            emit("netlab: you cannot accept your own listener.\r\n");
+            emit_netlab("you cannot accept your own listener.\r\n");
             return 1;
         }
         if (s_nl_atk_session >= 0) {
-            emit("netlab: already bound; `netlab end` it first.\r\n");
+            emit_netlab("already bound; `netlab end` it first.\r\n");
             return 1;
         }
         /* "when we switch to lab network": re-resolve the pod host here, since
@@ -2070,7 +2103,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
             char adn[40], vdn[40];
             nl_display_name(s_nl_atk_session, adn, sizeof(adn));
             nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
-            emit("netlab: "); emit(vdn); emit(" accepted. "); emit(adn);
+            emit_netlab(""); emit(vdn); emit(" accepted. "); emit(adn);
             emit(" is bound as attacker against a fresh, isolated SANDBOX\r\n");
             emit("  labeled for "); emit(vdn); emit(" — not "); emit(vdn);
             emit("'s real session or real files.\r\n  ");
@@ -2082,14 +2115,14 @@ static int run_netlab(int session, const char *verb, const char **cursor)
     }
     if (str_eq(sub, "end")) {
         if (session != s_nl_atk_session && session != s_nl_victim_session) {
-            emit("netlab: no reverse shell bound to you.\r\n");
+            emit_netlab("no reverse shell bound to you.\r\n");
             return 1;
         }
         {
             char adn[40], vdn[40];
             nl_display_name(s_nl_atk_session, adn, sizeof(adn));
             nl_display_name(s_nl_victim_session, vdn, sizeof(vdn));
-            emit("netlab: reverse shell between "); emit(adn); emit(" and "); emit(vdn);
+            emit_netlab("reverse shell between "); emit(adn); emit(" and "); emit(vdn);
             emit(" closed.\r\n");
         }
         s_nl_atk_session = -1;
@@ -2129,7 +2162,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         }
         p = nl_find_pod(pod);
         if (!p) {
-            emit("netlab: no pod '");
+            emit_netlab("no pod '");
             emit(pod);
             emit("' (try `netlab pods`)\r\n");
             return 1;
@@ -2221,7 +2254,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
                 }
             }
             if (!h) {
-                emit("netlab: no host '");
+                emit_netlab("no host '");
                 emit(dst);
                 emit("' in pod ");
                 emit(p->name);
@@ -2306,7 +2339,7 @@ static int run_netlab(int session, const char *verb, const char **cursor)
         return 1;
     }
 
-    emit("netlab: unknown verb '");
+    emit_netlab("unknown verb '");
     emit(sub);
     emit("' (try `netlab help`)\r\n");
     return 1;

@@ -423,7 +423,7 @@ try:
     if at < 0:
         raise SystemExit("test-freestanding-shell: coloured relay line missing on VGA\n" + vga_text())
     red = at + len("[relay] Alice: ")
-    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x07:
+    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x03 or cells[(at + 8) * 2 + 1] != 0x07:
         raise SystemExit("test-freestanding-shell: relay SGR colour not shown on VGA")
     # Any other escape sequence (cursor moves, screen clears) stays visible as '?'.
     cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[relay] Alice: ?[2Jboom")

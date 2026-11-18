@@ -96,6 +96,9 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   other escape sequence, such as a cursor move or screen clear, is shown with its
   `ESC` as `?`. The WebAssembly shell's VGA buffer reads the same codes; its
   terminal shows the serial stream as text.
+  The shell's own server text is coloured the same way, on the VGA buffer only
+  (`[relay] ` cyan, `server file:` bold blue, `netlab:` cyan, `relayrecv: refused`
+  red); serial and redirected output stay plain. See `docs/COLOR_SYSTEM.md`.
 - KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
   <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
   retry). The file is signed by its sender and sealed to the recipient; the session hosting
