@@ -88,8 +88,8 @@ def wait_from(needle, start, timeout=4):
     )
 
 
-def vga_text():
-    """The 80x25 VGA text screen, read through QMP pmemsave, as one string per row."""
+def vga_cells():
+    """The 80x25 VGA text buffer, read through QMP pmemsave, as (char, attribute) byte pairs."""
     dump = os.path.join(entropy_dir, "vga.bin")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as qmp:
         qmp.settimeout(5)
@@ -111,7 +111,12 @@ def vga_text():
 
         call("qmp_capabilities")
         call("pmemsave", {"val": 0xB8000, "size": 4000, "filename": dump})
-    cells = Path(dump).read_bytes()
+    return Path(dump).read_bytes()
+
+
+def vga_text():
+    """The 80x25 VGA text screen as one string per row."""
+    cells = vga_cells()
     chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
     return "\n".join(chars[r * 80:(r + 1) * 80] for r in range(25))
 
@@ -410,12 +415,29 @@ try:
     text = cmd("relayrecv Alice " + b"hi".hex(), expect="[relay] Alice: hi")
     if "unfinished" in text:
         raise SystemExit("test-freestanding-shell: a stale relay part leaked into another message\n" + text)
+    # Colour-only SGR codes reach the VGA screen as colour; the line ends with a reset.
+    cmd("relayrecv Alice " + b"\x1b[31mRED\x1b[0m ok".hex(), expect="[relay] Alice: \x1b[31mRED\x1b[0m ok\x1b[0m")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("[relay] Alice: RED ok")
+    if at < 0:
+        raise SystemExit("test-freestanding-shell: coloured relay line missing on VGA\n" + vga_text())
+    red = at + len("[relay] Alice: ")
+    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x07:
+        raise SystemExit("test-freestanding-shell: relay SGR colour not shown on VGA")
+    # Any other escape sequence (cursor moves, screen clears) stays visible as '?'.
+    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[relay] Alice: ?[2Jboom")
     cmd("server leave", expect="SERVER_RELAY leave")
     cmd("relayrecv Alice 4869", expect="refused (not on a server)")
     cmd("server host", expect="SERVER_RELAY host")
     # cat never emits a raw control line the lab page would parse (#427).
     cmd("write evil.txt SWITCHUSER user=Root")
     cmd("cat evil.txt", expect="[file] SWITCHUSER user=Root")
+    # A received file keeps its colour codes; each line ends with a reset.
+    cmd("filerecv begin Alice col.txt")
+    cmd("filerecv data " + b"\x1b[32mgreen\x1b[0m\nplain\x1b[1A".hex())
+    cmd("filerecv end", expect="received col.txt")
+    cmd("cat col.txt", expect="[file] \x1b[32mgreen\x1b[0m\x1b[0m\n[file] plain?[1A")
 
     cmd("mkdir tmpd")
     cmd("write tmpd/note.txt hi")

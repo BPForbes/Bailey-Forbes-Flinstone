@@ -55,8 +55,8 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   line: `relayrecv + <from> <hex>` for every part but the last, then
   `relayrecv <from> <hex>`, which prints the whole message (up to the relay's
   512 bytes) as `[relay] <from>: <text>`, broken between words at 80 columns
-  with a two-space indent on later lines. Only printable bytes are shown
-  (anything else becomes `?`). A part from a different sender, a refused part,
+  with a two-space indent on later lines. Only printable bytes and colour
+  codes are shown (anything else becomes `?`; see colour below). A part from a different sender, a refused part,
   or leaving the server drops an unfinished message. The page arms a quiet
   `server seat` on connect (and `server unseat` on leave) so `relayrecv` is
   refused when not on a server.
@@ -84,9 +84,18 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   from <user>`. A file is never saved over an existing one, names are a single
   plain component, lab files are text of at most 159 bytes, and at most 16 files
   wait at once (the oldest is dropped, with a note). `cat` / `type` print file
-  content behind a `[file] ` prefix with the same printable-only filter, so a
-  received file cannot forge `SWITCHUSER`, `SERVER_*`, or `LAB_NETMODE` lines the
-  page would act on. Lab isolation (`netlab start`) stops files as well as chat.
+  content behind a `[file] ` prefix with the same filter, so a received file
+  cannot forge `SWITCHUSER`, `SERVER_*`, or `LAB_NETMODE` lines the page would
+  act on. Lab isolation (`netlab start`) stops files as well as chat.
+- Colour: relay messages and `cat` / `type` output keep ANSI colour codes
+  (`ESC [ <n>;<n> m`) when every number is a colour or reset code: 0, 1 (bright
+  foreground), 22, 30-37, 39, 40-47, 49, 90-97 and 100-107 (bright backgrounds
+  show as the normal colour, since VGA uses that bit for blinking). The VGA
+  console draws them as text colours, and a message or file line that used colour
+  ends with `ESC [0m`, so a sender cannot recolour the receiver's prompt. Any
+  other escape sequence, such as a cursor move or screen clear, is shown with its
+  `ESC` as `?`. The WebAssembly shell's VGA buffer reads the same codes; its
+  terminal shows the serial stream as text.
 - KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
   <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
   retry). The file is signed by its sender and sealed to the recipient; the session hosting

@@ -165,10 +165,11 @@ static void emit(const char *s)
 }
 
 /*
- * Print untrusted text the lab page may parse on serial: only bytes 0x20-0x7E,
- * everything else as '?'. Each logical line (split on CR/LF) is emitted behind
- * `prefix` so a forged SWITCHUSER / SERVER_* / LAB_NETMODE line can never match
- * parseGuestLine (#427). Chat uses the same path behind "[relay] " (#426).
+ * Print untrusted text the lab page may parse on serial: only bytes 0x20-0x7E
+ * and colour-only SGR sequences, everything else as '?'. Each logical line
+ * (split on CR/LF) is emitted behind `prefix` so a forged SWITCHUSER /
+ * SERVER_* / LAB_NETMODE line can never match parseGuestLine (#427). Chat uses
+ * the same path behind "[relay] " (#426).
  */
 static void emit_safe_byte(unsigned char c)
 {
@@ -178,14 +179,69 @@ static void emit_safe_byte(unsigned char c)
     emit(one);
 }
 
+static int sgr_colour_param(unsigned p)
+{
+    return p == 0 || p == 1 || p == 22 || (p >= 30 && p <= 37) || p == 39 ||
+           (p >= 40 && p <= 47) || p == 49 || (p >= 90 && p <= 97) || (p >= 100 && p <= 107);
+}
+
+#define SGR_SEQ_MAX 24u
+
+/* Length of a colour-only "ESC [ n;n m" sequence at s (at most n bytes), or 0. */
+static unsigned safe_sgr_len(const char *s, unsigned n)
+{
+    unsigned i, p = 0, digits = 0;
+    if (n < 3u || (unsigned char)s[0] != 0x1bu || s[1] != '[')
+        return 0;
+    for (i = 2; i < n && i < SGR_SEQ_MAX; ++i) {
+        char c = s[i];
+        if (c >= '0' && c <= '9') {
+            if (++digits > 3u)
+                return 0;
+            p = p * 10u + (unsigned)(c - '0');
+            continue;
+        }
+        if (c != ';' && c != 'm')
+            return 0;
+        if (!sgr_colour_param(p))
+            return 0;
+        if (c == 'm')
+            return i + 1u;
+        p = 0;
+        digits = 0;
+    }
+    return 0;
+}
+
+static void emit_sgr(const char *s, unsigned len)
+{
+    char seq[SGR_SEQ_MAX + 1u];
+    unsigned i;
+    for (i = 0; i < len && i < SGR_SEQ_MAX; ++i)
+        seq[i] = s[i];
+    seq[i] = 0;
+    emit(seq);
+}
+
+#define SGR_RESET "\x1b[0m"
+
 static void emit_safe_text(const char *prefix, const char *data)
 {
     const char *p = data ? data : "";
     for (;;) {
+        int coloured = 0;
         emit(prefix);
-        while (*p && *p != '\n' && *p != '\r')
-            emit_safe_byte((unsigned char)*p++);
-        emit("\r\n");
+        while (*p && *p != '\n' && *p != '\r') {
+            unsigned k = safe_sgr_len(p, SGR_SEQ_MAX);
+            if (k) {
+                emit_sgr(p, k);
+                p += k;
+                coloured = 1;
+            } else {
+                emit_safe_byte((unsigned char)*p++);
+            }
+        }
+        emit(coloured ? SGR_RESET "\r\n" : "\r\n");
         if (*p == '\r')
             ++p;
         if (*p == '\n')
@@ -1050,11 +1106,12 @@ static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
 {
     unsigned col = 10u + str_len(from);
     unsigned i = 0;
+    int coloured = 0;
     emit("[relay] ");
     emit(from);
     emit(": ");
     while (i < n) {
-        unsigned w = 0;
+        unsigned j, vis = 0;
         if (body[i] == ' ') {
             if (col + 1u > RELAY_COLS) {
                 emit("\r\n" RELAY_INDENT);
@@ -1066,22 +1123,32 @@ static void emit_relay_wrapped(const char *from, const char *body, unsigned n)
             ++i;
             continue;
         }
-        while (i + w < n && body[i + w] != ' ')
-            ++w;
-        if (col + w > RELAY_COLS && col > sizeof(RELAY_INDENT) - 1u) {
+        for (j = i; j < n && body[j] != ' ';) {
+            unsigned k = safe_sgr_len(body + j, n - j);
+            j += k ? k : 1u;
+            vis += k ? 0u : 1u;
+        }
+        if (col + vis > RELAY_COLS && col > sizeof(RELAY_INDENT) - 1u) {
             emit("\r\n" RELAY_INDENT);
             col = sizeof(RELAY_INDENT) - 1u;
         }
-        for (; w; --w, ++i) {
+        while (i < j) {
+            unsigned k = safe_sgr_len(body + i, n - i);
+            if (k) {
+                emit_sgr(body + i, k);
+                i += k;
+                coloured = 1;
+                continue;
+            }
             if (col >= RELAY_COLS) {
                 emit("\r\n" RELAY_INDENT);
                 col = sizeof(RELAY_INDENT) - 1u;
             }
-            emit_safe_byte((unsigned char)body[i]);
+            emit_safe_byte((unsigned char)body[i++]);
             ++col;
         }
     }
-    emit("\r\n");
+    emit(coloured ? SGR_RESET "\r\n" : "\r\n");
 }
 
 static int run_relayrecv(int session, const char *verb, const char **cursor)
