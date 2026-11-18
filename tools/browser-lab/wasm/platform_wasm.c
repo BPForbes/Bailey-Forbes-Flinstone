@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "serial.h"
 #include "vga.h"
+#include "vga_sgr.h"
 #include <stdint.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -17,6 +18,7 @@
 static uint16_t s_vga[VGA_COLS * VGA_ROWS];
 static int s_row = 1;
 static int s_col = 0;
+static struct fl_vga_sgr s_sgr = { 0, FL_VGA_SGR_DEFAULT_ATTR, 0, 0, 0, { 0 } };
 
 static void emit_js(char c)
 {
@@ -64,6 +66,7 @@ void fl_fs_vga_init(void)
     s_vga[0] = DIAG_GLYPH;
     s_row = 1;
     s_col = 0;
+    fl_vga_sgr_reset(&s_sgr);
     fl_fs_vga_status("Flinstone", 1, 1);
 }
 
@@ -77,6 +80,8 @@ void fl_fs_vga_status(const char *user, unsigned session, unsigned sessions)
 
 void fl_fs_vga_putc(char c)
 {
+    if (fl_vga_sgr_feed(&s_sgr, c))
+        return;
     if (c == '\r') {
         s_col = 0;
         return;
@@ -95,7 +100,7 @@ void fl_fs_vga_putc(char c)
             --s_col;
         return;
     }
-    put_cell(s_row, s_col++, c, 0x07);
+    put_cell(s_row, s_col++, c, s_sgr.attr);
 }
 
 void fl_fs_vga_puts(const char *s)
@@ -130,6 +135,7 @@ void fl_fs_vga_clear_shell(void)
         s_vga[i] = (uint16_t)(0x0700u | ' ');
     s_row = 1;
     s_col = 0;
+    fl_vga_sgr_reset(&s_sgr);
 }
 
 void fl_fs_vga_get_cursor(int *row, int *col)

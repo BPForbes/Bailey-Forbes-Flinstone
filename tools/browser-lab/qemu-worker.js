@@ -6,6 +6,7 @@ self.Worker = class extends NativeWorker {
   terminate() { children.delete(this); return super.terminate(); }
 };
 let stage = "startup"; let input = [], readable = new Set(), qmpLine = "", mod;
+let dead = false;
 let termios = { iflag: 0, oflag: 0, cflag: 0, lflag: 0, cc: Array(32).fill(0) };
 const encoder = new TextEncoder();
 const pty = {
@@ -41,9 +42,13 @@ function sendInput(value) {
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "destroy") {
+      dead = true;
       for (const child of [...children]) child.terminate();
-      self.postMessage({ type: "destroyed" }); self.close(); return;
+      children.clear();
+      try { self.postMessage({ type: "destroyed" }); } catch (_) { /* closing */ }
+      self.close(); return;
     }
+    if (dead) return;
     if (data.type === "qmp") { sendInput(data.data); return; }
     if (data.type === "screen") {
       stage = "screen read";
@@ -62,6 +67,7 @@ self.onmessage = async ({ data }) => {
     const [{ default: init }, romResponse] = await Promise.all([
       import(new URL("out.js", base)), fetch(new URL("load-rom.data", base)),
     ]);
+    if (dead) return;
     if (!romResponse.ok) throw new Error(`BIOS download failed: ${romResponse.status}`);
     const rom = new Uint8Array(await romResponse.arrayBuffer());
     const bios = [["bios-256k.bin", 0, 262144], ["efi-virtio.rom", 262144, 422912],
@@ -89,5 +95,12 @@ self.onmessage = async ({ data }) => {
       onAbort: text => self.postMessage({ type: "error", text: String(text) }),
       onExit: code => self.postMessage({ type: "error", text: `QEMU exited (${code})` }),
     });
-  } catch (error) { self.postMessage({ type: "error", text: stage + ": " + error.message + " errno=" + error.errno + " " + error.stack }); }
+    if (dead) {
+      for (const child of [...children]) child.terminate();
+      children.clear();
+    }
+  } catch (error) {
+    if (dead) return;
+    self.postMessage({ type: "error", text: stage + ": " + error.message + " errno=" + error.errno + " " + error.stack });
+  }
 };

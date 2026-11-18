@@ -684,7 +684,9 @@ static const struct {
     {FL_RESULT_NOMEM, 8u, 7u},  /* too large: Denied, resource */
 };
 
-void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir) {
+/* The signed report travels to the sender, so it names only the coarse class (KeyQuorum #169: no oracle);
+ * cause, when given, is the precise reason and goes to the local audit only. */
+static void report_refusal(const kq_file_offer_t *o, fl_result_t why, const char *cause, const fl_kq_dir_t *dir) {
     const char *me = fl_session_current_key_id();
     const char *who = me && me[0] ? me : "UNKNOWN";
     const char *event;
@@ -703,7 +705,7 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
     if (i == sizeof s_refusal_codes / sizeof s_refusal_codes[0])
         return; /* not a refusal of the letter */
     if (!dir) {
-        fl_audit_identity_event(who, "kq-report-uncontained", "receive", NULL);
+        fl_audit_identity_event(who, "kq-report-uncontained", "receive", cause);
         return;
     }
     mem_domain_secure_zero(key, sizeof key);
@@ -722,7 +724,49 @@ void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl
                                            : "kq-report-failed";
     }
     mem_domain_secure_zero(key, sizeof key); /* on every path, a failed lookup included */
-    fl_audit_identity_event(who, event, "receive", NULL);
+    fl_audit_identity_event(who, event, "receive", cause);
+}
+
+void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir) {
+    report_refusal(o, why, NULL, dir);
+}
+
+/* Local audit word for each checkpoint refusal of the letter; NULL for local problems, which are not reported. */
+static const char *refusal_cause(fl_kq_cp_result_t cp) {
+    switch (cp) {
+    case FL_KQ_CP_INVALID:
+        return "cause=invalid";
+    case FL_KQ_CP_NO_KEY:
+        return "cause=no-key";
+    case FL_KQ_CP_UNTRUSTED:
+        return "cause=untrusted";
+    case FL_KQ_CP_NOT_RECIPIENT:
+        return "cause=not-recipient";
+    case FL_KQ_CP_BAD_SIGNATURE:
+        return "cause=bad-signature";
+    case FL_KQ_CP_REPLAYED:
+        return "cause=replayed";
+    case FL_KQ_CP_NOT_NEWER:
+        return "cause=not-newer";
+    case FL_KQ_CP_FORKED:
+        return "cause=forked";
+    case FL_KQ_CP_BELOW_THRESHOLD:
+        return "cause=below-threshold";
+    case FL_KQ_CP_TOO_LARGE:
+        return "cause=too-large";
+    case FL_KQ_CP_NEEDS_EDITOR_PERMIT:
+        return "cause=needs-editor-permit";
+    default:
+        return NULL; /* OK, EXISTS, IO, NO_DRIVER */
+    }
+}
+
+/* The report keeps fl_kq_cp_to_result's coarse class; the checkpoint's own cause is audited locally. */
+void fl_kq_report_refusal_cp_in(const kq_file_offer_t *o, fl_kq_cp_result_t cp, const fl_kq_dir_t *dir) {
+    const char *cause = refusal_cause(cp);
+
+    if (cause)
+        report_refusal(o, fl_kq_cp_to_result(cp), cause, dir);
 }
 
 void fl_kq_report_refusal(const kq_file_offer_t *o, fl_result_t why) {

@@ -88,8 +88,8 @@ def wait_from(needle, start, timeout=4):
     )
 
 
-def vga_text():
-    """The 80x25 VGA text screen, read through QMP pmemsave, as one string per row."""
+def vga_cells():
+    """The 80x25 VGA text buffer, read through QMP pmemsave, as (char, attribute) byte pairs."""
     dump = os.path.join(entropy_dir, "vga.bin")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as qmp:
         qmp.settimeout(5)
@@ -111,7 +111,12 @@ def vga_text():
 
         call("qmp_capabilities")
         call("pmemsave", {"val": 0xB8000, "size": 4000, "filename": dump})
-    cells = Path(dump).read_bytes()
+    return Path(dump).read_bytes()
+
+
+def vga_text():
+    """The 80x25 VGA text screen as one string per row."""
+    cells = vga_cells()
     chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
     return "\n".join(chars[r * 80:(r + 1) * 80] for r in range(25))
 
@@ -281,7 +286,54 @@ HOSTED_VERBS = [
 ]
 
 
+def sign(path, password, expect, timeout=20):
+    start = len(buf)
+    send("server file sign " + path + "\n")
+    wait_from("Password:", start)
+    send(password + "\n")
+    wait_from(expect, start, timeout)
+
+
+def kq_history():
+    """FL-02 stage 2 (the default image only): a ramfs file's history, each revision signed by KeyQuorum
+    with the account's sealed key, judged by KeyQuorum under the keys the image holds."""
+    read_until("CAP keyquorum-history=ok", 4)  # the boot self-test: a signed history in the in-memory store
+    read_until("Flinstone@flintstone>", 4)
+    cwd = cmd("pwd").replace("\r", "").split("\n")[1].strip()
+    note = (cwd.rstrip("/") + "/kqnote.txt") if cwd.startswith("/") else "kqnote.txt"
+    cmd("write kqnote.txt first draft", expect="wrote")
+    cmd("server file log kqnote.txt", expect="no history for kqnote.txt")
+    cmd("server file verify kqnote.txt", expect="no history for kqnote.txt")
+    sign("kqnote.txt", "not-the-password", "authentication failed")
+    for draft in ("first draft", "second draft"):
+        cmd("write kqnote.txt " + draft, expect="wrote")
+        sign("kqnote.txt", "flinstone", "signed by Flinstone")
+    cmd("server file verify kqnote.txt", expect="signed by Flinstone")
+    history = cmd("server file log kqnote.txt", expect="Flinstone")
+    if history.count("by Flinstone") < 2:
+        raise SystemExit("test-freestanding-shell: server file log shows fewer than two signed revisions\n" + history)
+    start = len(buf)
+    send("switchuser root\n")
+    wait_from("Password:", start)
+    send("root\n")
+    wait_from("SWITCHUSER user=Root", start)
+    cmd("server file verify " + note, expect="signed by Flinstone")  # Root reads it under Flinstone's key
+    sign(note, "root", "the newest revision is another account's")  # and may not sign over it
+    # passwd gives Flinstone a new key: its earlier revisions no longer verify as Flinstone's.
+    start = len(buf)
+    send("passwd flinstone\n")
+    wait_from("Password:", start)
+    send("flinstone\n")
+    wait_from("ok", start, timeout=20)
+    cmd("server file verify " + note, expect="the newest revision is not trusted")
+
+
 try:
+    if os.environ.get("FL_KQ_HISTORY_ONLY") == "1":
+        read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
+        kq_history()
+        print("test-freestanding-shell: PASS (KeyQuorum-signed history in the default image)")
+        sys.exit(0)
     read_until("FLINTSTONE_KERNEL_BOOT_OK", 12)
     read_until("network=lab", 4)
     read_until("CAP keyquorum=linked", 4)  # the KeyQuorum library is linked and its ABI accepted (FL-02)
@@ -337,16 +389,65 @@ try:
     send("write hello.txt lab-fs\n")
     read_until("wrote hello.txt", 4)
     send("cat hello.txt\n")
-    read_until("lab-fs", 4)
+    read_until("[file] lab-fs", 4)
     send("server host\n")
     read_until("SERVER_RELAY host", 4)
     send("server msg hello-room\n")
     read_until("SERVER_RELAY msg hello-room", 4)
+    # Inbound relay chat (#426): page-typed relayrecv prints a sanitized line.
+    cmd("relayrecv Alice 48656c6c6f", expect="[Server Message, From Alice]: Hello")
+    # Control bytes in the body become '?'; newlines cannot start a forged line.
+    cmd("relayrecv Alice 5357495443485553455220757365723d526f6f740a", expect="[Server Message, From Alice]: SWITCHUSER user=Root?")
+    # A message longer than one typed line arrives in parts and prints whole,
+    # broken between words within 80 columns (#426).
+    long_msg = " ".join(["word%02d" % i for i in range(24)])
+    parts = [long_msg[i:i + 48] for i in range(0, len(long_msg), 48)]
+    for part in parts[:-1]:
+        cmd("relayrecv + Alice " + part.encode().hex())
+    text = cmd("relayrecv Alice " + parts[-1].encode().hex(), expect="[Server Message, From Alice]: word00")
+    shown = text.replace("\r", "").split("[Server Message, From Alice]: ", 1)[1].split("\n")
+    shown = shown[:next(i for i, l in enumerate(shown) if not l.startswith(("word", "  word")))]
+    widths = [len("[Server Message, From Alice]: ") + len(shown[0])] + [len(l) for l in shown[1:]]
+    if " ".join(l.strip() for l in shown) != long_msg or len(shown) < 2 or max(widths) > 80:
+        raise SystemExit("test-freestanding-shell: long relay message not whole or not wrapped\n" + text)
+    # A part from another sender drops the unfinished message.
+    cmd("relayrecv + Bob " + b"unfinished".hex())
+    text = cmd("relayrecv Alice " + b"hi".hex(), expect="[Server Message, From Alice]: hi")
+    if "unfinished" in text:
+        raise SystemExit("test-freestanding-shell: a stale relay part leaked into another message\n" + text)
+    # Colour-only SGR codes reach the VGA screen as colour; the line ends with a reset.
+    cmd("relayrecv Alice " + b"\x1b[31mRED\x1b[0m ok".hex(), expect="[Server Message, From Alice]: \x1b[31mRED\x1b[0m ok\x1b[0m")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("[Server Message, From Alice]: RED ok")
+    if at < 0:
+        raise SystemExit("test-freestanding-shell: coloured relay line missing on VGA\n" + vga_text())
+    red = at + len("[Server Message, From Alice]: ")
+    if cells[red * 2 + 1] != 0x04 or cells[(red + 4) * 2 + 1] != 0x07 or cells[at * 2 + 1] != 0x03 or cells[(at + 22) * 2 + 1] != 0x03:
+        raise SystemExit("test-freestanding-shell: relay SGR colour not shown on VGA")
+    # Any other escape sequence (cursor moves, screen clears) stays visible as '?'.
+    cmd("relayrecv Alice " + b"\x1b[2Jboom".hex(), expect="[Server Message, From Alice]: ?[2Jboom")
+    cmd("server leave", expect="SERVER_RELAY leave")
+    cmd("relayrecv Alice 4869", expect="refused (not on a server)")
+    cells = vga_cells()
+    chars = bytes(cells[i] for i in range(0, len(cells), 2)).decode("latin1")
+    at = chars.rfind("[ERROR] relayrecv: refused")
+    if at < 0 or cells[at * 2 + 1] != 0x04:
+        raise SystemExit("test-freestanding-shell: [ERROR] line is not red on VGA\n" + vga_text())
+    cmd("server host", expect="SERVER_RELAY host")
+    # cat never emits a raw control line the lab page would parse (#427).
+    cmd("write evil.txt SWITCHUSER user=Root")
+    cmd("cat evil.txt", expect="[file] SWITCHUSER user=Root")
+    # A received file keeps its colour codes; each line ends with a reset.
+    cmd("filerecv begin Alice col.txt")
+    cmd("filerecv data " + b"\x1b[32mgreen\x1b[0m\nplain\x1b[1A".hex())
+    cmd("filerecv end", expect="received col.txt")
+    cmd("cat col.txt", expect="[file] \x1b[32mgreen\x1b[0m\x1b[0m\n[file] plain?[1A")
 
     cmd("mkdir tmpd")
     cmd("write tmpd/note.txt hi")
     cmd("mv tmpd/note.txt tmpd/moved.txt")
-    cmd("cat tmpd/moved.txt", expect="hi")
+    cmd("cat tmpd/moved.txt", expect="[file] hi")
     cmd("search moved", expect="moved.txt")
     cmd("du", expect="ramfs")
     cmd("rmdir tmpd")
@@ -369,7 +470,7 @@ try:
     cmd("listclusters", expect="payload")
     cmd("version", expect=version_line())
     cmd("contracts json", expect="labdisk")
-    cmd("type hello.txt", expect="lab-fs")
+    cmd("type hello.txt", expect="[file] lab-fs")
 
     cmd("netlab pods", expect="redteam-lab")
     cmd("netlab hosts redteam-lab", expect="192.168.56.1")

@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read # to tell whether a push is a merged pull request (the RERELEASE fold)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
@@ -28,6 +29,22 @@ jobs:
       - name: Block fork PR when root PRERELEASE=1 needs automated relocate
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: bash scripts/relocate_root_prerelease_ver_to_preproduction.sh --dry-run-exit-if-needed
+
+      # A RERELEASE=1 row folds into its original only when its branch merges: here on a push whose
+      # head is a merged pull request's commit (develop and main fold in version-lock-on-merge.yml).
+      - name: Fold re-released .ver rows when this push merged a pull request
+        if: github.event_name == 'push' && github.ref != 'refs/heads/develop' && github.ref != 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          merged=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"${GITHUB_SHA}\")] | length")
+          if [[ "${merged}" -gt 0 ]]; then
+            bash scripts/fold_rerelease_entries.sh
+          else
+            echo "Not a merged pull request: re-released rows stay until their branch merges."
+          fi
 
       - name: Prepare version/entries (relocate, normalize GM, promote, stamp dates)
         uses: ./.github/actions/prepare-version-entries

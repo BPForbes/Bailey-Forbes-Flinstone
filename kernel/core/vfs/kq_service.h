@@ -6,6 +6,7 @@
 /* When the service is not alive every monitored change is refused. */
 #include "contract_result.h"
 #include "fl/driver/keyquorum.h"
+#include "kq_checkpoint.h"
 #include "kq_storage.h"
 #include "user_db.h"
 #include "workqueue.h"
@@ -73,6 +74,7 @@ fl_result_t fl_kq_service_autosign_remove(const char *label);
 void fl_kq_service_utc_now(char *out, size_t cap);
 
 void fl_kq_report_refusal_in(const kq_file_offer_t *o, fl_result_t why, const fl_kq_dir_t *dir);
+void fl_kq_report_refusal_cp_in(const kq_file_offer_t *o, fl_kq_cp_result_t cp, const fl_kq_dir_t *dir);
 
 #include <pthread.h>
 pthread_t fl_kq_service_thread_for_test(void);

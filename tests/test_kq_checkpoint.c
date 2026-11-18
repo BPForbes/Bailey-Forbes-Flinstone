@@ -1132,6 +1132,50 @@ static int test_head_author_names_the_single_head(void) {
     return 0;
 }
 
+/* track starts a signed history once; the head is trusted under the store's keys, and a newer signed
+ * revision (sign_head) stays trusted, while a head whose signer the store has no key for is not. */
+static int test_track_starts_a_trusted_history(void) {
+    world_t w;
+    fl_user_db_keydir_t dir;
+    fl_kq_buf_t lines = {0};
+    char src[PATH_MAX], other[PATH_MAX], forked[PATH_MAX], missing[PATH_MAX];
+    uint8_t rev[32], again[32], head[32];
+
+    ASSERT(setup(&w) == 0);
+    fl_user_db_keydir_init(&dir, &w.db);
+    path_in(src, sizeof src, "tracked.txt");
+    path_in(other, sizeof other, "unknown-signer.txt");
+    path_in(forked, sizeof forked, "tracked-forked.txt");
+    path_in(missing, sizeof missing, "never-written.txt");
+    ASSERT(kq_test_write_text(src, "v1\n") == 0 && kq_test_write_text(other, "v1\n") == 0);
+
+    ASSERT(fl_kq_cp_track_with(&dir.base, src, MYA, w.mya_sign, T1, rev) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_head(src, head) == FL_KQ_CP_OK && memcmp(head, rev, 32) == 0);
+    ASSERT(fl_kq_cp_head_trusted_with(&dir.base, src, again) == FL_KQ_CP_OK && memcmp(again, rev, 32) == 0);
+    /* Never twice: a second track would start a second history. */
+    ASSERT(fl_kq_cp_track_with(&dir.base, src, MYA, w.mya_sign, T2, NULL) == FL_KQ_CP_EXISTS);
+
+    ASSERT(kq_test_write_text(src, "v2\n") == 0);
+    ASSERT(fl_kq_cp_sign_head_with(src, MYA, w.mya_sign, T2) == FL_KQ_CP_OK);
+    ASSERT(fl_kq_cp_head(src, head) == FL_KQ_CP_OK && memcmp(head, rev, 32) != 0);
+    ASSERT(fl_kq_cp_head_trusted_with(&dir.base, src, again) == FL_KQ_CP_OK && memcmp(again, head, 32) == 0);
+    ASSERT(fl_kq_cp_history(src, &lines) == FL_KQ_CP_OK);
+    ASSERT(count(&lines, MYA) >= 2);
+    fl_kq_buf_free(&lines);
+
+    /* A label the store holds no key for neither starts a history nor is trusted. */
+    ASSERT(fl_kq_cp_track_with(&dir.base, other, "Root.Nobody", w.mya_sign, T1, NULL) == FL_KQ_CP_NO_KEY);
+    ASSERT(fl_kq_cp_track_with(&dir.base, other, STEVE, w.mya_sign, T1, NULL) == FL_KQ_CP_OK); /* Mya's key, Steve's name */
+    ASSERT(fl_kq_cp_head_trusted_with(&dir.base, other, again) == FL_KQ_CP_UNTRUSTED);
+
+    ASSERT(make_forked(&w, forked) == 0);
+    ASSERT(fl_kq_cp_head_trusted_with(&dir.base, forked, again) == FL_KQ_CP_FORKED);
+    ASSERT(fl_kq_cp_head_trusted_with(&dir.base, missing, again) == FL_KQ_CP_IO);
+    ASSERT(fl_kq_cp_track_with(&dir.base, missing, MYA, w.mya_sign, T1, NULL) == FL_KQ_CP_IO); /* no file */
+    teardown(&w);
+    return 0;
+}
+
 /* A refused receive's KQER is verified only for that artifact and reporter; injecting adds one ErrorReported event. */
 static int test_refusal_report_is_verified_and_injected(void) {
     world_t w;
@@ -1306,6 +1350,7 @@ int main(void) {
     RUN(test_decode_uses_the_held_directory);
     RUN(test_checkpoints_through_the_facade);
     RUN(test_head_author_names_the_single_head);
+    RUN(test_track_starts_a_trusted_history);
     RUN(test_refusal_report_is_verified_and_injected);
     RUN(test_offer_wire_layout_is_fixed);
     RUN(test_reports_are_held_and_capped);
