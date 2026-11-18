@@ -68,7 +68,7 @@ async function main() {
   await bob.locator("#kq-requests li button").first().waitFor({ timeout: 20000 });
   assert(/note\.txt from alice/.test(await bob.textContent("#kq-requests")), "bob is not asked to co-sign");
   await shell(bob, "cat note.txt");
-  assert(!/\nhello bob/.test(await bob.textContent("#wasm-term")), "the file arrived before bob co-signed");
+  assert(!/\[file\] hello bob/.test(await bob.textContent("#wasm-term")), "the file arrived before bob co-signed");
   await bob.click("#kq-requests li button");
   await bob.waitForFunction(() => /decode: ok/.test(document.getElementById("kq-log")?.textContent || ""), null,
                             { timeout: 20000 });
@@ -79,7 +79,7 @@ async function main() {
     assert(step.test(bobLog), `bob's log lacks ${step}`);
   assert(!/refused/.test(aliceLog + bobLog), "a checkpoint refused the delivery");
   await shell(bob, "cat note.txt");
-  await bob.waitForFunction(() => /\nhello bob/.test(document.getElementById("wasm-term")?.textContent || ""), null,
+  await bob.waitForFunction(() => /\[file\] hello bob/.test(document.getElementById("wasm-term")?.textContent || ""), null,
                             { timeout: 10000 });
 
   await shell(alice, "write plain.txt just text");

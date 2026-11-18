@@ -49,6 +49,25 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   8767` uses the Node hub. If the hub is down, the page falls back to a
   same-origin BroadcastChannel (tabs on one machine only). Sending a chat line
   emits it once (the sender's local echo is the same event path as peer delivery).
+  Peer messages are also typed into the guest at an idle command prompt, so a
+  bare-metal user can follow chat without the page panel. The body goes as hex
+  in parts of at most 48 bytes so each typed line fits the guest's 128-character
+  line: `relayrecv + <from> <hex>` for every part but the last, then
+  `relayrecv <from> <hex>`, which prints the whole message (up to the relay's
+  512 bytes) as `[Server Message, From <from>]: <text>`, broken between words at 80 columns
+  with a two-space indent on later lines. Only printable bytes and colour
+  codes are shown (anything else becomes `?`; see colour below). A part from a different sender, a refused part,
+  or leaving the server drops an unfinished message. The page arms a quiet
+  `server seat` on connect (and `server unseat` on leave) so `relayrecv` is
+  refused when not on a server.
+- What the page types for itself (`relayrecv`, `filerecv`, `server seat`,
+  `server unseat`) and the control lines it reads back (`SERVER_RELAY msg` /
+  `announce` and the `SERVER_FILE` hex line) stay on serial only: the VGA
+  console never shows them, so the screen holds what the person typed and the
+  shell's answers. A sender sees their own `server msg` line once, as typed,
+  and peers see it as `[Server Message, ...]` output. `relayrecv` and `filerecv` are for the
+  page: a person typing them sees no echo. The WebAssembly shell's terminal is
+  its serial stream, so it still shows these lines.
 - `server file -user <name> <path>` sends a ramfs file to another user on the
   server. The guest prints `SERVER_FILE <user> <name> <hex>`; the page sends it
   as one frame of the lab opcode `0x72` (`who_len`, `who`, `name_len`, `name`, a
@@ -64,8 +83,22 @@ After that marker the guest is an interactive lab shell, not the hosted ELF:
   The file is saved in the current directory and the shell prints `received <name>
   from <user>`. A file is never saved over an existing one, names are a single
   plain component, lab files are text of at most 159 bytes, and at most 16 files
-  wait at once (the oldest is dropped, with a note). Lab isolation (`netlab start`)
-  stops files as well as chat.
+  wait at once (the oldest is dropped, with a note). `cat` / `type` print file
+  content behind a `[file] ` prefix with the same filter, so a received file
+  cannot forge `SWITCHUSER`, `SERVER_*`, or `LAB_NETMODE` lines the page would
+  act on. Lab isolation (`netlab start`) stops files as well as chat.
+- Colour: relay messages and `cat` / `type` output keep ANSI colour codes
+  (`ESC [ <n>;<n> m`) when every number is a colour or reset code: 0, 1 (bright
+  foreground), 22, 30-37, 39, 40-47, 49, 90-97 and 100-107 (bright backgrounds
+  show as the normal colour, since VGA uses that bit for blinking). The VGA
+  console draws them as text colours, and a message or file line that used colour
+  ends with `ESC [0m`, so a sender cannot recolour the receiver's prompt. Any
+  other escape sequence, such as a cursor move or screen clear, is shown with its
+  `ESC` as `?`. The WebAssembly shell's VGA buffer reads the same codes; its
+  terminal shows the serial stream as text.
+  The shell's own server text is coloured the same way, on the VGA buffer only
+  (chat `[Server Message, From <from>]: ` cyan, `[Server]` success green and
+  warnings yellow, `[ERROR]` red, `netlab:` tag cyan, as `fl_colors.c` does); serial and redirected output stay plain. See `docs/COLOR_SYSTEM.md`.
 - KeyQuorum co-signed files (WebAssembly shell only): `server file send -t <path> -user
   <name>`, then the recipient's `server file cosign [<id>]` (and `server file open <id>` to
   retry). The file is signed by its sender and sealed to the recipient; the session hosting

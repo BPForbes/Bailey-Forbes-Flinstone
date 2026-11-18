@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <string.h>
+#include "fl/path.h"
 
 #define FL_SERVER_SHARED_LANDED_MAX \
     (FL_SERVER_SHARE_ID_MAX + FL_SERVER_FILE_NAME_MAX + 32u)
@@ -30,9 +32,36 @@ int fl_fs_trusted_root_open(const char *dir);
 int fl_fs_read_file_in(int dirfd, const char *name, size_t max, uint8_t **data, size_t *len);
 int fl_fs_write_file_atomic_in(int dirfd, const char *name, const uint8_t *data, size_t len);
 
-int fl_fs_join_path(char *out, size_t cap, const char *dir, const char *name);
+#define FL_SERVER_SHARED_META_SUFFIX ".meta"
 
-int fl_server_shared_name_is_reserved(const char *name);
+/* 1 when name ends (ignoring ASCII case, as a file system may fold it) with a suffix only the
+ * share and KeyQuorum write: a staged part, sidecar metadata, a container, a seen record, a
+ * report or a backup. Inline so the freestanding image uses the same rule. */
+static inline int fl_server_shared_name_is_reserved(const char *name) {
+    static const char *const reserved[] = {FL_FS_PART_SUFFIX, FL_SERVER_SHARED_META_SUFFIX,
+                                           ".kqtf", ".kqseen", ".kqer", FL_FS_BACKUP_SUFFIX};
+    size_t len, i;
+
+    if (!name)
+        return 0;
+    len = strlen(name);
+    for (i = 0; i < sizeof reserved / sizeof reserved[0]; i++) {
+        const char *a, *b;
+        size_t sl = strlen(reserved[i]);
+
+        if (len < sl)
+            continue;
+        for (a = name + len - sl, b = reserved[i]; *a; a++, b++) {
+            unsigned char x = (unsigned char)*a, y = (unsigned char)*b;
+
+            if ((x >= 'A' && x <= 'Z' ? x + 32u : x) != (y >= 'A' && y <= 'Z' ? y + 32u : y))
+                break;
+        }
+        if (!*a)
+            return 1;
+    }
+    return 0;
+}
 int fl_fs_contained_available(void);
 int fl_fs_stage_file_in(int dirfd, const char *name, const uint8_t *data, size_t len);
 int fl_fs_rename_in(int dirfd, const char *from, const char *to);

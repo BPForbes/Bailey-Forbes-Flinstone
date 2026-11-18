@@ -177,6 +177,30 @@
     const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
     return lines || "filerecv none\n";
   }
+  /* Inbound chat for the guest (#426): the body goes as hex in parts that fit the
+   * guest's 128-character line ("relayrecv + <from> <hex>"), and the last part
+   * ("relayrecv <from> <hex>") prints the whole message. See README.md. */
+  const RELAY_RECV_PART_BYTES = 48;
+  const RELAY_RECV_BODY_MAX = 512;
+  function relayRecvLine(chatText) {
+    const raw = String(chatText || "");
+    if (!raw) return "";
+    const match = /^([^:\n]+): ([\s\S]*)$/.exec(raw);
+    let from = match ? match[1].trim() : "peer";
+    let body = match ? match[2] : raw;
+    if (!guestUserNameOk(from)) {
+      from = "peer";
+      body = raw;
+    }
+    const bytes = new TextEncoder().encode(body).slice(0, RELAY_RECV_BODY_MAX);
+    if (!bytes.length) return "";
+    let lines = "";
+    for (let i = 0; i < bytes.length; i += RELAY_RECV_PART_BYTES) {
+      const last = i + RELAY_RECV_PART_BYTES >= bytes.length;
+      lines += `relayrecv ${last ? "" : "+ "}${from} ${bytesToHex(bytes.slice(i, i + RELAY_RECV_PART_BYTES))}\n`;
+    }
+    return lines;
+  }
   function labDnsNameOk(name) {
     return typeof name === "string" && name.length > 0 && name.length <= 253 &&
       /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[A-Za-z0-9]$/.test(name);
@@ -279,5 +303,5 @@
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine };
 });

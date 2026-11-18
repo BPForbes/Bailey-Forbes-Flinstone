@@ -16,7 +16,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define FL_SERVER_SHARED_META_SUFFIX ".meta"
 
 int fl_fs_mkdir_p(const char *path, mode_t mode)
 {
@@ -432,25 +431,6 @@ int fl_fs_read_file_in(int dirfd, const char *name, size_t max, uint8_t **data, 
 #endif
 }
 
-int fl_fs_join_path(char *out, size_t cap, const char *a, const char *b)
-{
-    int r;
-
-    if (!out || cap == 0u)
-        return -1;
-    if (!a || !a[0])
-        r = snprintf(out, cap, "%s", b ? b : "");
-    else if (a[strlen(a) - 1] == '/')
-        r = snprintf(out, cap, "%s%s", a, b ? b : "");
-    else
-        r = snprintf(out, cap, "%s/%s", a, b ? b : "");
-    if (r < 0 || (size_t)r >= cap) {
-        errno = ENAMETOOLONG;
-        return -ENAMETOOLONG;
-    }
-    return 0;
-}
-
 /* ---- landing directory and the all-or-nothing replace ---------------------- */
 
 /* The directory the replace works in: an fd (contained), or fd -1 with the directory's path. */
@@ -830,40 +810,6 @@ static int landing_meta_exists(const char *root, const char *landed)
     if (n < 0 || (size_t)n >= sizeof(meta_path))
         return 0;
     return access(meta_path, F_OK) == 0;
-}
-
-/* ASCII-only, equal-length comparison ignoring case (a file system may fold case). */
-static int ascii_casecmp(const char *a, const char *b)
-{
-    for (; *a && *b; a++, b++) {
-        unsigned char x = (unsigned char)*a, y = (unsigned char)*b;
-
-        if (x >= 'A' && x <= 'Z')
-            x = (unsigned char)(x + ('a' - 'A'));
-        if (y >= 'A' && y <= 'Z')
-            y = (unsigned char)(y + ('a' - 'A'));
-        if (x != y)
-            return 1;
-    }
-    return *a != *b;
-}
-
-int fl_server_shared_name_is_reserved(const char *name)
-{
-    static const char *const reserved[] = {FL_FS_PART_SUFFIX, FL_SERVER_SHARED_META_SUFFIX,
-                                           ".kqtf", ".kqseen", ".kqer", FL_FS_BACKUP_SUFFIX};
-    size_t len, i;
-
-    if (!name)
-        return 0;
-    len = strlen(name);
-    for (i = 0; i < sizeof reserved / sizeof reserved[0]; i++) {
-        size_t sl = strlen(reserved[i]);
-
-        if (len >= sl && !ascii_casecmp(name + len - sl, reserved[i]))
-            return 1;
-    }
-    return 0;
 }
 
 /** `n` 1 = base name; 2+ = `stem (n).ext` disambiguation without share id in the name. */
