@@ -619,7 +619,7 @@
   }
   async function sendGuest(value) {
     if (!guestReady()) return false;
-    await enqueueGuest(() => emulator.sendText(value));
+    await enqueueGuest(() => (emulator ? emulator.sendText(value) : undefined));
     return true;
   }
   /* Seat arming and inbound relay chat are typed only at an idle command prompt
@@ -665,7 +665,7 @@
           const from = serialTail.length;
           const seatLine = on ? "server seat\n" : "server unseat\n";
           if (gen !== relayWorkGen || !guestReady()) return;
-          await enqueueGuest(() => emulator.sendText(seatLine));
+          await enqueueGuest(() => (emulator ? emulator.sendText(seatLine) : undefined));
           if (gen !== relayWorkGen || !guestReady()) return;
           await waitSerial(/(?:@flintstone>|shell>) /, 2000, from);
         }
@@ -674,7 +674,7 @@
           const line = pendingRelayChat.shift();
           const from = serialTail.length;
           if (gen !== relayWorkGen || !guestReady()) return;
-          await enqueueGuest(() => emulator.sendText(line));
+          await enqueueGuest(() => (emulator ? emulator.sendText(line) : undefined));
           if (gen !== relayWorkGen || !guestReady()) return;
           await waitSerial(/\[relay\] |relayrecv: /, 2000, from);
         }
@@ -826,8 +826,11 @@
       busy = true;
       if (id === "boot" || id === "reset" || id === "poweroff") {
         clearLabIsolation();
-        // Drop queued seat/chat work so an in-flight flush cannot keep a QEMU worker alive.
+        // Drop queued seat/chat work and drop the page emulator handle before destroy
+        // so an in-flight seat flush cannot call sendText on a dying QEMU worker
+        // (and so guestReady() is false while powerOff awaits terminate).
         cancelGuestRelayWork();
+        emulator = null;
       }
       try { await action(); } catch (error) {
         if (id === "pause" || id === "resume") {

@@ -124,6 +124,18 @@ assert(labJsSrc.includes("sendGuestLines(`session ${id}\\n`"), "session tabs mus
 assert(labJsSrc.includes("deliverRelayChat"), "inbound relay chat must be typed into the guest (#426)");
 assert(labJsSrc.includes("armGuestRelaySeat"), "relay hello/leave must arm the guest seat for relayrecv");
 assert(labJsSrc.includes("cancelGuestRelayWork"), "power-off/reset must cancel pending seat and chat flushes");
+assert(/cancelGuestRelayWork\(\);\s*\n\s*emulator = null;/.test(labJsSrc),
+       "power-off/reset/boot must drop the page emulator handle before destroy");
+{
+  const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
+  assert(adapterSrc.includes("finally {\n          try { worker.terminate(); }"),
+         "QEMU destroy must terminate the worker even if the destroy handshake fails");
+  assert(adapterSrc.includes("if (disposed) return;"),
+         "QEMU sendText/sendKey must no-op after dispose so seat flush cannot keep a worker alive");
+  const workerSrc = fs.readFileSync("tools/browser-lab/qemu-worker.js", "utf8");
+  assert(workerSrc.includes("let dead = false"),
+         "QEMU worker must ignore boot/qmp work after destroy");
+}
 assert(labJsSrc.includes("if (!event.local) void deliverRelayChat(event.text)"),
        "local chat echo must not be typed back as relayrecv");
 assert(labJsSrc.includes("createFlintstoneWasm"), "default lab must sandboxed-boot the Emscripten module");
@@ -512,7 +524,11 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     }
     assert(labJs.includes("const guestKeys = core.createGuestInput();"), "every guest input is counted");
     assert(/core\.driveGuestSteps\(steps, patterns, \{\s*input: guestKeys,/.test(labJs), "exchanges send through the counted input");
-    assert(!/emulator\.(sendText|typeChar|sendKey)\(/.test(labJs.replace(/enqueueGuest\(\(\) => emulator\.\w+\([^)]*\)\)/g, "").replace("write: value => emulator.sendText(value)", "")),
+    assert(!/emulator\.(sendText|typeChar|sendKey)\(/.test(
+      labJs
+        .replace(/enqueueGuest\(\(\) => \(emulator \? emulator\.\w+\([^)]*\) : undefined\)\)/g, "")
+        .replace(/enqueueGuest\(\(\) => emulator\.\w+\([^)]*\)\)/g, "")
+        .replace("write: value => emulator.sendText(value)", "")),
       "nothing reaches the guest except through guestKeys");
   }
   console.log("test_browser_lab: PASS");

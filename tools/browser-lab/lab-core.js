@@ -125,8 +125,30 @@
         return true;
       },
       async reset(options) { await this.powerOff(); await this.boot(options); },
-      async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; paused = false; line = ""; state(STATES.OFF); },
-      fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; readySent = false; paused = false; state(STATES.FAILED, error.message || String(error)); },
+      async powerOff() {
+        generation++; clearTimeout(timer);
+        const instance = emulator;
+        emulator = null;
+        readySent = false; paused = false; line = "";
+        try {
+          if (instance) {
+            if (instance.destroy) await instance.destroy();
+            else await instance.stop();
+          }
+        } finally {
+          state(STATES.OFF);
+        }
+      },
+      fail(error) {
+        generation++; clearTimeout(timer);
+        const instance = emulator;
+        emulator = null;
+        readySent = false; paused = false;
+        state(STATES.FAILED, error.message || String(error));
+        // Tear down asynchronously; callers (onError) are sync. Always attempt destroy.
+        if (instance && instance.destroy) void Promise.resolve(instance.destroy()).catch(() => {});
+        else if (instance && instance.stop) void Promise.resolve(instance.stop()).catch(() => {});
+      },
       serialByte,
     };
   }
