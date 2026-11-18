@@ -1,4 +1,5 @@
 #include "vga.h"
+#include "vga_sgr.h"
 #include <stdint.h>
 
 #define VGA_COLS 80
@@ -13,6 +14,7 @@ static volatile uint16_t *const s_vga = (volatile uint16_t *)(uintptr_t)0xb8000;
 #endif
 static int s_row = 1;
 static int s_col = 0;
+static struct fl_vga_sgr s_sgr = { 0, FL_VGA_SGR_DEFAULT_ATTR, 0, 0, 0, { 0 } };
 
 static void put_cell(int row, int col, char ch, uint8_t attr)
 {
@@ -32,6 +34,7 @@ void fl_fs_vga_init(void)
     s_vga[0] = DIAG_GLYPH;
     s_row = 1;
     s_col = 0;
+    fl_vga_sgr_reset(&s_sgr);
     fl_fs_vga_status("Flinstone", 1, 1);
 }
 
@@ -66,6 +69,8 @@ void fl_fs_vga_status(const char *user, unsigned session, unsigned sessions)
 
 void fl_fs_vga_putc(char c)
 {
+    if (fl_vga_sgr_feed(&s_sgr, c))
+        return;
     if (c == '\r') {
         s_col = 0;
         return;
@@ -87,11 +92,11 @@ void fl_fs_vga_putc(char c)
     if (c == '\b') {
         if (s_col > 0) {
             --s_col;
-            put_cell(s_row, s_col, ' ', 0x07);
+            put_cell(s_row, s_col, ' ', s_sgr.attr);
         }
         return;
     }
-    put_cell(s_row, s_col, c, 0x07);
+    put_cell(s_row, s_col, c, s_sgr.attr);
     ++s_col;
 }
 
@@ -127,6 +132,7 @@ void fl_fs_vga_clear_shell(void)
         clear_row(row, 0x07);
     s_row = 1;
     s_col = 0;
+    fl_vga_sgr_reset(&s_sgr);
 }
 
 void fl_fs_vga_get_cursor(int *row, int *col)

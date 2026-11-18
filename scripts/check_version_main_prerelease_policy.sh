@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Main-line policy: no preproduction/* directories, no PRERELEASE=1, no GM=1, no
-# RERELEASE=, and no DEV_VERSION= lines in any .ver under version/entries or
-# version/locked. Run scripts/promote_preproduction_for_main.sh before merging
-# develop → main when promoting a prerelease line to GA.
+# Main-line policy: no preproduction/* directories, no PRERELEASE=1, no GM=1, and no
+# DEV_VERSION= lines in any .ver under version/entries or version/locked. RERELEASE is allowed:
+# a GA version may be reissued (fold_rerelease_entries.sh folds it on merge).
+# Run scripts/promote_preproduction_for_main.sh before merging develop → main when promoting
+# a prerelease line to GA.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 err=0
@@ -21,10 +22,6 @@ while IFS= read -r -d '' f; do
   fi
   if grep -qE '^[[:space:]]*(int[[:space:]]+)?GM=1([[:space:]]|$)' "$f"; then
     echo "check_version_main_prerelease_policy: GM=1 not allowed in $f on main." >&2
-    err=1
-  fi
-  if grep -qE '^[[:space:]]*(int[[:space:]]+)?RERELEASE=' "$f"; then
-    echo "check_version_main_prerelease_policy: RERELEASE must not appear in $f on main." >&2
     err=1
   fi
   if grep -qE '^[[:space:]]*(int[[:space:]]+)?DEV_VERSION=' "$f"; then

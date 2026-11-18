@@ -104,7 +104,9 @@
     worker.postMessage({ type: "boot", image, memorySize }, [image]);
     return {
       async stop() {
+        if (disposed) return;
         await withScreenHeld(async () => {
+          if (disposed) return;
           const s = await command("query-status");
           if (s && !s.running) return;
           await command("stop");
@@ -113,7 +115,9 @@
         });
       },
       async run() {
+        if (disposed) return;
         await withScreenHeld(async () => {
+          if (disposed) return;
           const s = await command("query-status");
           if (s && s.running) return;
           await command("cont");
@@ -122,15 +126,18 @@
         });
       },
       async sendKey(qcodes) {
+        if (disposed) return;
         pulseInputHold();
         try { await withScreenHeld(() => sendKey(qcodes)); }
         finally { pulseInputHold(); }
       },
       async sendText(text) {
+        if (disposed) return;
         pulseInputHold();
         try {
           await withScreenHeld(async () => {
             for (const ch of text) {
+              if (disposed) return;
               const codes = qcodesForChar(ch);
               if (!codes) continue;
               await sendKey(codes);
@@ -151,12 +158,16 @@
         if (inputHoldTimer) clearTimeout(inputHoldTimer);
         clearInterval(screenTimer);
         qmp.failAll(new Error("QEMU powered off"));
-        await new Promise(resolve => {
-          const timeout = setTimeout(resolve, 1000);
-          worker.onmessage = ({ data }) => { if (data.type === "destroyed") { clearTimeout(timeout); resolve(); } };
-          worker.postMessage({ type: "destroy" });
-        });
-        worker.terminate();
+        try {
+          await new Promise(resolve => {
+            const timeout = setTimeout(resolve, 1000);
+            worker.onmessage = ({ data }) => { if (data.type === "destroyed") { clearTimeout(timeout); resolve(); } };
+            try { worker.postMessage({ type: "destroy" }); }
+            catch (_) { clearTimeout(timeout); resolve(); }
+          });
+        } finally {
+          try { worker.terminate(); } catch (_) { /* already closed */ }
+        }
       },
     };
   };

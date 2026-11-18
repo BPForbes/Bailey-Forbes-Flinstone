@@ -100,11 +100,38 @@ stage2:
     cmp eax, KERNEL_MAX_SECTORS
     ja boot_fail
     mov [remaining], ax
-    mov eax, [patch_kernel_end]
-    cmp eax, FL_KERNEL_LOAD_ADDR
+    mov eax, [patch_kernel_end] ; the bss end: the bss lives above 1 MiB and is never read from disk
+    cmp eax, FL_KERNEL_BSS_ADDR
     jbe boot_fail
-    cmp eax, FL_LOW_BUDGET
+    cmp eax, FL_IDENTITY_MAP_END
     ja boot_fail
+; entry.asm zeroes the bss before any C check runs: one usable E820 entry must hold all of it.
+    mov si, msg_bss
+    mov di, FL_BOOTINFO_E820_ADDR
+    mov cx, [FL_BOOTINFO_ADDR + BI_E820_COUNT]
+.bss_next:
+    test cx, cx
+    jz boot_fail
+    cmp dword [di + 16], 1 ; usable RAM
+    jne .bss_skip
+    test byte [di + 20], 1 ; enabled (preset for a 20-byte entry)
+    jz .bss_skip
+    cmp dword [di + 4], 0
+    jne .bss_skip
+    cmp dword [di], FL_KERNEL_BSS_ADDR
+    ja .bss_skip
+    mov eax, [di]
+    mov edx, [di + 12]
+    add eax, [di + 8]
+    adc edx, 0
+    jnz .bss_ok ; ends at or past 4 GiB
+    cmp eax, [patch_kernel_end]
+    jae .bss_ok
+.bss_skip:
+    add di, 24
+    dec cx
+    jmp .bss_next
+.bss_ok:
     ; Chunks of at most 127 sectors keep each read inside one 64 KiB real-mode segment.
 .load_next:
     mov ax, [remaining]
@@ -151,6 +178,7 @@ stage2:
     shl eax, 9
     add eax, FL_KERNEL_LOAD_ADDR
     mov [FL_BOOTINFO_ADDR + BI_KERNEL_LOAD_END], eax
+    mov [res_load_end], eax
     mov eax, [patch_kernel_end]
     mov [FL_BOOTINFO_ADDR + BI_KERNEL_END], eax
     mov [res_kernel_end], eax
@@ -245,6 +273,7 @@ msg_e820: db "FLINTSTONE_BOOT_FAIL e820", 13, 10, 0
 msg_a20: db "FLINTSTONE_BOOT_FAIL a20", 13, 10, 0
 msg_size: db "FLINTSTONE_BOOT_FAIL kernel-size", 13, 10, 0
 msg_read: db "FLINTSTONE_BOOT_FAIL kernel-read", 13, 10, 0
+msg_bss: db "FLINTSTONE_BOOT_FAIL bss-memory", 13, 10, 0
 drive: db 0
 e820_calls: dw 0
 e820_di: dw 0
@@ -270,7 +299,9 @@ reserved:
     dq FL_LOADER_STACK_BOTTOM, FL_STAGE2_ADDR + FL_STAGE2_SECTORS * 512 ; loader stack, stages 1 and 2
     dq FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP      ; kernel stack
     dq FL_KERNEL_LOAD_ADDR
-res_kernel_end: dq 0                                    ; image and bss
+res_load_end: dq 0                                      ; image
+    dq FL_KERNEL_BSS_ADDR
+res_kernel_end: dq 0                                    ; bss
     dq 0xa0000, 0x100000                                ; legacy video and BIOS ROM
 reserved_end:
 

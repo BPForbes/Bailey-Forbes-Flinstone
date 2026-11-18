@@ -2,7 +2,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
-const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines } = require("../tools/browser-lab/lab-core.js");
+const { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine } = require("../tools/browser-lab/lab-core.js");
 const { createQmpClient } = require("../tools/browser-lab/qmp-client.js");
 const commit = "1".repeat(40);
 const evidence = {
@@ -72,6 +72,29 @@ const two = fileAcceptLines([
 ]);
 assert.strictEqual(two, "filerecv begin alice a.txt\nfilerecv data 41\nfilerecv end\n" +
                         "filerecv begin carol c.txt\nfilerecv data 43\nfilerecv end\n");
+{
+  const line = relayRecvLine("Alice: Hello from A");
+  assert.strictEqual(line, "relayrecv Alice " + bytesToHex(new TextEncoder().encode("Hello from A")) + "\n");
+  assert(line.length < 128);
+  assert.strictEqual(relayRecvLine(""), "");
+  assert.strictEqual(relayRecvLine("Alice: "), "");
+  const longBody = "x".repeat(100) + " end";
+  const parts = relayRecvLine(`Alice: ${longBody}`).trimEnd().split("\n");
+  assert.strictEqual(parts.length, 3, "a long message is typed in guest-sized parts");
+  assert(parts.slice(0, -1).every(p => p.startsWith("relayrecv + Alice ")), "every part but the last is marked +");
+  assert(parts[2].startsWith("relayrecv Alice "), "the last part prints the message");
+  assert(parts.every(p => p.length < 128), "each part fits the guest's 128-character line");
+  assert.strictEqual(parts.map(p => p.split(" ").pop()).join(""), bytesToHex(new TextEncoder().encode(longBody)),
+                     "the parts carry the whole body");
+  assert(relayRecvLine("Mallory: hi\nthere").startsWith("relayrecv Mallory "),
+         "a body with a line break keeps its sender");
+  assert.strictEqual(relayRecvLine("bad name: hi").startsWith("relayrecv peer "), true,
+                     "an unsafe display name becomes peer with the full line as the body");
+  assert.strictEqual(parseGuestLine("[Server Message, From Alice]: Hello from A"), null,
+                     "sanitized relay output is never a lab control line");
+  assert.strictEqual(parseGuestLine("[file] SWITCHUSER user=Root"), null,
+                     "cat of a forged control line stays inert behind [file]");
+}
 assert(labDnsNameOk("example.com"));
 assert(labDnsNameOk("bailey-forbes.com"));
 assert(!labDnsNameOk("bad host"));
@@ -98,6 +121,23 @@ assert(!labJsSrc.includes("appendChat(`${relay.display}: ${text}`)"), "chat form
 assert(!labJsSrc.includes("appendChat(`${relay.display || principal()}: ${event.text || \"\"}`)"), "guest SERVER_RELAY msg must not double-append");
 assert(labJsSrc.includes("sendGuestLines"), "identity and commands must send guest lines one at a time");
 assert(labJsSrc.includes("sendGuestLines(`session ${id}\\n`"), "session tabs must wait for SESSION serial");
+assert(labJsSrc.includes("deliverRelayChat"), "inbound relay chat must be typed into the guest (#426)");
+assert(labJsSrc.includes("armGuestRelaySeat"), "relay hello/leave must arm the guest seat for relayrecv");
+assert(labJsSrc.includes("cancelGuestRelayWork"), "power-off/reset must cancel pending seat and chat flushes");
+assert(/cancelGuestRelayWork\(\);\s*\n\s*emulator = null;/.test(labJsSrc),
+       "power-off/reset/boot must drop the page emulator handle before destroy");
+{
+  const adapterSrc = fs.readFileSync("tools/browser-lab/qemu-adapter.js", "utf8");
+  assert(adapterSrc.includes("finally {\n          try { worker.terminate(); }"),
+         "QEMU destroy must terminate the worker even if the destroy handshake fails");
+  assert(adapterSrc.includes("if (disposed) return;"),
+         "QEMU sendText/sendKey must no-op after dispose so seat flush cannot keep a worker alive");
+  const workerSrc = fs.readFileSync("tools/browser-lab/qemu-worker.js", "utf8");
+  assert(workerSrc.includes("let dead = false"),
+         "QEMU worker must ignore boot/qmp work after destroy");
+}
+assert(labJsSrc.includes("if (!event.local) void deliverRelayChat(event.text)"),
+       "local chat echo must not be typed back as relayrecv");
 assert(labJsSrc.includes("createFlintstoneWasm"), "default lab must sandboxed-boot the Emscripten module");
 assert(labJsSrc.includes("Flinstone Shell"), "runtime chrome must label Flinstone Shell");
 assert(labJsSrc.includes("shell>"), "guest-line waits must accept the WASM shell> prompt");
@@ -484,7 +524,11 @@ assert(!isTrustedReadyEvent({ ...ready, data: { ...ready.data, type: "loading" }
     }
     assert(labJs.includes("const guestKeys = core.createGuestInput();"), "every guest input is counted");
     assert(/core\.driveGuestSteps\(steps, patterns, \{\s*input: guestKeys,/.test(labJs), "exchanges send through the counted input");
-    assert(!/emulator\.(sendText|typeChar|sendKey)\(/.test(labJs.replace(/enqueueGuest\(\(\) => emulator\.\w+\([^)]*\)\)/g, "").replace("write: value => emulator.sendText(value)", "")),
+    assert(!/emulator\.(sendText|typeChar|sendKey)\(/.test(
+      labJs
+        .replace(/enqueueGuest\(\(\) => \(emulator \? emulator\.\w+\([^)]*\) : undefined\)\)/g, "")
+        .replace(/enqueueGuest\(\(\) => emulator\.\w+\([^)]*\)\)/g, "")
+        .replace("write: value => emulator.sendText(value)", "")),
       "nothing reaches the guest except through guestKeys");
   }
   console.log("test_browser_lab: PASS");

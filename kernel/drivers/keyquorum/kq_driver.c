@@ -305,8 +305,6 @@ static int drv_slot_open(const uint8_t *kqst, size_t klen, const char *label, co
                         expected_encryption_pub, signing_secret_out, encryption_secret_out);
 }
 
-#ifndef FL_FREESTANDING
-/* No checkpoint storage here: the op is NULL and fl_kq_cp_head_author fails closed (image budget). */
 /* KeyQuorum writes the label without a terminator; one byte is kept back for it. */
 static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
     size_t n = 0;
@@ -327,8 +325,6 @@ static int drv_head_author(const fl_kq_buf_t *c, char *out, size_t cap) {
     out[n] = '\0';
     return KQ_FILE_OK;
 }
-
-#endif
 
 static const fl_driver_ops_t s_kq_lifecycle = {
     .probe = kq_probe,
@@ -381,8 +377,8 @@ static const fl_kq_driver_t s_kq_driver = {
     .error_name = drv_error_name,
     .error_class_name = drv_error_class_name,
     .slot_open = drv_slot_open,
+    .head_author = drv_head_author, /* the image's signed histories (kq_files.c) sign only their own head */
 #ifndef FL_FREESTANDING
-    .head_author = drv_head_author,
     /* The freestanding image has no account store, token or bridge: those ops are NULL and callers fail closed. */
     .access_requirement = kq_access_requirement,
     .bridge_prove = kq_bridge_prove,

@@ -125,8 +125,30 @@
         return true;
       },
       async reset(options) { await this.powerOff(); await this.boot(options); },
-      async powerOff() { generation++; clearTimeout(timer); if (emulator) { if (emulator.destroy) await emulator.destroy(); else await emulator.stop(); } emulator = null; readySent = false; paused = false; line = ""; state(STATES.OFF); },
-      fail(error) { generation++; clearTimeout(timer); if (emulator) emulator.destroy(); emulator = null; readySent = false; paused = false; state(STATES.FAILED, error.message || String(error)); },
+      async powerOff() {
+        generation++; clearTimeout(timer);
+        const instance = emulator;
+        emulator = null;
+        readySent = false; paused = false; line = "";
+        try {
+          if (instance) {
+            if (instance.destroy) await instance.destroy();
+            else await instance.stop();
+          }
+        } finally {
+          state(STATES.OFF);
+        }
+      },
+      fail(error) {
+        generation++; clearTimeout(timer);
+        const instance = emulator;
+        emulator = null;
+        readySent = false; paused = false;
+        state(STATES.FAILED, error.message || String(error));
+        // Tear down asynchronously; callers (onError) are sync. Always attempt destroy.
+        if (instance && instance.destroy) void Promise.resolve(instance.destroy()).catch(() => {});
+        else if (instance && instance.stop) void Promise.resolve(instance.stop()).catch(() => {});
+      },
       serialByte,
     };
   }
@@ -176,6 +198,30 @@
   function fileAcceptLines(files) {
     const lines = (files || []).map(f => fileRecvLines(f.from, f.name, f.bytes)).join("");
     return lines || "filerecv none\n";
+  }
+  /* Inbound chat for the guest (#426): the body goes as hex in parts that fit the
+   * guest's 128-character line ("relayrecv + <from> <hex>"), and the last part
+   * ("relayrecv <from> <hex>") prints the whole message. See README.md. */
+  const RELAY_RECV_PART_BYTES = 48;
+  const RELAY_RECV_BODY_MAX = 512;
+  function relayRecvLine(chatText) {
+    const raw = String(chatText || "");
+    if (!raw) return "";
+    const match = /^([^:\n]+): ([\s\S]*)$/.exec(raw);
+    let from = match ? match[1].trim() : "peer";
+    let body = match ? match[2] : raw;
+    if (!guestUserNameOk(from)) {
+      from = "peer";
+      body = raw;
+    }
+    const bytes = new TextEncoder().encode(body).slice(0, RELAY_RECV_BODY_MAX);
+    if (!bytes.length) return "";
+    let lines = "";
+    for (let i = 0; i < bytes.length; i += RELAY_RECV_PART_BYTES) {
+      const last = i + RELAY_RECV_PART_BYTES >= bytes.length;
+      lines += `relayrecv ${last ? "" : "+ "}${from} ${bytesToHex(bytes.slice(i, i + RELAY_RECV_PART_BYTES))}\n`;
+    }
+    return lines;
   }
   function labDnsNameOk(name) {
     return typeof name === "string" && name.length > 0 && name.length <= 253 &&
@@ -279,5 +325,5 @@
     return [{ line: "session new", secret: false }].concat(switchSteps(user, password, "Flinstone"));
   }
 
-  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines };
+  return { STATES, validateManifest, isTrustedReadyEvent, createController, validDiagnosticVga, exactSerialLine, parseGuestLine, labDnsNameOk, labDnsRequestUrl, isFormTypingTarget, guestUserNameOk, guestRegisterLines, guestSwitchLines, guestNewSessionLines, createExclusiveQueue, createGuestInput, promptAfterEcho, driveGuestSteps, hexToBytes, bytesToHex, fileRecvLines, fileAcceptLines, relayRecvLine };
 });

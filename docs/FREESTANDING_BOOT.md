@@ -15,14 +15,23 @@ side is in [browser-kernel-lab.md](browser-kernel-lab.md) and [LAB_KQ_SHELL.md](
   patch site is found by its tag (`FLS2PTCH`) and the total and kernel-end fields after it. The count must be non-zero and no
   larger than `KERNEL_MAX_SECTORS`.
 - `KERNEL_MAX_SECTORS` is `(FL_LOW_BUDGET - FL_KERNEL_LOAD_ADDR) / 512`. `FL_LOW_BUDGET` is `0x9f000`, the top
-  of the low memory the image may use. The kernel end, which is also patched in, must lie above the load address
-  and below the budget. Otherwise the loader stops.
+  of the low memory the loaded image (code, read-only data, data) may use.
+- The bss is never read from disk. `linker.ld` places it at `FL_KERNEL_BSS_ADDR` (`0x100000`), so it costs no
+  conventional memory. The kernel end, which is patched in, is the bss end: it must lie above 1 MiB and inside the
+  identity map, and one usable E820 entry must hold all of `[FL_KERNEL_BSS_ADDR, kernel end)`, because `entry.asm`
+  zeroes the bss before any C check runs. Otherwise the loader stops (`FLINTSTONE_BOOT_FAIL kernel-size` or
+  `FLINTSTONE_BOOT_FAIL bss-memory`).
+- The boot info reserves the loaded image and the bss as two ranges, so the KeyQuorum heap starts past the bss.
+- The kernel stack is `FL_KERNEL_STACK_BOTTOM` (`0xa000`) to `FL_KERNEL_STACK_TOP` (`0x10000`), 24 KiB with no guard page: it
+  starts above stage 2, which is dead once the kernel runs. The KeyQuorum history checkpoints and the Rust verification under
+  them run on it; the boot self-test peaks near 12 KiB, measured under QEMU by filling the stack with a marker.
 - Stage 2 itself is `FL_STAGE2_SECTORS` (8) sectors read from LBA 1.
 
 ## Boot handoff and the KeyQuorum heap (`kernel.c`, `bootmap.c`, `kq_heap.[ch]`)
 
-- The loader's handoff is validated first (`fl_bootinfo_validate`), against the kernel's start and end. A failure stops
-  with `FLINTSTONE_BOOT_FAIL bootinfo`.
+- The loader's handoff is validated first (`fl_bootinfo_validate`), against the kernel's start, the end of its loaded
+  bytes (`__image_end`), and its bss: every loaded byte read and below the bss, both ranges reserved, and the bss
+  usable RAM in the E820 map. A failure stops with `FLINTSTONE_BOOT_FAIL bootinfo`.
 - The KeyQuorum heap is the largest E820 span above 1 MiB, inside the identity map and clear of every reserved range.
   `fl_bootmap_select_arena` makes the choice with a minimum of `FL_KQ_HEAP_MIN` (40 MiB) and 4096-byte alignment.
   Too little memory stops the boot with `FLINTSTONE_BOOT_FAIL memory`. There is no fallback.
@@ -38,7 +47,9 @@ side is in [browser-kernel-lab.md](browser-kernel-lab.md) and [LAB_KQ_SHELL.md](
 The image provides the four embedder hooks of `keyquorum_identity.h`, the `mem_domain_*` allocators the driver calls,
 a UTC clock, and the libc symbols the compiler and the Rust archive expect under `-nostdlib`. The symbols are built
 with `-fno-builtin` and `-fno-tree-loop-distribute-patterns`, so none of them calls itself. `rep movsb` and `stosb`
-are used for the byte primitives, which needs no SSE.
+are used for the byte primitives, which needs no SSE. For the KeyQuorum checkpoints (FL-02 stage 2) the file also defines
+`strcmp`, `strnlen`, `strrchr`, `strtoul` and a small `vsnprintf`/`snprintf` (`%s %c %d %i %u %x %X`, the `-` and `0` flags, width,
+precision, `l`/`ll`/`z`; any other conversion returns -1).
 
 | Hook | Behaviour |
 |------|-----------|
@@ -47,8 +58,17 @@ are used for the byte primitives, which needs no SSE.
 | `kq_platform_panic` | prints `FLINTSTONE_KQ_PANIC` and halts for good (`cli; hlt` loop) |
 | `mem_domain_*` | the same heap; `mem_domain_secure_zero` is `asm_mem_secure_zero`; `mem_domain_equal` is constant time |
 
-A build that sets `FL_SECFEAT` (the security-features image) has no fw_cfg path. Its entropy is RDRAND only, because
-fw_cfg does not fit below `0x9f000` in that image.
+A build that sets `FL_SECFEAT` (the security-features image) has the same entropy path: RDRAND, else fw_cfg. The fw_cfg
+driver is built into both images now that the bss sits above 1 MiB.
+
+## Data disk (FL-02 persistence)
+
+`kq_disk.c` drives ATA PIO on the secondary master (I/O `0x170`, control `0x376`), LBA28, one sector per command, polled
+with interrupts off and every wait bounded. `fl_fs_disk_init` runs IDENTIFY; a drive that does not answer, a floating bus
+(`0xFF`, as in the browser lab with no `index=2` disk), an ATAPI device, or a disk with no sectors means no persistence
+and returns without burning a long poll (Wasm QEMU makes each `inb` expensive). Records are the log described in `FILE_SHARING_KEYQUORUM.md`: a header
+sector with magic `GLQK`, kind, name, length and CRC-32, written last, then the data sectors. The log is read at boot before
+the accounts are enrolled.
 
 ## Entropy
 
@@ -66,7 +86,8 @@ The browser worker's part of this setup is in [browser-kernel-lab.md](browser-ke
 
 The UTC clock comes from the CMOS real-time clock. The code waits for the update-in-progress flag to
 clear, converts BCD if the RTC is in BCD mode, and converts the 12-hour form to 24-hour before it computes days from
-the civil date.
+the civil date. `fl_fs_utc_text` turns it back into KeyQuorum's revision timestamp (`YYYY-MM-DDTHH:MM:SS.000Z`) for the
+signed file histories.
 
 ## Names in the freestanding identity
 
@@ -76,6 +97,7 @@ or bridges (see [IDENTITY_HERITAGE.md](IDENTITY_HERITAGE.md#not-yet-covered)).
 
 ## Tests that pin these
 
-`tests/test_fs_bootmap.c` covers the heap's refusals (misaligned, too small, wrapping, second init) and the arena
-selection. Other behaviour is covered by the lab build and the image's boot gate
+`tests/test_fs_bootmap.c` covers the heap's refusals (misaligned, too small, wrapping, second init), the arena
+selection, and the handoff checks, including a bss below 1 MiB, a loader that wrote into the bss, a bss that is not
+reserved, and a bss that is not all usable RAM. Booting with 1 MiB of RAM stops at `FLINTSTONE_BOOT_FAIL bss-memory`. Other behaviour is covered by the lab build and the image's boot gate
 (see [browser-kernel-lab.md](browser-kernel-lab.md#boot-success-contract)).

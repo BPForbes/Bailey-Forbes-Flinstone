@@ -178,8 +178,9 @@ static int test_below_min_base_excluded(void)
 
 
 #define K_START 0x10000ull
-#define K_BSS 0x81a00ull
-#define K_END 0x97160ull
+#define K_IMAGE 0x82118ull /* the loaded bytes end here, below FL_LOW_BUDGET */
+#define K_BSS 0x100000ull  /* FL_KERNEL_BSS_ADDR: never loaded */
+#define K_END 0x115320ull
 
 static struct {
     fl_boot_info_t bi;
@@ -199,22 +200,23 @@ static void good_info(fl_boot_info_t *bi)
     bi->e820_count = 6;
     bi->e820_capacity = FL_BOOTINFO_E820_CAP;
     bi->kernel_base = K_START;
-    bi->kernel_load_end = K_START + 912 * 512;
+    bi->kernel_load_end = K_START + 913 * 512;
     bi->kernel_end = K_END;
     bi->mapped_end = 1ull << 30;
-    bi->reserved_count = 7;
+    bi->reserved_count = 8;
     bi->reserved[0] = (fl_boot_range_t){ 0, FL_BOOTINFO_ADDR };
     bi->reserved[1] = (fl_boot_range_t){ (uintptr_t)&s_low, (uintptr_t)&s_low + sizeof s_low };
     bi->reserved[2] = (fl_boot_range_t){ FL_PAGE_TABLES, FL_PAGE_TABLES_END };
     bi->reserved[3] = (fl_boot_range_t){ 0x7000, 0x8e00 };
     bi->reserved[4] = (fl_boot_range_t){ FL_KERNEL_STACK_BOTTOM, FL_KERNEL_STACK_TOP };
-    bi->reserved[5] = (fl_boot_range_t){ K_START, K_END };
+    bi->reserved[5] = (fl_boot_range_t){ K_START, K_START + 913 * 512 };
     bi->reserved[6] = (fl_boot_range_t){ 0xa0000, 0x100000 };
+    bi->reserved[7] = (fl_boot_range_t){ K_BSS, K_END };
 }
 
 static int validate(const fl_boot_info_t *bi)
 {
-    return fl_bootinfo_validate(bi, K_START, K_BSS, K_END);
+    return fl_bootinfo_validate(bi, K_START, K_IMAGE, K_BSS, K_END);
 }
 
 static int test_bootinfo_validate(void)
@@ -223,7 +225,9 @@ static int test_bootinfo_validate(void)
 
     good_info(&bi);
     ASSERT(validate(&bi) == FL_BOOTMAP_OK);
-    ASSERT(fl_bootinfo_validate(NULL, K_START, K_BSS, K_END) == FL_BOOTMAP_E_INVAL);
+    ASSERT(fl_bootinfo_validate(NULL, K_START, K_IMAGE, K_BSS, K_END) == FL_BOOTMAP_E_INVAL);
+    ASSERT(fl_bootinfo_validate(&bi, K_START, K_IMAGE, 0x9f000, K_END) == FL_BOOTMAP_E_INVAL); /* bss below 1 MiB */
+    ASSERT(fl_bootinfo_validate(&bi, K_START, K_BSS + 512, K_BSS, K_END) == FL_BOOTMAP_E_INVAL); /* image runs into it */
 #define BAD(field_change, want) do { good_info(&bi); field_change; ASSERT(validate(&bi) == (want)); } while (0)
     BAD(bi.magic ^= 1, FL_BOOTMAP_E_INVAL);
     BAD(bi.version = 2, FL_BOOTMAP_E_INVAL);
@@ -238,17 +242,22 @@ static int test_bootinfo_validate(void)
     BAD(bi.e820_addr = UINT64_MAX - 7, FL_BOOTMAP_E_INVAL);           /* buffer end wraps */
     BAD(bi.kernel_base = K_START + 0x1000, FL_BOOTMAP_E_INVAL);       /* not this image */
     BAD(bi.kernel_end = K_END + 16, FL_BOOTMAP_E_INVAL);
-    BAD(bi.kernel_load_end = K_BSS - 512, FL_BOOTMAP_E_INVAL);         /* image not fully read */
+    BAD(bi.kernel_load_end = K_START + 912 * 512, FL_BOOTMAP_E_INVAL); /* image not fully read */
+    BAD(bi.kernel_load_end = K_BSS + 512, FL_BOOTMAP_E_INVAL);         /* loader wrote into the bss */
     BAD(bi.kernel_load_end += 1, FL_BOOTMAP_E_INVAL);                  /* not whole sectors */
     BAD(bi.mapped_end = K_END - 1, FL_BOOTMAP_E_INVAL);
     BAD(bi.reserved_count = 0, FL_BOOTMAP_E_INVAL);
     BAD(bi.reserved_count = FL_BOOTINFO_MAX_RESERVED + 1, FL_BOOTMAP_E_INVAL);
-    BAD(bi.reserved[5].end = K_END - 1, FL_BOOTMAP_E_INVAL);           /* image not reserved */
+    BAD(bi.reserved[5].end -= 512, FL_BOOTMAP_E_INVAL);                /* image not reserved */
+    BAD(bi.reserved[7].end = K_END - 1, FL_BOOTMAP_E_INVAL);           /* bss not reserved */
+    BAD(s_low.map[3].length = K_END - K_BSS - 1, FL_BOOTMAP_E_INVAL);   /* bss not all RAM */
+    BAD(s_low.map[3].type = 2, FL_BOOTMAP_E_INVAL);                     /* bss over reserved memory */
+    BAD((s_low.map[5] = (fl_e820_entry_t){ 0x110000, 0x1000, 2, 1 }), FL_BOOTMAP_E_INVAL); /* a hole in the bss */
     BAD(bi.reserved[4].base += 16, FL_BOOTMAP_E_INVAL);                /* stack not reserved */
     BAD(bi.reserved[2].end -= 0x1000, FL_BOOTMAP_E_INVAL);             /* page tables not reserved */
     BAD(bi.reserved[1].end -= 24, FL_BOOTMAP_E_INVAL);                 /* E820 buffer not reserved */
     BAD(bi.reserved[1].base += 8, FL_BOOTMAP_E_INVAL);                 /* boot info not reserved */
-    BAD((bi.reserved_count = 8, bi.reserved[7] = (fl_boot_range_t){ 9, 9 }), FL_BOOTMAP_E_INVAL);
+    BAD(bi.reserved[7] = ((fl_boot_range_t){ 9, 9 }), FL_BOOTMAP_E_INVAL);
     BAD(bi.e820_count = FL_BOOTINFO_E820_CAP, FL_BOOTMAP_OK);
 #undef BAD
     good_info(&bi);
@@ -257,7 +266,7 @@ static int test_bootinfo_validate(void)
 
         ASSERT(pick((const fl_e820_entry_t *)(uintptr_t)bi.e820_addr, bi.e820_count, bi.reserved,
                     bi.reserved_count, &k_limits, &b, &s) == FL_BOOTMAP_OK);
-        ASSERT(b == 0x100000 && s == 0x3ee0000);
+        ASSERT(b == 0x116000 && s == 0x3fe0000 - 0x116000); /* past the bss, page aligned */
     }
 #undef bi
     return 0;
@@ -279,6 +288,7 @@ static int test_inc_matches_header(const char *path)
         { "FL_PAGE_TABLES_END", FL_PAGE_TABLES_END },
         { "FL_KERNEL_STACK_BOTTOM", FL_KERNEL_STACK_BOTTOM },
         { "FL_KERNEL_STACK_TOP", FL_KERNEL_STACK_TOP },
+        { "FL_KERNEL_BSS_ADDR", FL_KERNEL_BSS_ADDR },
         { "BI_MAGIC", offsetof(fl_boot_info_t, magic) },
         { "BI_VERSION", offsetof(fl_boot_info_t, version) },
         { "BI_SIZE", offsetof(fl_boot_info_t, size) },
