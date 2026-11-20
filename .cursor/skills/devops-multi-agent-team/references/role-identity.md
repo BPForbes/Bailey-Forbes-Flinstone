@@ -23,7 +23,11 @@ other files point here.
   grep -rF "$id" .cursor/thoughts   # must print nothing
   ```
 
-  This is the only documented generator. A topic is never
+  This is the only documented generator. The skill's MCP tool
+  `mint_seat_id` ([../mcp/server.mjs](../mcp/server.mjs)) runs this
+  same algorithm (3 random bytes, then a check of every file name and
+  content under `.cursor/thoughts`, minting again on a hit); use it
+  when the MCP server is connected, the shell form when it is not. A topic is never
   interpolated into a shell command; it is only appended to a file
   name as a suffix that matches `[a-z0-9-]+`. The check is a
   `case` on the whole value, so a newline cannot slip through (a

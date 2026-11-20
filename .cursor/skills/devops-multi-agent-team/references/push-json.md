@@ -36,8 +36,12 @@ Seat ids), or a role when the addressee is not chosen yet.
 
 ## Shape
 
-Valid JSON. File paths are object keys. Hunks are
+Valid JSON. File paths are object keys; each file is
+`{ "hunks": [...], "delta": "+N/-M" }`. Hunks are
 `{ op, lines, why }`. Each file ends with `delta` `+N/-M`.
+The skill's MCP tool `validate_push_json` checks this shape (and
+warns when `delta` does not match the `+`/`-` hunk line counts); it
+does not replace the Reviewers' diff comparison.
 `op` is `-` (old), `+` (new), or `~` (same span, behavior change).
 `lines` is a single line or `start-end`. Index the side-branch
 tree vs `<integration-base>`, not `git show HEAD` alone.

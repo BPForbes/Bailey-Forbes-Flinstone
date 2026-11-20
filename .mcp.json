@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "devops-multi-agent-team": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        ".cursor/skills/devops-multi-agent-team/mcp/server.mjs"
+      ],
+      "env": {}
+    }
+  }
+}

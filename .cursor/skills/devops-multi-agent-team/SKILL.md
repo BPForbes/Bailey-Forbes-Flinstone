@@ -24,6 +24,23 @@ review, security, QA, observe, optimize, document, refactor, and
 profile. One plan is source of truth. Roles are **async** pods, not
 a linear queue.
 
+**This skill is served by its own MCP server**,
+[mcp/server.mjs](mcp/server.mjs) (Node, no dependencies), registered
+for the repo in `.mcp.json` as `devops-multi-agent-team`. Any MCP
+client (Claude Code, Cursor) gets:
+
+| Surface | What |
+|---------|------|
+| Prompts | `devops-multi-agent-team` (this file; arg `goal`), one per `.cursor/commands/*.md` (arg `args`), one per `.cursor/agents/devops-*.md` (arg `task`) |
+| Resources | `devops://skill`, `devops://reference/<name>`, `devops://agent/<name>`, `devops://command/<name>` |
+| Tools | `list_docs`, `read_doc`, `mint_seat_id` (Seat ids, [role-identity.md](references/role-identity.md)), `validate_push_json` ([push-json.md](references/push-json.md)) |
+
+The Markdown here stays the source of truth: the server reads it
+from disk on each request, so edit the Markdown, not the server.
+Register elsewhere with
+`claude mcp add devops-multi-agent-team -- node <repo>/.cursor/skills/devops-multi-agent-team/mcp/server.mjs`.
+Test: `node --test .cursor/skills/devops-multi-agent-team/mcp/server.test.mjs`.
+
 Prefer **MCP** for live CI/quality/security/ticket data; prefer
 **slash skills** for packaged workflows. Catalog:
 [references/agent-commands.md](references/agent-commands.md).
