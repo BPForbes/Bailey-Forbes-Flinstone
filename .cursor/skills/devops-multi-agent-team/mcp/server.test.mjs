@@ -125,7 +125,10 @@ test('stdio: initialize, tools, resources, prompts', async () => {
 
     const prompts = await rpc('prompts/list', {});
     const names = prompts.result.prompts.map((p) => p.name);
-    for (const n of ['devops-multi-agent-team', 'goal', 'devops-reviewer']) assert.ok(names.includes(n), n);
+    for (const n of ['devops', 'goal', 'devops-reviewer']) assert.ok(names.includes(n), n);
+    assert.equal(names.filter((n) => n === 'devops').length, 1);
+    const skill = await rpc('prompts/get', { name: 'devops', arguments: { goal: 'ship X' } });
+    assert.match(skill.result.messages[0].content.text, /^---\nname: devops-multi-agent-team/);
 
     const got = await rpc('prompts/get', { name: 'goal', arguments: { args: 'ship X' } });
     assert.match(got.result.messages[0].content.text, /Arguments: ship X$/);

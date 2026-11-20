@@ -11,6 +11,13 @@ templates do not override this. **Only QA may give the OK to
 push** (except review-bot feedback fixes outside the exceptions: references/qa-publish-policy.md). After PASS: one compressed push that keeps approved
 Coder commits.
 
+## `/devops`
+
+Start the team as Orchestrator on a goal: load the skill (MCP
+`read_doc` `{"kind": "skill"}`, or [SKILL.md](../SKILL.md)), then
+`/goal` and `/create-subagent`. Claude Code reads the same file
+through the `.claude/commands/devops.md` symlink.
+
 ## `/goal`
 
 Write `goal-<seat-id>.md`. Loop until X; do not stop at a plan.

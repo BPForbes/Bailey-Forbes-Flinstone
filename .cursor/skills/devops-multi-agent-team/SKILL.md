@@ -13,7 +13,7 @@ description: >-
   Terraform/Pulumi, deploy pipelines, monitoring/SLOs, runbooks, infra
   hardening, build-time or cost optimization, pre-merge
   quality/security gates, SOC 2 review, or explicitly invokes
-  /devops-multi-agent-team, /goal, /create-subagent, /code-review,
+  /devops, /devops-multi-agent-team, /goal, /create-subagent, /code-review,
   or /repro.
 ---
 
@@ -31,13 +31,15 @@ client (Claude Code, Cursor) gets:
 
 | Surface | What |
 |---------|------|
-| Prompts | `devops-multi-agent-team` (this file; arg `goal`), one per `.cursor/commands/*.md` (arg `args`), one per `.cursor/agents/devops-*.md` (arg `task`) |
+| Prompts | `devops` (this file; arg `goal`), one per other `.cursor/commands/*.md` (arg `args`), one per `.cursor/agents/devops-*.md` (arg `task`) |
 | Resources | `devops://skill`, `devops://reference/<name>`, `devops://agent/<name>`, `devops://command/<name>` |
 | Tools | `list_docs`, `read_doc`, `mint_seat_id` (Seat ids, [role-identity.md](references/role-identity.md)), `validate_push_json` ([push-json.md](references/push-json.md)) |
 
 The Markdown here stays the source of truth: the server reads it
 from disk on each request, so edit the Markdown, not the server.
-Register elsewhere with
+**`/devops <goal>`** starts the team in Cursor and Claude Code:
+`.cursor/commands/devops.md`, with `.claude/commands/devops.md` a
+symlink to it. Register elsewhere with
 `claude mcp add devops-multi-agent-team -- node <repo>/.cursor/skills/devops-multi-agent-team/mcp/server.mjs`.
 Test: `node --test .cursor/skills/devops-multi-agent-team/mcp/server.test.mjs`.
 

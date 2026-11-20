@@ -7,7 +7,7 @@
 //
 //   resources  devops://skill, devops://reference/<name>,
 //              devops://agent/<name>, devops://command/<name>
-//   prompts    devops-multi-agent-team, one per .cursor/commands/*.md,
+//   prompts    devops (the skill), one per other .cursor/commands/*.md,
 //              one per .cursor/agents/devops-*.md
 //   tools      list_docs, read_doc, mint_seat_id, validate_push_json
 //
@@ -304,11 +304,17 @@ const TOOLS = [
   },
 ];
 
+// The skill prompt is named after the /devops command; that command file only
+// points at the skill, so it is not served as a second prompt.
+const SKILL_PROMPT = 'devops';
+
 function promptCatalog() {
   const prompts = [];
   for (const doc of listDocs()) {
     if (doc.kind === 'skill') {
-      prompts.push({ doc, name: SERVER_NAME, description: 'Run as the DevOps multi-agent Orchestrator.', arg: { name: 'goal', description: 'What the team should achieve.' } });
+      prompts.push({ doc, name: SKILL_PROMPT, description: 'Run as the DevOps multi-agent Orchestrator.', arg: { name: 'goal', description: 'What the team should achieve.' } });
+    } else if (doc.kind === 'command' && doc.name === SKILL_PROMPT) {
+      continue;
     } else if (doc.kind === 'command') {
       prompts.push({ doc, name: doc.name, description: doc.description, arg: { name: 'args', description: 'Arguments for the command.' } });
     } else if (doc.kind === 'agent') {
@@ -372,7 +378,7 @@ export function handle(method, params = {}) {
         capabilities: { tools: {}, resources: {}, prompts: {} },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions:
-          'DevOps multi-agent team skill for this repo. Start with the devops-multi-agent-team prompt or read devops://skill. ' +
+          'DevOps multi-agent team skill for this repo. Start with the devops prompt (/devops) or read devops://skill. ' +
           'Only QA may give the OK to push. AGENTS.md, CLAUDE.md and .cursor/rules/*.mdc take precedence over the skill.',
       };
     }
